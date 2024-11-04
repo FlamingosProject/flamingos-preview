@@ -81,9 +81,9 @@ The tutorials are primarily targeted at **Linux**-based distributions. Most stuf
 1. In case you use `Visual Studio Code`, I strongly recommend installing the [Rust Analyzer extension].
 1. (**macOS only**) Install a few `Ruby` gems.
 
-  This was last tested by the author with Ruby version `3.0.2` on `macOS Monterey`. If you are using
-  `rbenv`, the respective `.ruby-version` file is already in place. If you never heard of `rbenv`,
-  try using [this little guide](https://stackoverflow.com/a/68118750).
+   This was last tested by the author with Ruby version `3.0.2` on `macOS Monterey`. If you are
+   using `rbenv`, the respective `.ruby-version` file is already in place. If you never heard of
+   `rbenv`, try using [this little guide](https://stackoverflow.com/a/68118750).
 
    Run this in the repository root folder:
 
