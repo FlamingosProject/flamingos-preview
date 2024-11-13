@@ -7,3 +7,7 @@
 * 03: `PANIC_IN_PROGRESS` should be handled with
   `.fetch_or(true, AcqRel)` to avoid worries about
   atomicity
+* Restructure everything so that there is a branch per
+  chapter properly stacked, allowing rebasing to correct
+  code in current and subsequent chapters. Some scripts
+  would be helpful here
