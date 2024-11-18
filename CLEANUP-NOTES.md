@@ -11,3 +11,5 @@
   chapter properly stacked, allowing rebasing to correct
   code in current and subsequent chapters. Some scripts
   would be helpful here
+* Clean up crlf mess starting ch 5. Find a better plan than
+  the Ruby terminal

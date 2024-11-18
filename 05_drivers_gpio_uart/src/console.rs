@@ -25,6 +25,7 @@ pub mod interface {
         fn write_fmt(&self, args: fmt::Arguments) -> fmt::Result;
 
         /// Block until the last buffered character has been physically put on the TX wire.
+        #[allow(unused)]
         fn flush(&self);
     }
 
@@ -47,6 +48,7 @@ pub mod interface {
         }
 
         /// Return the number of characters read.
+        #[allow(unused)]
         fn chars_read(&self) -> usize {
             0
         }
