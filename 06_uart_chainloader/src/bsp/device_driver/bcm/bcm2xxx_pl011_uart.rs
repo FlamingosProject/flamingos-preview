@@ -311,6 +311,11 @@ impl PL011UartInner {
 impl fmt::Write for PL011UartInner {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         for c in s.chars() {
+            // Convert newline to carrige return + newline.
+            if c == '\n' {
+                self.write_char('\r')
+            }
+
             self.write_char(c);
         }
 
