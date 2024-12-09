@@ -24,7 +24,7 @@ pub static NULL_CONSOLE: NullConsole = NullConsole {};
 //--------------------------------------------------------------------------------------------------
 
 impl interface::Write for NullConsole {
-    fn write_char(&self, _c: char) {}
+    fn write_char(&self, _c: u8) {}
 
     fn write_fmt(&self, _args: fmt::Arguments) -> fmt::Result {
         fmt::Result::Ok(())

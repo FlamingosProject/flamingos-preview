@@ -254,7 +254,7 @@ impl PL011UartInner {
     }
 
     /// Send a character.
-    fn write_char(&mut self, c: char) {
+    fn write_char(&mut self, c: u8) {
         // Spin while TX FIFO full is set, waiting for an empty slot.
         while self.registers.FR.matches_all(FR::TXFF::SET) {
             cpu::nop();
@@ -275,7 +275,7 @@ impl PL011UartInner {
     }
 
     /// Retrieve a character.
-    fn read_char_converting(&mut self, blocking_mode: BlockingMode) -> Option<char> {
+    fn read_char_converting(&mut self, blocking_mode: BlockingMode) -> Option<u8> {
         // If RX FIFO is empty,
         if self.registers.FR.matches_all(FR::RXFE::SET) {
             // immediately return in non-blocking mode.
@@ -290,11 +290,11 @@ impl PL011UartInner {
         }
 
         // Read one character.
-        let mut ret = self.registers.DR.get() as u8 as char;
+        let mut ret = self.registers.DR.get() as u8;
 
-        // Convert carrige return to newline.
-        if ret == '\r' {
-            ret = '\n'
+        // Convert carriage return to newline.
+        if ret == b'\r' {
+            ret = b'\n'
         }
 
         // Update statistics.
@@ -315,8 +315,8 @@ impl PL011UartInner {
 /// [`src/print.rs`]: ../../print/index.html
 impl fmt::Write for PL011UartInner {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        for c in s.chars() {
-            self.write_char(c);
+        for b in s.bytes() {
+            self.write_char(b);
         }
 
         Ok(())
@@ -362,8 +362,24 @@ impl driver::interface::DeviceDriver for PL011Uart {
 impl console::interface::Write for PL011Uart {
     /// Passthrough of `args` to the `core::fmt::Write` implementation, but guarded by a Mutex to
     /// serialize access.
+    /*
     fn write_char(&self, c: char) {
-        self.inner.lock(|inner| inner.write_char(c));
+        let mut buf = [0u8; 4];
+        let s = c.encode_utf8(&mut buf);
+        let ns = s.bytes().count();
+        if ns > 1 {
+            for b in s.bytes() {
+                self.inner.lock(|inner| inner.write_str(b));
+            }
+        } else {
+            assert_eq!(ns, 1);
+            self.inner.lock(|inner| inner.write_char(b[0]))
+        }
+    }
+    */
+
+    fn write_char(&self, c: u8) {
+        self.inner.lock(|inner| inner.write_char(c))
     }
 
     fn write_fmt(&self, args: core::fmt::Arguments) -> fmt::Result {
@@ -379,7 +395,7 @@ impl console::interface::Write for PL011Uart {
 }
 
 impl console::interface::Read for PL011Uart {
-    fn read_char(&self) -> char {
+    fn read_char(&self) -> u8 {
         self.inner
             .lock(|inner| inner.read_char_converting(BlockingMode::Blocking).unwrap())
     }

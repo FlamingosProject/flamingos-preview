@@ -19,7 +19,7 @@ pub mod interface {
     /// Console write functions.
     pub trait Write {
         /// Write a single character.
-        fn write_char(&self, c: char);
+        fn write_char(&self, c: u8);
 
         /// Write a Rust format string.
         fn write_fmt(&self, args: fmt::Arguments) -> fmt::Result;
@@ -32,8 +32,8 @@ pub mod interface {
     /// Console read functions.
     pub trait Read {
         /// Read a single character.
-        fn read_char(&self) -> char {
-            ' '
+        fn read_char(&self) -> u8 {
+            ' ' as u8
         }
 
         /// Clear RX buffers, if any.
