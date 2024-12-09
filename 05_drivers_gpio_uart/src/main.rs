@@ -160,5 +160,8 @@ fn kernel_main() -> ! {
     loop {
         let c = console().read_char();
         console().write_char(c);
+        if c == b'\r' {
+            console().write_char(b'\n');
+        }
     }
 }
