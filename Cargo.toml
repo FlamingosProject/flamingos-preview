@@ -24,4 +24,4 @@ path = "src/main.rs"
 
 # Platform specific dependencies
 [target.'cfg(target_arch = "aarch64")'.dependencies]
-aarch64-cpu = { version = "9.x.x" }
+aarch64-cpu = "10.0.0"
