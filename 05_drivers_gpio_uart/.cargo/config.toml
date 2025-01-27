@@ -1,0 +1,9 @@
+[build]
+target="aarch64-unknown-none-softfloat"
+
+[target.aarch64-unknown-none-softfloat]
+rustflags = [
+  "-C", "linker=rust-lld",
+  "-C", "link-arg=--library-path=src/bsp/raspberrypi/",
+  "-C", "link-arg=--script=kernel.ld",
+]

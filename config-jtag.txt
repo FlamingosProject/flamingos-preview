@@ -1,0 +1,4 @@
+arm_64bit=1
+init_uart_clock=48000000
+enable_jtag_gpio=1
+gpio=22-27=a4

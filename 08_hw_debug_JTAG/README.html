@@ -1,0 +1,417 @@
+<h1 id="tutorial-08---hardware-debugging-using-jtag">Tutorial 08 -
+Hardware Debugging using JTAG</h1>
+<h2 id="tldr">tl;dr</h2>
+<p>In the exact order as listed:</p>
+<ol type="1">
+<li><code>make jtagboot</code> and keep terminal open.</li>
+<li>Connect USB serial device.</li>
+<li>Connect <code>JTAG</code> debugger USB device.</li>
+<li>In new terminal, <code>make openocd</code> and keep terminal
+open.</li>
+<li>In new terminal, <code>make gdb</code> or make
+<code>make gdb-opt0</code>.</li>
+</ol>
+<p><img src="../doc/09_demo.gif" alt="Demo" /></p>
+<h2 id="table-of-contents">Table of Contents</h2>
+<ul>
+<li><a href="#introduction">Introduction</a></li>
+<li><a href="#outline">Outline</a></li>
+<li><a href="#software-setup">Software Setup</a></li>
+<li><a href="#hardware-setup">Hardware Setup</a>
+<ul>
+<li><a href="#wiring">Wiring</a></li>
+</ul></li>
+<li><a href="#getting-ready-to-connect">Getting ready to
+connect</a></li>
+<li><a href="#openocd">OpenOCD</a></li>
+<li><a href="#gdb">GDB</a>
+<ul>
+<li><a href="#remarks">Remarks</a>
+<ul>
+<li><a href="#optimization">Optimization</a></li>
+<li><a href="#gdb-control">GDB control</a></li>
+</ul></li>
+</ul></li>
+<li><a href="#notes-on-usb-connection-constraints">Notes on USB
+connection constraints</a></li>
+<li><a href="#additional-resources">Additional resources</a></li>
+<li><a href="#acknowledgments">Acknowledgments</a></li>
+<li><a href="#diff-to-previous">Diff to previous</a></li>
+</ul>
+<h2 id="introduction">Introduction</h2>
+<p>In the upcoming tutorials, we are going to touch sensitive areas of
+the RPi's SoC that can make our debugging life very hard. For example,
+changing the processor's <code>Privilege Level</code> or introducing
+<code>Virtual Memory</code>.</p>
+<p>A hardware based debugger can sometimes be the last resort when
+searching for a tricky bug. Especially for debugging intricate,
+architecture-specific HW issues, it will be handy, because in this area
+<code>QEMU</code> sometimes can not help, since it abstracts certain
+features of the HW and doesn't simulate down to the very last bit.</p>
+<p>So lets introduce <code>JTAG</code> debugging. Once set up, it will
+allow us to single-step through our kernel on the real HW. How cool is
+that?!</p>
+<h2 id="outline">Outline</h2>
+<p>From kernel perspective, this tutorial is the same as the previous
+one. We are just wrapping infrastructure for JTAG debugging around
+it.</p>
+<h2 id="software-setup">Software Setup</h2>
+<p>We need to add another line to the <code>config.txt</code> file from
+the SD Card:</p>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode toml"><code class="sourceCode toml"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="dt">arm_64bit</span><span class="op">=</span><span class="dv">1</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="dt">init_uart_clock</span><span class="op">=</span><span class="dv">48000000</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="dt">enable_jtag_gpio</span><span class="op">=</span><span class="dv">1</span></span></code></pre></div>
+<h2 id="hardware-setup">Hardware Setup</h2>
+<p>Unlike microcontroller boards like the <code>STM32F3DISCOVERY</code>,
+which is used in our WG's <a
+href="https://rust-embedded.github.io/book/start/hardware.html">Embedded
+Rust Book</a>, the Raspberry Pi does not have an embedded debugger on
+its board. Hence, you need to buy one.</p>
+<p>For this tutorial, we will use the <a
+href="https://www.olimex.com/Products/ARM/JTAG/ARM-USB-TINY-H">ARM-USB-TINY-H</a>
+from OLIMEX. It has a standard <a
+href="http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.dui0499dj/BEHEIHCE.html">ARM
+JTAG 20 connector</a>. Unfortunately, the RPi does not, so we have to
+connect it via jumper wires.</p>
+<h3 id="wiring">Wiring</h3>
+<table>
+    <thead>
+        <tr>
+            <th>GPIO #</th>
+            <th>Name</th>
+            <th>JTAG #</th>
+            <th>Note</th>
+            <th width="60%">Diagram</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td></td>
+            <td>VTREF</td>
+            <td>1</td>
+            <td>to 3.3V</td>
+            <td rowspan="8"><img src="../doc/09_wiring_jtag.png"></td>
+        </tr>
+        <tr>
+            <td></td>
+            <td>GND</td>
+            <td>4</td>
+            <td>to GND</td>
+        </tr>
+        <tr>
+            <td>22</td>
+            <td>TRST</td>
+            <td>3</td>
+            <td></td>
+        </tr>
+        <tr>
+            <td>26</td>
+            <td>TDI</td>
+            <td>5</td>
+            <td></td>
+        </tr>
+        <tr>
+            <td>27</td>
+            <td>TMS</td>
+            <td>7</td>
+            <td></td>
+        </tr>
+        <tr>
+            <td>25</td>
+            <td>TCK</td>
+            <td>9</td>
+            <td></td>
+        </tr>
+        <tr>
+            <td>23</td>
+            <td>RTCK</td>
+            <td>11</td>
+            <td></td>
+        </tr>
+        <tr>
+            <td>24</td>
+            <td>TDO</td>
+            <td>13</td>
+            <td></td>
+        </tr>
+    </tbody>
+</table>
+
+<p align="center"><img src="../doc/09_image_jtag_connected.jpg" width="50%"></p>
+
+<h2 id="getting-ready-to-connect">Getting ready to connect</h2>
+<p>Upon booting, thanks to the changes we made to
+<code>config.txt</code>, the RPi's firmware will configure the
+respective GPIO pins for <code>JTAG</code> functionality.</p>
+<p>What is left to do now is to pause the execution of the RPi and then
+connect over <code>JTAG</code>. Therefore, we add a new
+<code>Makefile</code> target, <code>make jtagboot</code>, which uses the
+<code>chainboot</code> approach to load a tiny helper binary onto the
+RPi that just parks the executing core into a waiting state.</p>
+<p>The helper binary is maintained separately in this repository's <a
+href="../X1_JTAG_boot">X1_JTAG_boot</a> folder, and is a modified
+version of the kernel we used in our tutorials so far.</p>
+<pre class="console"><code>$ make jtagboot
+Minipush 1.0
+
+[MP] &#x23F3; Waiting for /dev/ttyUSB0
+[MP] &#x2705; Serial connected
+[MP] &#x1F50C; Please power the target now
+ __  __ _      _ _                 _
+|  \/  (_)_ _ (_) |   ___  __ _ __| |
+| |\/| | | &#39; \| | |__/ _ \/ _` / _` |
+|_|  |_|_|_||_|_|____\___/\__,_\__,_|
+
+           Raspberry Pi 3
+
+[ML] Requesting binary
+[MP] &#x23E9; Pushing 7 KiB ==========================================&#x1F980; 100% 0 KiB/s Time: 00:00:00
+[ML] Loaded! Executing the payload now
+
+[    0.394532] Parking CPU core. Please connect over JTAG now.</code></pre>
+<p>It is important to keep the USB serial connected and the terminal
+with the <code>jtagboot</code> open and running. When we load the actual
+kernel later, <code>UART</code> output will appear here.</p>
+<h2 id="openocd">OpenOCD</h2>
+<p>Next, we need to launch the <a href="http://openocd.org">Open On-Chip
+Debugger</a>, aka <code>OpenOCD</code> to actually connect the
+<code>JTAG</code>.</p>
+<p>As always, our tutorials try to be as painless as possible regarding
+dev-tools, which is why we have packaged everything into the <a
+href="../docker/rustembedded-osdev-utils">dedicated Docker container</a>
+that is already used for chainbooting and <code>QEMU</code>.</p>
+<p>Connect the Olimex USB JTAG debugger, open a new terminal and in the
+same folder, type <code>make openocd</code> (in that order!). You will
+see some initial output:</p>
+<pre class="console"><code>$ make openocd
+[...]
+Open On-Chip Debugger 0.10.0
+[...]
+Info : Listening on port 6666 for tcl connections
+Info : Listening on port 4444 for telnet connections
+Info : clock speed 1000 kHz
+Info : JTAG tap: rpi3.tap tap/device found: 0x4ba00477 (mfg: 0x23b (ARM Ltd.), part: 0xba00, ver: 0x4)
+Info : rpi3.core0: hardware has 6 breakpoints, 4 watchpoints
+Info : rpi3.core1: hardware has 6 breakpoints, 4 watchpoints
+Info : rpi3.core2: hardware has 6 breakpoints, 4 watchpoints
+Info : rpi3.core3: hardware has 6 breakpoints, 4 watchpoints
+Info : Listening on port 3333 for gdb connections
+Info : Listening on port 3334 for gdb connections
+Info : Listening on port 3335 for gdb connections
+Info : Listening on port 3336 for gdb connections</code></pre>
+<p><code>OpenOCD</code> has detected the four cores of the RPi, and
+opened four network ports to which <code>gdb</code> can now connect to
+debug the respective core.</p>
+<h2 id="gdb">GDB</h2>
+<p>Finally, we need an <code>AArch64</code>-capable version of
+<code>gdb</code>. You guessed right, it's already packaged in the osdev
+container. It can be launched via <code>make gdb</code>.</p>
+<p>This Makefile target actually does a little more. It builds a special
+version of our kernel with debug information included. This enables
+<code>gdb</code> to show the <code>Rust</code> source code line we are
+currently debugging. It also launches <code>gdb</code> such that it
+already loads this debug build (<code>kernel_for_jtag</code>).</p>
+<p>We can now use the <code>gdb</code> commandline to</p>
+<ol type="1">
+<li>Set breakpoints in our kernel</li>
+<li>Load the kernel via JTAG into memory (remember that currently, the
+RPi is still executing the minimal JTAG boot binary).</li>
+<li>Manipulate the program counter of the RPi to start execution at our
+kernel's entry point.</li>
+<li>Single-step through its execution.</li>
+</ol>
+<pre class="console"><code>$ make gdb
+[...]
+&gt;&gt;&gt; target remote :3333                          # Connect to OpenOCD, core0
+&gt;&gt;&gt; load                                         # Load the kernel into the RPi&#39;s DRAM over JTAG.
+Loading section .text, size 0x2454 lma 0x80000
+Loading section .rodata, size 0xa1d lma 0x82460
+Loading section .got, size 0x10 lma 0x82e80
+Loading section .data, size 0x20 lma 0x82e90
+Start address 0x0000000000080000, load size 11937
+Transfer rate: 63 KB/sec, 2984 bytes/write.
+&gt;&gt;&gt; set $pc = 0x80000                            # Set RPI&#39;s program counter to the start of the
+                                                 # kernel binary.
+&gt;&gt;&gt; break main.rs:158
+Breakpoint 1 at 0x8025c: file src/main.rs, line 158.
+&gt;&gt;&gt; cont
+&gt;&gt;&gt; step                                         # Single-step through the kernel
+&gt;&gt;&gt; step
+&gt;&gt;&gt; ...</code></pre>
+<h3 id="remarks">Remarks</h3>
+<h4 id="optimization">Optimization</h4>
+<p>When debugging an OS binary, you have to make a trade-off between the
+granularity at which you can step through your Rust source-code and the
+optimization level of the generated binary. The <code>make</code> and
+<code>make gdb</code> targets produce a <code>--release</code> binary,
+which includes an optimization level of three
+(<code>-opt-level=3</code>). However, in this case, the compiler will
+inline very aggressively and pack together reads and writes where
+possible. As a result, it will not always be possible to hit breakpoints
+exactly where you want to regarding the line of source code file.</p>
+<p>For this reason, the Makefile also provides the
+<code>make gdb-opt0</code> target, which uses <code>-opt-level=0</code>.
+Hence, it will allow you to have finer debugging granularity. However,
+please keep in mind that when debugging code that closely deals with HW,
+a compiler optimization that squashes reads or writes to volatile
+registers can make all the difference in execution. FYI, the demo gif
+above has been recorded with <code>gdb-opt0</code>.</p>
+<h4 id="gdb-control">GDB control</h4>
+<p>At some point, you may reach delay loops or code that waits on user
+input from the serial. Here, single stepping might not be feasible or
+work anymore. You can jump over these roadblocks by setting other
+breakpoints beyond these areas, and reach them using the
+<code>cont</code> command.</p>
+<p>Pressing <code>ctrl+c</code> in <code>gdb</code> will stop execution
+of the RPi again in case you continued it without further
+breakpoints.</p>
+<h2 id="notes-on-usb-connection-constraints">Notes on USB connection
+constraints</h2>
+<p>If you followed the tutorial from top to bottom, everything should be
+fine regarding USB connections.</p>
+<p>Still, please note that in its current form, our
+<code>Makefile</code> makes implicit assumptions about the naming of the
+connected USB devices. It expects <code>/dev/ttyUSB0</code> to be the
+<code>UART</code> device.</p>
+<p>Hence, please ensure the following order of connecting the devices to
+your box:</p>
+<ol type="1">
+<li>Connect the USB serial.</li>
+<li>Afterwards, the Olimex debugger.</li>
+</ol>
+<p>This way, the host OS enumerates the devices accordingly. This has to
+be done only once. It is fine to disconnect and connect the serial
+multiple times, e.g. for kicking off different
+<code>make jtagboot</code> runs, while keeping the debugger
+connected.</p>
+<h2 id="additional-resources">Additional resources</h2>
+<ul>
+<li><a
+href="https://metebalci.com/blog/bare-metal-raspberry-pi-3b-jtag">https://metebalci.com/blog/bare-metal-raspberry-pi-3b-jtag</a></li>
+<li><a
+href="https://www.suse.com/c/debugging-raspberry-pi-3-with-jtag">https://www.suse.com/c/debugging-raspberry-pi-3-with-jtag</a></li>
+</ul>
+<h2 id="acknowledgments">Acknowledgments</h2>
+<p>Thanks to <a href="https://github.com/naotaco">@naotaco</a> for
+laying the groundwork for this tutorial.</p>
+<h2 id="diff-to-previous">Diff to previous</h2>
+<div class="sourceCode" id="cb5"><pre
+class="sourceCode diff"><code class="sourceCode diff"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="kw">diff -uNr 07_timestamps/Cargo.toml 08_hw_debug_JTAG/Cargo.toml</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="dt">--- 07_timestamps/Cargo.toml</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a><span class="dt">+++ 08_hw_debug_JTAG/Cargo.toml</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a><span class="dt">@@ -1,6 +1,6 @@</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a> [package]</span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a> name = &quot;mingo&quot;</span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a><span class="st">-version = &quot;0.7.0&quot;</span></span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a><span class="va">+version = &quot;0.8.0&quot;</span></span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a> authors = [&quot;Andre Richter &lt;andre.o.richter@gmail.com&gt;&quot;]</span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a> edition = &quot;2021&quot;</span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a><span class="kw">diff -uNr 07_timestamps/Makefile 08_hw_debug_JTAG/Makefile</span></span>
+<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a><span class="dt">--- 07_timestamps/Makefile</span></span>
+<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a><span class="dt">+++ 08_hw_debug_JTAG/Makefile</span></span>
+<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a><span class="dt">@@ -32,6 +32,8 @@</span></span>
+<span id="cb5-18"><a href="#cb5-18" aria-hidden="true" tabindex="-1"></a>     OBJDUMP_BINARY    = aarch64-none-elf-objdump</span>
+<span id="cb5-19"><a href="#cb5-19" aria-hidden="true" tabindex="-1"></a>     NM_BINARY         = aarch64-none-elf-nm</span>
+<span id="cb5-20"><a href="#cb5-20" aria-hidden="true" tabindex="-1"></a>     READELF_BINARY    = aarch64-none-elf-readelf</span>
+<span id="cb5-21"><a href="#cb5-21" aria-hidden="true" tabindex="-1"></a><span class="va">+    OPENOCD_ARG       = -f /openocd/tcl/interface/ftdi/olimex-arm-usb-tiny-h.cfg -f /openocd/rpi3.cfg</span></span>
+<span id="cb5-22"><a href="#cb5-22" aria-hidden="true" tabindex="-1"></a><span class="va">+    JTAG_BOOT_IMAGE   = ../X1_JTAG_boot/jtag_boot_rpi3.img</span></span>
+<span id="cb5-23"><a href="#cb5-23" aria-hidden="true" tabindex="-1"></a>     LD_SCRIPT_PATH    = $(shell pwd)/src/bsp/raspberrypi</span>
+<span id="cb5-24"><a href="#cb5-24" aria-hidden="true" tabindex="-1"></a>     RUSTC_MISC_ARGS   = -C target-cpu=cortex-a53</span>
+<span id="cb5-25"><a href="#cb5-25" aria-hidden="true" tabindex="-1"></a> else ifeq ($(BSP),rpi4)</span>
+<span id="cb5-26"><a href="#cb5-26" aria-hidden="true" tabindex="-1"></a><span class="dt">@@ -43,6 +45,8 @@</span></span>
+<span id="cb5-27"><a href="#cb5-27" aria-hidden="true" tabindex="-1"></a>     OBJDUMP_BINARY    = aarch64-none-elf-objdump</span>
+<span id="cb5-28"><a href="#cb5-28" aria-hidden="true" tabindex="-1"></a>     NM_BINARY         = aarch64-none-elf-nm</span>
+<span id="cb5-29"><a href="#cb5-29" aria-hidden="true" tabindex="-1"></a>     READELF_BINARY    = aarch64-none-elf-readelf</span>
+<span id="cb5-30"><a href="#cb5-30" aria-hidden="true" tabindex="-1"></a><span class="va">+    OPENOCD_ARG       = -f /openocd/tcl/interface/ftdi/olimex-arm-usb-tiny-h.cfg -f /openocd/rpi4.cfg</span></span>
+<span id="cb5-31"><a href="#cb5-31" aria-hidden="true" tabindex="-1"></a><span class="va">+    JTAG_BOOT_IMAGE   = ../X1_JTAG_boot/jtag_boot_rpi4.img</span></span>
+<span id="cb5-32"><a href="#cb5-32" aria-hidden="true" tabindex="-1"></a>     LD_SCRIPT_PATH    = $(shell pwd)/src/bsp/raspberrypi</span>
+<span id="cb5-33"><a href="#cb5-33" aria-hidden="true" tabindex="-1"></a>     RUSTC_MISC_ARGS   = -C target-cpu=cortex-a72</span>
+<span id="cb5-34"><a href="#cb5-34" aria-hidden="true" tabindex="-1"></a> endif</span>
+<span id="cb5-35"><a href="#cb5-35" aria-hidden="true" tabindex="-1"></a><span class="dt">@@ -99,18 +103,25 @@</span></span>
+<span id="cb5-36"><a href="#cb5-36" aria-hidden="true" tabindex="-1"></a> DOCKER_CMD            = docker run -t --rm -v $(shell pwd):/work/tutorial -w /work/tutorial</span>
+<span id="cb5-37"><a href="#cb5-37" aria-hidden="true" tabindex="-1"></a> DOCKER_CMD_INTERACT   = $(DOCKER_CMD) -i</span>
+<span id="cb5-38"><a href="#cb5-38" aria-hidden="true" tabindex="-1"></a> DOCKER_ARG_DIR_COMMON = -v $(shell pwd)/../common:/work/common</span>
+<span id="cb5-39"><a href="#cb5-39" aria-hidden="true" tabindex="-1"></a><span class="va">+DOCKER_ARG_DIR_JTAG   = -v $(shell pwd)/../X1_JTAG_boot:/work/X1_JTAG_boot</span></span>
+<span id="cb5-40"><a href="#cb5-40" aria-hidden="true" tabindex="-1"></a> DOCKER_ARG_DEV        = --privileged -v /dev:/dev</span>
+<span id="cb5-41"><a href="#cb5-41" aria-hidden="true" tabindex="-1"></a><span class="va">+DOCKER_ARG_NET        = --network host</span></span>
+<span id="cb5-42"><a href="#cb5-42" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-43"><a href="#cb5-43" aria-hidden="true" tabindex="-1"></a> # DOCKER_IMAGE defined in include file (see top of this file).</span>
+<span id="cb5-44"><a href="#cb5-44" aria-hidden="true" tabindex="-1"></a> DOCKER_QEMU  = $(DOCKER_CMD_INTERACT) $(DOCKER_IMAGE)</span>
+<span id="cb5-45"><a href="#cb5-45" aria-hidden="true" tabindex="-1"></a> DOCKER_TOOLS = $(DOCKER_CMD) $(DOCKER_IMAGE)</span>
+<span id="cb5-46"><a href="#cb5-46" aria-hidden="true" tabindex="-1"></a> DOCKER_TEST  = $(DOCKER_CMD) $(DOCKER_ARG_DIR_COMMON) $(DOCKER_IMAGE)</span>
+<span id="cb5-47"><a href="#cb5-47" aria-hidden="true" tabindex="-1"></a><span class="va">+DOCKER_GDB   = $(DOCKER_CMD_INTERACT) $(DOCKER_ARG_NET) $(DOCKER_IMAGE)</span></span>
+<span id="cb5-48"><a href="#cb5-48" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-49"><a href="#cb5-49" aria-hidden="true" tabindex="-1"></a> # Dockerize commands, which require USB device passthrough, only on Linux.</span>
+<span id="cb5-50"><a href="#cb5-50" aria-hidden="true" tabindex="-1"></a> ifeq ($(shell uname -s),Linux)</span>
+<span id="cb5-51"><a href="#cb5-51" aria-hidden="true" tabindex="-1"></a>     DOCKER_CMD_DEV = $(DOCKER_CMD_INTERACT) $(DOCKER_ARG_DEV)</span>
+<span id="cb5-52"><a href="#cb5-52" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-53"><a href="#cb5-53" aria-hidden="true" tabindex="-1"></a>     DOCKER_CHAINBOOT = $(DOCKER_CMD_DEV) $(DOCKER_ARG_DIR_COMMON) $(DOCKER_IMAGE)</span>
+<span id="cb5-54"><a href="#cb5-54" aria-hidden="true" tabindex="-1"></a><span class="va">+    DOCKER_JTAGBOOT  = $(DOCKER_CMD_DEV) $(DOCKER_ARG_DIR_COMMON) $(DOCKER_ARG_DIR_JTAG) $(DOCKER_IMAGE)</span></span>
+<span id="cb5-55"><a href="#cb5-55" aria-hidden="true" tabindex="-1"></a><span class="va">+    DOCKER_OPENOCD   = $(DOCKER_CMD_DEV) $(DOCKER_ARG_NET) $(DOCKER_IMAGE)</span></span>
+<span id="cb5-56"><a href="#cb5-56" aria-hidden="true" tabindex="-1"></a><span class="va">+else</span></span>
+<span id="cb5-57"><a href="#cb5-57" aria-hidden="true" tabindex="-1"></a><span class="va">+    DOCKER_OPENOCD   = echo &quot;Not yet supported on non-Linux systems.&quot;; \#</span></span>
+<span id="cb5-58"><a href="#cb5-58" aria-hidden="true" tabindex="-1"></a> endif</span>
+<span id="cb5-59"><a href="#cb5-59" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-60"><a href="#cb5-60" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-61"><a href="#cb5-61" aria-hidden="true" tabindex="-1"></a><span class="dt">@@ -215,6 +226,35 @@</span></span>
+<span id="cb5-62"><a href="#cb5-62" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-63"><a href="#cb5-63" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-64"><a href="#cb5-64" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-65"><a href="#cb5-65" aria-hidden="true" tabindex="-1"></a><span class="va">+##--------------------------------------------------------------------------------------------------</span></span>
+<span id="cb5-66"><a href="#cb5-66" aria-hidden="true" tabindex="-1"></a><span class="va">+## Debugging targets</span></span>
+<span id="cb5-67"><a href="#cb5-67" aria-hidden="true" tabindex="-1"></a><span class="va">+##--------------------------------------------------------------------------------------------------</span></span>
+<span id="cb5-68"><a href="#cb5-68" aria-hidden="true" tabindex="-1"></a><span class="va">+.PHONY: jtagboot openocd gdb gdb-opt0</span></span>
+<span id="cb5-69"><a href="#cb5-69" aria-hidden="true" tabindex="-1"></a><span class="va">+</span></span>
+<span id="cb5-70"><a href="#cb5-70" aria-hidden="true" tabindex="-1"></a><span class="va">+##------------------------------------------------------------------------------</span></span>
+<span id="cb5-71"><a href="#cb5-71" aria-hidden="true" tabindex="-1"></a><span class="va">+## Push the JTAG boot image to the real HW target</span></span>
+<span id="cb5-72"><a href="#cb5-72" aria-hidden="true" tabindex="-1"></a><span class="va">+##------------------------------------------------------------------------------</span></span>
+<span id="cb5-73"><a href="#cb5-73" aria-hidden="true" tabindex="-1"></a><span class="va">+jtagboot:</span></span>
+<span id="cb5-74"><a href="#cb5-74" aria-hidden="true" tabindex="-1"></a><span class="va">+   @$(DOCKER_JTAGBOOT) $(EXEC_MINIPUSH) $(DEV_SERIAL) $(JTAG_BOOT_IMAGE)</span></span>
+<span id="cb5-75"><a href="#cb5-75" aria-hidden="true" tabindex="-1"></a><span class="va">+</span></span>
+<span id="cb5-76"><a href="#cb5-76" aria-hidden="true" tabindex="-1"></a><span class="va">+##------------------------------------------------------------------------------</span></span>
+<span id="cb5-77"><a href="#cb5-77" aria-hidden="true" tabindex="-1"></a><span class="va">+## Start OpenOCD session</span></span>
+<span id="cb5-78"><a href="#cb5-78" aria-hidden="true" tabindex="-1"></a><span class="va">+##------------------------------------------------------------------------------</span></span>
+<span id="cb5-79"><a href="#cb5-79" aria-hidden="true" tabindex="-1"></a><span class="va">+openocd:</span></span>
+<span id="cb5-80"><a href="#cb5-80" aria-hidden="true" tabindex="-1"></a><span class="va">+   $(call color_header, &quot;Launching OpenOCD&quot;)</span></span>
+<span id="cb5-81"><a href="#cb5-81" aria-hidden="true" tabindex="-1"></a><span class="va">+   @$(DOCKER_OPENOCD) openocd $(OPENOCD_ARG)</span></span>
+<span id="cb5-82"><a href="#cb5-82" aria-hidden="true" tabindex="-1"></a><span class="va">+</span></span>
+<span id="cb5-83"><a href="#cb5-83" aria-hidden="true" tabindex="-1"></a><span class="va">+##------------------------------------------------------------------------------</span></span>
+<span id="cb5-84"><a href="#cb5-84" aria-hidden="true" tabindex="-1"></a><span class="va">+## Start GDB session</span></span>
+<span id="cb5-85"><a href="#cb5-85" aria-hidden="true" tabindex="-1"></a><span class="va">+##------------------------------------------------------------------------------</span></span>
+<span id="cb5-86"><a href="#cb5-86" aria-hidden="true" tabindex="-1"></a><span class="va">+gdb: RUSTC_MISC_ARGS += -C debuginfo=2</span></span>
+<span id="cb5-87"><a href="#cb5-87" aria-hidden="true" tabindex="-1"></a><span class="va">+gdb-opt0: RUSTC_MISC_ARGS += -C debuginfo=2 -C opt-level=0</span></span>
+<span id="cb5-88"><a href="#cb5-88" aria-hidden="true" tabindex="-1"></a><span class="va">+gdb gdb-opt0: $(KERNEL_ELF)</span></span>
+<span id="cb5-89"><a href="#cb5-89" aria-hidden="true" tabindex="-1"></a><span class="va">+   $(call color_header, &quot;Launching GDB&quot;)</span></span>
+<span id="cb5-90"><a href="#cb5-90" aria-hidden="true" tabindex="-1"></a><span class="va">+   @$(DOCKER_GDB) gdb-multiarch -q $(KERNEL_ELF)</span></span>
+<span id="cb5-91"><a href="#cb5-91" aria-hidden="true" tabindex="-1"></a><span class="va">+</span></span>
+<span id="cb5-92"><a href="#cb5-92" aria-hidden="true" tabindex="-1"></a><span class="va">+</span></span>
+<span id="cb5-93"><a href="#cb5-93" aria-hidden="true" tabindex="-1"></a><span class="va">+</span></span>
+<span id="cb5-94"><a href="#cb5-94" aria-hidden="true" tabindex="-1"></a> ##--------------------------------------------------------------------------------------------------</span>
+<span id="cb5-95"><a href="#cb5-95" aria-hidden="true" tabindex="-1"></a> ## Testing targets</span>
+<span id="cb5-96"><a href="#cb5-96" aria-hidden="true" tabindex="-1"></a> ##--------------------------------------------------------------------------------------------------</span>
+<span id="cb5-97"><a href="#cb5-97" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-98"><a href="#cb5-98" aria-hidden="true" tabindex="-1"></a><span class="kw">diff -uNr 07_timestamps/src/bsp/raspberrypi/driver.rs 08_hw_debug_JTAG/src/bsp/raspberrypi/driver.rs</span></span>
+<span id="cb5-99"><a href="#cb5-99" aria-hidden="true" tabindex="-1"></a><span class="dt">--- 07_timestamps/src/bsp/raspberrypi/driver.rs</span></span>
+<span id="cb5-100"><a href="#cb5-100" aria-hidden="true" tabindex="-1"></a><span class="dt">+++ 08_hw_debug_JTAG/src/bsp/raspberrypi/driver.rs</span></span>
+<span id="cb5-101"><a href="#cb5-101" aria-hidden="true" tabindex="-1"></a><span class="dt">@@ -57,17 +57,6 @@</span></span>
+<span id="cb5-102"><a href="#cb5-102" aria-hidden="true" tabindex="-1"></a> /// # Safety</span>
+<span id="cb5-103"><a href="#cb5-103" aria-hidden="true" tabindex="-1"></a> ///</span>
+<span id="cb5-104"><a href="#cb5-104" aria-hidden="true" tabindex="-1"></a> /// See child function calls.</span>
+<span id="cb5-105"><a href="#cb5-105" aria-hidden="true" tabindex="-1"></a><span class="st">-///</span></span>
+<span id="cb5-106"><a href="#cb5-106" aria-hidden="true" tabindex="-1"></a><span class="st">-/// # Note</span></span>
+<span id="cb5-107"><a href="#cb5-107" aria-hidden="true" tabindex="-1"></a><span class="st">-///</span></span>
+<span id="cb5-108"><a href="#cb5-108" aria-hidden="true" tabindex="-1"></a><span class="st">-/// Using atomics here relieves us from needing to use `unsafe` for the static variable.</span></span>
+<span id="cb5-109"><a href="#cb5-109" aria-hidden="true" tabindex="-1"></a><span class="st">-///</span></span>
+<span id="cb5-110"><a href="#cb5-110" aria-hidden="true" tabindex="-1"></a><span class="st">-/// On `AArch64`, which is the only implemented architecture at the time of writing this,</span></span>
+<span id="cb5-111"><a href="#cb5-111" aria-hidden="true" tabindex="-1"></a><span class="st">-/// [`AtomicBool::load`] and [`AtomicBool::store`] are lowered to ordinary load and store</span></span>
+<span id="cb5-112"><a href="#cb5-112" aria-hidden="true" tabindex="-1"></a><span class="st">-/// instructions. They are therefore safe to use even with MMU + caching deactivated.</span></span>
+<span id="cb5-113"><a href="#cb5-113" aria-hidden="true" tabindex="-1"></a><span class="st">-///</span></span>
+<span id="cb5-114"><a href="#cb5-114" aria-hidden="true" tabindex="-1"></a><span class="st">-/// [`AtomicBool::load`]: core::sync::atomic::AtomicBool::load</span></span>
+<span id="cb5-115"><a href="#cb5-115" aria-hidden="true" tabindex="-1"></a><span class="st">-/// [`AtomicBool::store`]: core::sync::atomic::AtomicBool::store</span></span>
+<span id="cb5-116"><a href="#cb5-116" aria-hidden="true" tabindex="-1"></a> pub unsafe fn init() -&gt; Result&lt;(), &amp;&#39;static str&gt; {</span>
+<span id="cb5-117"><a href="#cb5-117" aria-hidden="true" tabindex="-1"></a>     static INIT_DONE: AtomicBool = AtomicBool::new(false);</span>
+<span id="cb5-118"><a href="#cb5-118" aria-hidden="true" tabindex="-1"></a>     if INIT_DONE.load(Ordering::Relaxed) {</span></code></pre></div>
