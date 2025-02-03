@@ -1,7 +1,17 @@
 [build]
 target = "aarch64-unknown-none-softfloat"
 
-[target.aarch64-unknown-none-softfloat]
+[target.'cfg(all(target_arch="aarch64", feature="bsp_rpi3"))']
+rustflags = [
+  "-C", "target-cpu=cortex-a53",
+]
+
+[target.'cfg(all(target_arch="aarch64", feature="bsp_rpi4"))']
+rustflags = [
+  "-C", "target-cpu=cortex-a72",
+]
+
+[target.'cfg(target_arch="aarch64")']
 rustflags = [
   "-C", "linker=rust-lld",
   "-C", "link-arg=--library-path=src/bsp/raspberrypi/",
