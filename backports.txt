@@ -1,0 +1,5 @@
+* remove diff from readmes
+* clip out long markdown comment
+* fix version number
+* remove makefile
+* deal with rustfmt
