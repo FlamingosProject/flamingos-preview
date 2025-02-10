@@ -116,8 +116,10 @@ compile_error!(
 );
 
 mod bsp;
+mod console;
 mod cpu;
 mod panic_wait;
+mod print;
 
 /// Early init code.
 ///
@@ -125,5 +127,7 @@ mod panic_wait;
 ///
 /// - Only a single core must be active and running this function.
 unsafe fn kernel_init() -> ! {
-    panic!()
+    println!("Hello from Rust!");
+
+    panic!("Stopping here.")
 }
