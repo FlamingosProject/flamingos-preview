@@ -80,39 +80,7 @@ impl fmt::Write for QEMUOutputInner {
 // Public Code
 //--------------------------------------------------------------------------------------------------
 
-impl QEMUOutput {
-    /// Create a new instance.
-    pub const fn new() -> QEMUOutput {
-        QEMUOutput {
-            inner: NullLock::new(QEMUOutputInner::new()),
-        }
-    }
-}
-
 /// Return a reference to the console.
 pub fn console() -> &'static dyn console::interface::All {
-    &QEMU_OUTPUT
+    &super::driver::PL011_UART
 }
-
-//------------------------------------------------------------------------------
-// OS Interface Code
-//------------------------------------------------------------------------------
-use synchronization::interface::Mutex;
-
-/// Passthrough of `args` to the `core::fmt::Write` implementation, but guarded by a Mutex to
-/// serialize access.
-impl console::interface::Write for QEMUOutput {
-    fn write_fmt(&self, args: core::fmt::Arguments) -> fmt::Result {
-        // Fully qualified syntax for the call to `core::fmt::Write::write_fmt()` to increase
-        // readability.
-        self.inner.lock(|inner| fmt::Write::write_fmt(inner, args))
-    }
-}
-
-impl console::interface::Statistics for QEMUOutput {
-    fn chars_written(&self) -> usize {
-        self.inner.lock(|inner| inner.chars_written)
-    }
-}
-
-impl console::interface::All for QEMUOutput {}
