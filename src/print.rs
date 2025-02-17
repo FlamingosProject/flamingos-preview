@@ -21,7 +21,9 @@ pub fn _print(args: fmt::Arguments) {
 /// Carbon copy from <https://doc.rust-lang.org/src/std/macros.rs.html>
 #[macro_export]
 macro_rules! print {
-    ($($arg:tt)*) => ($crate::print::_print(format_args!($($arg)*)));
+    ($($arg:tt)*) => {{
+        ($crate::print::_print(format_args!($($arg)*)));
+    }};
 }
 
 /// Prints with a newline.
@@ -29,9 +31,9 @@ macro_rules! print {
 /// Carbon copy from <https://doc.rust-lang.org/src/std/macros.rs.html>
 #[macro_export]
 macro_rules! println {
-    () => ($crate::print!("\n"));
-    ($($arg:tt)*) => ({
+    () => ($crate::print!("\r\n"));
+    ($($arg:tt)*) => {{
         $crate::print::_print(format_args!($($arg)*));
-        $crate::println!();
-    })
+        println!();
+    }};
 }
