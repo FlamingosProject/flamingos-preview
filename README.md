@@ -1,36 +1,52 @@
-# Tutorial 03 - Hacky Hello World
+# Tutorial 04 - Safe Globals
 
 ## tl;dr
 
-- Introducing global `println!()` macros to enable "printf debugging" at the earliest.
-- To keep tutorial length reasonable, printing functions for now "abuse" a QEMU property that lets
-  us use the Raspberry's `UART` without setting it up properly.
-- Using the real hardware `UART` is enabled step-by-step in following tutorials.
+- A pseudo-lock is introduced.
+- It is a first showcase of OS synchronization primitives and enables safe access to a global data
+  structure.
 
-## Notable additions
+## Mutable globals in Rust
 
-- `src/console.rs` introduces interface `Traits` for console commands and global access to the
-  kernel's console through `console::console()`.
-- `src/bsp/raspberrypi/console.rs` implements the interface for QEMU's emulated UART.
-- The panic handler makes use of the new `println!()` to display user error messages.
-- There is a new Makefile target, `make test`, intended for automated testing. It boots the compiled
-  kernel in `QEMU`, and checks for an expected output string produced by the kernel.
-  - In this tutorial, it checks for the string `Stopping here`, which is emitted by the `panic!()`
-    at the end of `main.rs`.
+When we introduced the globally usable `print!` macros in Tutorial 03, we cheated a bit. Calling
+`core::fmt`'s `write_fmt()` function, which takes an `&mut self`, was only working because on each
+call, a new instance of `QEMUOutput` was created.
+
+If we would want to preserve some state, e.g. statistics about the number of characters written, we
+need to make a single global instance of `QEMUOutput` (in Rust, using the `static` keyword).
+
+A `static QEMU_OUTPUT`, however, would not allow to call functions taking `&mut self`. For that, we
+would need a `static mut`, but calling functions that mutate state on `static mut`s is unsafe. The
+Rust compiler's reasoning for this is that it can then not prevent anymore that multiple
+cores/threads are mutating the data concurrently (it is a global, so everyone can reference it from
+anywhere. The borrow checker can't help here).
+
+The solution to this problem is to wrap the global into a synchronization primitive. In our case, a
+variant of a *MUTual EXclusion* primitive. `Mutex` is introduced as a trait in `synchronization.rs`,
+and implemented by the `NullLock` in the same file. In order to make the code lean for teaching
+purposes, it leaves out the actual architecture-specific logic for protection against concurrent
+access, since we don't need it as long as the kernel only executes on a single core with interrupts
+disabled.
+
+The `NullLock` focuses on showcasing the Rust core concept of [interior mutability]. Make sure to
+read up on it. I also recommend to read this article about an [accurate mental model for Rust's
+reference types].
+
+If you want to compare the `NullLock` to some real-world mutex implementations, you can check out
+implemntations in the [spin crate] or the [parking lot crate].
+
+[interior mutability]: https://doc.rust-lang.org/std/cell/index.html
+[accurate mental model for Rust's reference types]: https://docs.rs/dtolnay/0.0.6/dtolnay/macro._02__reference_types.html
+[spin crate]: https://github.com/mvdnes/spin-rs
+[parking lot crate]: https://github.com/Amanieu/parking_lot
 
 ## Test it
-
-QEMU is no longer running in assembly mode. It will from now on show the output of the `console`.
 
 ```console
 $ make qemu
 [...]
 
-Hello from Rust!
-Kernel panic!
-
-Panic location:
-      File 'src/main.rs', line 126, column 5
-
-Stopping here.
+[0] Hello from Rust!
+[1] Chars written: 22
+[2] Stopping here.
 ```
