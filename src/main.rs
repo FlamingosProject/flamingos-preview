@@ -150,11 +150,20 @@ const MINILOAD_LOGO: &str = r#"
 |_|  |_|_|_||_|_|____\___/\__,_\__,_|
 "#;
 
+fn display_logo() {
+    for c in MINILOAD_LOGO.chars() {
+        if c == '\n' {
+            print!("\r");
+        }
+        print!("{c}");
+    }
+}
+
 /// The main function running after the early init.
 fn kernel_main() -> ! {
     use console::console;
 
-    println!("{}", MINILOAD_LOGO);
+    display_logo();
     println!("{:^37}", bsp::board_name());
     println!();
     println!("[ML] Requesting binary");
