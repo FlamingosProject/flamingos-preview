@@ -45,6 +45,7 @@ pub mod interface {
     /// Console statistics.
     pub trait Statistics {
         /// Return the number of bytes written.
+        #[allow(unused)]
         fn bytes_written(&self) -> usize;
 
         /// Return the number of bytes read.
