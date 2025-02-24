@@ -169,8 +169,8 @@ enum BlockingMode {
 
 struct PL011UartInner {
     registers: Registers,
-    chars_written: usize,
-    chars_read: usize,
+    bytes_written: usize,
+    bytes_read: usize,
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -195,8 +195,8 @@ impl PL011UartInner {
     pub const unsafe fn new(mmio_start_addr: usize) -> Self {
         Self {
             registers: Registers::new(mmio_start_addr),
-            chars_written: 0,
-            chars_read: 0,
+            bytes_written: 0,
+            bytes_read: 0,
         }
     }
 
@@ -253,8 +253,8 @@ impl PL011UartInner {
             .write(CR::UARTEN::Enabled + CR::TXE::Enabled + CR::RXE::Enabled);
     }
 
-    /// Send a character.
-    fn write_char(&mut self, c: u8) {
+    /// Send a byte.
+    fn write_byte(&mut self, c: u8) {
         // Spin while TX FIFO full is set, waiting for an empty slot.
         while self.registers.FR.matches_all(FR::TXFF::SET) {
             cpu::nop();
@@ -263,7 +263,7 @@ impl PL011UartInner {
         // Write the character to the buffer.
         self.registers.DR.set(c as u32);
 
-        self.chars_written += 1;
+        self.bytes_written += 1;
     }
 
     /// Block execution until the last buffered character has been physically put on the TX wire.
@@ -274,8 +274,8 @@ impl PL011UartInner {
         }
     }
 
-    /// Retrieve a character.
-    fn read_char_converting(&mut self, blocking_mode: BlockingMode) -> Option<u8> {
+    /// Retrieve a byte.
+    fn read_byte(&mut self, blocking_mode: BlockingMode) -> Option<u8> {
         // If RX FIFO is empty,
         if self.registers.FR.matches_all(FR::RXFE::SET) {
             // immediately return in non-blocking mode.
@@ -283,7 +283,7 @@ impl PL011UartInner {
                 return None;
             }
 
-            // Otherwise, wait until a char was received.
+            // Otherwise, wait until a byte was received.
             while self.registers.FR.matches_all(FR::RXFE::SET) {
                 cpu::nop();
             }
@@ -293,7 +293,7 @@ impl PL011UartInner {
         let ret = self.registers.DR.get() as u8;
 
         // Update statistics.
-        self.chars_read += 1;
+        self.bytes_read += 1;
 
         Some(ret)
     }
@@ -311,7 +311,7 @@ impl PL011UartInner {
 impl fmt::Write for PL011UartInner {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         for b in s.bytes() {
-            self.write_char(b);
+            self.write_byte(b);
         }
 
         Ok(())
@@ -354,27 +354,16 @@ impl driver::interface::DeviceDriver for PL011Uart {
     }
 }
 
+/// Passthrough of `args` to the `core::fmt::Write` implementation, but guarded by a Mutex to
+/// serialize access.
 impl console::interface::Write for PL011Uart {
-    /// Passthrough of `args` to the `core::fmt::Write` implementation, but guarded by a Mutex to
-    /// serialize access.
-    /*
-    fn write_char(&self, c: char) {
-        let mut buf = [0u8; 4];
-        let s = c.encode_utf8(&mut buf);
-        let ns = s.bytes().count();
-        if ns > 1 {
-            for b in s.bytes() {
-                self.inner.lock(|inner| inner.write_str(b));
-            }
-        } else {
-            assert_eq!(ns, 1);
-            self.inner.lock(|inner| inner.write_char(b[0]))
-        }
+    fn write_byte(&self, c: u8) {
+        self.inner.lock(|inner| inner.write_byte(c))
     }
-    */
 
-    fn write_char(&self, c: u8) {
-        self.inner.lock(|inner| inner.write_char(c))
+    fn write_str(&self, s: &str) {
+        use fmt::Write;
+        self.inner.lock(|inner| inner.write_str(s).unwrap())
     }
 
     fn write_fmt(&self, args: core::fmt::Arguments) -> fmt::Result {
@@ -390,29 +379,29 @@ impl console::interface::Write for PL011Uart {
 }
 
 impl console::interface::Read for PL011Uart {
-    fn read_char(&self) -> u8 {
+    fn read_byte(&self) -> u8 {
         self.inner
-            .lock(|inner| inner.read_char_converting(BlockingMode::Blocking).unwrap())
+            .lock(|inner| inner.read_byte(BlockingMode::Blocking).unwrap())
     }
 
     fn clear_rx(&self) {
         // Read from the RX FIFO until it is indicating empty.
         while self
             .inner
-            .lock(|inner| inner.read_char_converting(BlockingMode::NonBlocking))
+            .lock(|inner| inner.read_byte(BlockingMode::NonBlocking))
             .is_some()
         {}
     }
 }
 
 impl console::interface::Statistics for PL011Uart {
-    fn chars_written(&self) -> usize {
-        self.inner.lock(|inner| inner.chars_written)
+    fn bytes_written(&self) -> usize {
+        self.inner.lock(|inner| inner.bytes_written)
     }
 
-    fn chars_read(&self) -> usize {
-        self.inner.lock(|inner| inner.chars_read)
+    fn bytes_read(&self) -> usize {
+        self.inner.lock(|inner| inner.bytes_read)
     }
 }
 
-impl console::interface::All for PL011Uart {}
+impl console::interface::Console for PL011Uart {}

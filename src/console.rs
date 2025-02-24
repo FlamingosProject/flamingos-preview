@@ -18,23 +18,25 @@ pub mod interface {
 
     /// Console write functions.
     pub trait Write {
-        /// Write a single character.
-        fn write_char(&self, c: u8);
+        /// Write a single byte.
+        fn write_byte(&self, c: u8);
 
-        /// Write a Rust format string.
+        /// Write a string slice.
+        #[allow(unused)]
+        fn write_str(&self, s: &str);
+
+        /// Write Rust formatted output.
         fn write_fmt(&self, args: fmt::Arguments) -> fmt::Result;
 
-        /// Block until the last buffered character has been physically put on the TX wire.
+        /// Block until the last buffered byte has been physically put on the TX wire.
         #[allow(unused)]
         fn flush(&self);
     }
 
     /// Console read functions.
     pub trait Read {
-        /// Read a single character.
-        fn read_char(&self) -> u8 {
-            ' ' as u8
-        }
+        /// Read a single byte.
+        fn read_byte(&self) -> u8;
 
         /// Clear RX buffers, if any.
         fn clear_rx(&self);
@@ -42,27 +44,24 @@ pub mod interface {
 
     /// Console statistics.
     pub trait Statistics {
-        /// Return the number of characters written.
-        fn chars_written(&self) -> usize {
-            0
-        }
+        /// Return the number of bytes written.
+        fn bytes_written(&self) -> usize;
 
-        /// Return the number of characters read.
+        /// Return the number of bytes read.
         #[allow(unused)]
-        fn chars_read(&self) -> usize {
-            0
-        }
+        fn bytes_read(&self) -> usize;
     }
 
+    // XXX Consoles should not be required to provide statistics.
     /// Trait alias for a full-fledged console.
-    pub trait All: Write + Read + Statistics {}
+    pub trait Console: Write + Read + Statistics {}
 }
 
 //--------------------------------------------------------------------------------------------------
 // Global instances
 //--------------------------------------------------------------------------------------------------
 
-static CUR_CONSOLE: NullLock<&'static (dyn interface::All + Sync)> =
+static CUR_CONSOLE: NullLock<&'static (dyn interface::Console + Sync)> =
     NullLock::new(&null_console::NULL_CONSOLE);
 
 //--------------------------------------------------------------------------------------------------
@@ -71,13 +70,13 @@ static CUR_CONSOLE: NullLock<&'static (dyn interface::All + Sync)> =
 use synchronization::interface::Mutex;
 
 /// Register a new console.
-pub fn register_console(new_console: &'static (dyn interface::All + Sync)) {
+pub fn register_console(new_console: &'static (dyn interface::Console + Sync)) {
     CUR_CONSOLE.lock(|con| *con = new_console);
 }
 
 /// Return a reference to the currently registered console.
 ///
 /// This is the global console used by all printing macros.
-pub fn console() -> &'static dyn interface::All {
+pub fn console() -> &'static dyn interface::Console {
     CUR_CONSOLE.lock(|con| *con)
 }

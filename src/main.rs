@@ -157,16 +157,16 @@ fn kernel_main() -> ! {
     println!("[2] Drivers loaded:");
     driver::driver_manager().enumerate();
 
-    println!("[3] Chars written: {}", console().chars_written());
+    println!("[3] Bytes written: {}", console().bytes_written());
     println!("[4] Echoing input now");
 
     // Discard any spurious received characters before going into echo mode.
     console().clear_rx();
     loop {
-        let c = console().read_char();
-        console().write_char(c);
+        let c = console().read_byte();
+        console().write_byte(c);
         if c == b'\r' {
-            console().write_char(b'\n');
+            console().write_byte(b'\n');
         }
     }
 }
