@@ -24,7 +24,9 @@ pub static NULL_CONSOLE: NullConsole = NullConsole {};
 //--------------------------------------------------------------------------------------------------
 
 impl interface::Write for NullConsole {
-    fn write_char(&self, _c: u8) {}
+    fn write_byte(&self, _c: u8) {}
+
+    fn write_str(&self, _s: &str) {}
 
     fn write_fmt(&self, _args: fmt::Arguments) -> fmt::Result {
         fmt::Result::Ok(())
@@ -35,7 +37,22 @@ impl interface::Write for NullConsole {
 
 impl interface::Read for NullConsole {
     fn clear_rx(&self) {}
+
+    // XXX The interface should be fixed to allow some way
+    // to indicate that no data is available to read.
+    fn read_byte(&self) -> u8 {
+        b' '
+    }
 }
 
-impl interface::Statistics for NullConsole {}
-impl interface::All for NullConsole {}
+impl interface::Statistics for NullConsole {
+    fn bytes_written(&self) -> usize {
+        0
+    }
+
+    fn bytes_read(&self) -> usize {
+        0
+    }
+}
+
+impl interface::Console for NullConsole {}
