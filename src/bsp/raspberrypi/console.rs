@@ -43,9 +43,9 @@ impl QEMUOutputInner {
     }
 
     /// Send a character.
-    fn write_char(&mut self, c: char) {
+    fn write_byte(&mut self, c: u8) {
         unsafe {
-            core::ptr::write_volatile(0x3F20_1000 as *mut u8, c as u8);
+            core::ptr::write_volatile(0x3F20_1000 as *mut u8, c);
         }
 
         self.chars_written += 1;
@@ -63,13 +63,13 @@ impl QEMUOutputInner {
 /// [`src/print.rs`]: ../../print/index.html
 impl fmt::Write for QEMUOutputInner {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        for c in s.chars() {
+        for c in s.bytes() {
             // Convert newline to carrige return + newline.
-            if c == '\n' {
-                self.write_char('\r')
+            if c == b'\n' {
+                self.write_byte(b'\r')
             }
 
-            self.write_char(c);
+            self.write_byte(c);
         }
 
         Ok(())
