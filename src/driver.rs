@@ -156,6 +156,7 @@ impl DriverManager {
     }
 
     /// Enumerate all registered device drivers.
+    #[allow(unused)]
     pub fn enumerate(&self) {
         let mut i: usize = 1;
         self.for_each_descriptor(|descriptor| {

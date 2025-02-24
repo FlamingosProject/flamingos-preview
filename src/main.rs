@@ -143,30 +143,56 @@ unsafe fn kernel_init() -> ! {
     kernel_main()
 }
 
+const MINILOAD_LOGO: &str = r#"
+ __  __ _      _ _                 _
+|  \/  (_)_ _ (_) |   ___  __ _ __| |
+| |\/| | | ' \| | |__/ _ \/ _` / _` |
+|_|  |_|_|_||_|_|____\___/\__,_\__,_|
+"#;
+
 /// The main function running after the early init.
 fn kernel_main() -> ! {
     use console::console;
 
-    println!(
-        "[0] {} version {}",
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_VERSION")
-    );
-    println!("[1] Booting on: {}", bsp::board_name());
+    println!("{}", MINILOAD_LOGO);
+    println!("{:^37}", bsp::board_name());
+    println!();
+    println!("[ML] Requesting binary");
+    console().flush();
 
-    println!("[2] Drivers loaded:");
-    driver::driver_manager().enumerate();
-
-    println!("[3] Bytes written: {}", console().bytes_written());
-    println!("[4] Echoing input now");
-
-    // Discard any spurious received characters before going into echo mode.
+    // Discard any spurious received characters before starting with the loader protocol.
     console().clear_rx();
-    loop {
-        let c = console().read_byte();
-        console().write_byte(c);
-        if c == b'\r' {
-            console().write_byte(b'\n');
+
+    // Notify `Minipush` to send the binary.
+    for _ in 0..3 {
+        console().write_byte(3);
+    }
+
+    // Read the binary's size.
+    let mut size: u32 = u32::from(console().read_byte());
+    size |= u32::from(console().read_byte()) << 8;
+    size |= u32::from(console().read_byte()) << 16;
+    size |= u32::from(console().read_byte()) << 24;
+
+    // Trust it's not too big.
+    console().write_byte(b'O');
+    console().write_byte(b'K');
+
+    let kernel_addr = bsp::memory::board_default_load_addr();
+    unsafe {
+        // Read the kernel byte by byte.
+        let la = kernel_addr as *mut u8;
+        for i in 0..size {
+            core::ptr::write_volatile(la.offset(i as isize), console().read_byte())
         }
     }
+
+    println!("[ML] Loaded! Executing the payload now\n");
+    console().flush();
+
+    // Use black magic to create a function pointer.
+    let kernel: fn() -> ! = unsafe { core::mem::transmute(kernel_addr) };
+
+    // Jump to loaded kernel!
+    kernel()
 }
