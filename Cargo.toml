@@ -15,6 +15,8 @@ bsp_rpi4 = ["tock-registers"]
 [[bin]]
 name = "kernel"
 path = "src/main.rs"
+test = false
+bench = false
 
 ##--------------------------------------------------------------------------------------------------
 ## Dependencies
