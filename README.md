@@ -1,141 +1,83 @@
-# Tutorial 05 - Drivers: GPIO and UART
+# Tutorial 06 - UART Chainloader
 
 ## tl;dr
 
-- Drivers for the real `UART` and the `GPIO` controller are added.
-- **For the first time, we will be able to run the code on the real hardware** (scroll down for
-  instructions).
+- Running from an SD card was a nice experience, but it would be extremely tedious to do it for
+  every new binary. So let's write a [chainloader].
+- This will be the last binary you need to put on the SD card. Each following tutorial will provide
+  a `chainboot` target in the `Makefile` that lets you conveniently load the kernel over `UART`.
 
-## Introduction
-
-Now that we enabled safe globals in the previous tutorial, the infrastructure is laid for adding the
-first real device drivers. We throw out the magic QEMU console and introduce a `driver manager`,
-which allows the `BSP` to register device drivers with the `kernel`.
-
-## Driver Manager
-
-The first step consists of adding a `driver subsystem` to the kernel. The corresponding code will
-live in `src/driver.rs`. The subsystem introduces `interface::DeviceDriver`, a common trait that
-every device driver will need to implement and that is known to the kernel. A global
-`DRIVER_MANAGER` instance (of type `DriverManager`) that is instantiated in the same file serves as
-the central entity that can be called to manage all things device drivers in the kernel. For
-example, by using the globally accessible `crate::driver::driver_manager().register_driver(...)`,
-any code can can register an object with static lifetime that implements the
-`interface::DeviceDriver` trait.
-
-During kernel init, a call to `crate::driver::driver_manager().init_drivers(...)` will let the
-driver manager loop over all registered drivers and kick off their initialization, and also execute
-an optional `post-init callback` that can be registered alongside the driver. For example, this
-mechanism is used to switch over to the `UART` driver as the main system console after the `UART`
-driver has been initialized.
-
-## BSP Driver Implementation
-
-In `src/bsp/raspberrypi/driver.rs`, the function `init()` takes care of registering the `UART` and
-`GPIO` drivers. It is therefore important that during kernel init, the correct order of (i) first
-initializing the BSP driver subsystem, and only then (ii) calling the `driver_manager()` is
-followed, like the following excerpt from `main.rs` shows:
-
-```rust
-unsafe fn kernel_init() -> ! {
-    // Initialize the BSP driver subsystem.
-    if let Err(x) = bsp::driver::init() {
-        panic!("Error initializing BSP driver subsystem: {}", x);
-    }
-
-    // Initialize all device drivers.
-    driver::driver_manager().init_drivers();
-    // println! is usable from here on.
-```
+[chainloader]: https://en.wikipedia.org/wiki/Chain_loading
 
 
+## Note
 
-The drivers themselves are stored in `src/bsp/device_driver`, and can be reused between `BSP`s. The
-first driver added in these tutorials is the `PL011Uart` driver: It implements the
-`console::interface::*` traits and is from now on used as the main system console. The second driver
-is the `GPIO` driver, which pinmuxes (that is, routing signals from inside the `SoC` to actual HW
-pins) the RPi's PL011 UART accordingly. Note how the `GPIO` driver differentiates between **RPi 3**
-and **RPi 4**. Their HW is different, so we have to account for it in SW.
+Please note that there is stuff going on in this tutorial that is very hard to grasp by only looking
+at the source code changes.
 
-The `BSP`s now also contain a memory map in `src/bsp/raspberrypi/memory.rs`. It provides the
-Raspberry's `MMIO` addresses which are used by the `BSP` to instantiate the respective device
-drivers, so that the driver code knows where to find the device's registers in memory.
+The gist of it is that in `boot.s`, we are writing a piece of [position independent code] which
+automatically determines where the firmware has loaded the binary (`0x8_0000`), and where it was
+linked to (`0x200_0000`, see `kernel.ld`). The binary then copies itself from loaded to linked
+address (aka  "relocating" itself), and then jumps to the relocated version of `_start_rust()`.
 
-## Boot it from SD card
+Since the chainloader has put itself "out of the way" now, it can now receive another kernel binary
+from the `UART` and copy it to the standard load address of the RPi firmware at `0x8_0000`. Finally,
+it jumps to `0x8_0000` and the newly loaded binary transparently executes as if it had been loaded
+from SD card all along.
 
-Since we have real `UART` output now, we can run the code on the real hardware. Building is
-differentiated between the **RPi 3** and the **RPi 4** due to before mentioned differences in the
-`GPIO` driver. By default, all `Makefile` targets will build for the **RPi 3**. In order to build
-for the the **RPi 4**, prepend `BSP=rpi4` to each target. For example:
+Please bear with me until I find the time to write it all down here elaborately. For the time being,
+please see this tutorial as an enabler for a convenience feature that allows booting the following
+tutorials in a quick manner. _For those keen to get a deeper understanding, it could make sense to
+skip forward to [Chapter 15](../15_virtual_mem_part3_precomputed_tables) and read the first half of
+the README, where `Load Address != Link Address` is discussed_.
 
-```console
-$ BSP=rpi4 make
-$ BSP=rpi4 make doc
-```
+[position independent code]: https://en.wikipedia.org/wiki/Position-independent_code
 
-Unfortunately, QEMU does not yet support the **RPi 4**, so `BSP=rpi4 make qemu` won't work.
+## Install and test it
 
-**Some steps for preparing the SD card differ between RPi 3 and RPi 4, so be careful in the
-following.**
+Our chainloader is called `MiniLoad` and is inspired by [raspbootin].
 
-### Common for both
+You can try it with this tutorial already:
+1. Depending on your target hardware, run:`make` or `BSP=rpi4 make`.
+1. Copy `kernel8.img` to the SD card and put the SD card back into your RPi.
+1. Run `make chainboot` or `BSP=rpi4 make chainboot`.
+1. Connect the USB serial to your host PC.
+    - Wiring diagram at [top-level README](../README.md#-usb-serial-output).
+    - Make sure that you **DID NOT** connect the power pin of the USB serial. Only RX/TX and GND.
+1. Connect the RPi to the (USB) power cable.
+1. Observe the loader fetching a kernel over `UART`:
 
-1. Make a single `FAT32` partition named `boot`.
-2. On the card, generate a file named `config.txt` with the following contents:
-
-```txt
-arm_64bit=1
-init_uart_clock=48000000
-```
-### RPi 3
-
-3. Copy the following files from the [Raspberry Pi firmware repo](https://github.com/raspberrypi/firmware/tree/master/boot) onto the SD card:
-    - [bootcode.bin](https://github.com/raspberrypi/firmware/raw/master/boot/bootcode.bin)
-    - [fixup.dat](https://github.com/raspberrypi/firmware/raw/master/boot/fixup.dat)
-    - [start.elf](https://github.com/raspberrypi/firmware/raw/master/boot/start.elf)
-4. Run `make`.
-
-### RPi 4
-
-3. Copy the following files from the [Raspberry Pi firmware repo](https://github.com/raspberrypi/firmware/tree/master/boot) onto the SD card:
-    - [fixup4.dat](https://github.com/raspberrypi/firmware/raw/master/boot/fixup4.dat)
-    - [start4.elf](https://github.com/raspberrypi/firmware/raw/master/boot/start4.elf)
-    - [bcm2711-rpi-4-b.dtb](https://github.com/raspberrypi/firmware/raw/master/boot/bcm2711-rpi-4-b.dtb)
-4. Run `BSP=rpi4 make`.
-
-
-_**Note**: Should it not work on your RPi 4, try renaming `start4.elf` to `start.elf` (without the 4)
-on the SD card._
-
-### Common again
-
-5. Copy the `kernel8.img` onto the SD card and insert it back into the RPi.
-6. Run the `miniterm` target, which opens the UART device on the host:
-
-```console
-$ make miniterm
-```
-
-> ❗ **NOTE**: `Miniterm` assumes a default serial device name of `/dev/ttyUSB0`. Depending on your
-> host operating system, the device name might differ. For example, on `macOS`, it might be
+> ❗ **NOTE**: `make chainboot` assumes a default serial device name of `/dev/ttyUSB0`. Depending on
+> your host operating system, the device name might differ. For example, on `macOS`, it might be
 > something like `/dev/tty.usbserial-0001`. In this case, please give the name explicitly:
 
 
 ```console
-$ DEV_SERIAL=/dev/tty.usbserial-0001 make miniterm
+$ DEV_SERIAL=/dev/tty.usbserial-0001 make chainboot
 ```
 
-7. Connect the USB serial to your host PC.
-    - Wiring diagram at [top-level README](../README.md#-usb-serial-output).
-    - **NOTE**: TX (transmit) wire connects to the RX (receive) pin.
-    - Make sure that you **DID NOT** connect the power pin of the USB serial. Only RX/TX and GND.
-8. Connect the RPi to the (USB) power cable and observe the output:
+[raspbootin]: https://github.com/mrvn/raspbootin
 
 ```console
-Miniterm 1.0
+$ make chainboot
+[...]
+Minipush 1.0
 
-[MT] ⏳ Waiting for /dev/ttyUSB0
-[MT] ✅ Serial connected
+[MP] ⏳ Waiting for /dev/ttyUSB0
+[MP] ✅ Serial connected
+[MP] 🔌 Please power the target now
+
+ __  __ _      _ _                 _
+|  \/  (_)_ _ (_) |   ___  __ _ __| |
+| |\/| | | ' \| | |__/ _ \/ _` / _` |
+|_|  |_|_|_||_|_|____\___/\__,_\__,_|
+
+           Raspberry Pi 3
+
+[ML] Requesting binary
+[MP] ⏩ Pushing 7 KiB ==========================================🦀 100% 0 KiB/s Time: 00:00:00
+[ML] Loaded! Executing the payload now
+
 [0] mingo version 0.5.0
 [1] Booting on: Raspberry Pi 3
 [2] Drivers loaded:
@@ -145,5 +87,36 @@ Miniterm 1.0
 [4] Echoing input now
 ```
 
-8. Exit by pressing <kbd>ctrl-c</kbd>.
+In this tutorial, a version of the kernel from the previous tutorial is loaded for demo purposes. In
+subsequent tutorials, it will be the working directory's kernel.
+
+## Test it
+
+The `Makefile` in this tutorial has an additional target, `qemuasm`, that lets you nicely observe
+how the kernel, after relocating itself, jumps the load address region (`0x80_XXX`) to the relocated
+code at (`0x0200_0XXX`):
+
+```console
+$ make qemuasm
+[...]
+N:
+0x00080030:  58000140  ldr      x0, #0x80058
+0x00080034:  9100001f  mov      sp, x0
+0x00080038:  58000141  ldr      x1, #0x80060
+0x0008003c:  d61f0020  br       x1
+
+----------------
+IN:
+0x02000070:  9400044c  bl       #0x20011a0
+
+----------------
+IN:
+0x020011a0:  90000008  adrp     x8, #0x2001000
+0x020011a4:  90000009  adrp     x9, #0x2001000
+0x020011a8:  f9446508  ldr      x8, [x8, #0x8c8]
+0x020011ac:  f9446929  ldr      x9, [x9, #0x8d0]
+0x020011b0:  eb08013f  cmp      x9, x8
+0x020011b4:  54000109  b.ls     #0x20011d4
+[...]
+```
 
