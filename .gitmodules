@@ -1,24 +1,24 @@
 [submodule "01-wait-forever"]
 	path = 01-wait-forever
-	url = ssh://git@github.com/RustOS2/rust-raspberrypi-OS-tutorials
+	url = https://github.com/RustOS2/flamingos.git
 	branch = 01-wait-forever
 [submodule "02-runtime-init"]
 	path = 02-runtime-init
-	url = ssh://git@github.com/RustOS2/rust-raspberrypi-OS-tutorials
+	url = https://github.com/RustOS2/flamingos.git
 	branch = 02-runtime-init
 [submodule "03-hacky-hello-world"]
 	path = 03-hacky-hello-world
-	url = ssh://git@github.com/RustOS2/rust-raspberrypi-OS-tutorials
+	url = https://github.com/RustOS2/flamingos.git
 	branch = 03-hacky-hello-world
 [submodule "04-safe-globals"]
 	path = 04-safe-globals
-	url = ssh://git@github.com/RustOS2/rust-raspberrypi-OS-tutorials
+	url = https://github.com/RustOS2/flamingos.git
 	branch = 04-safe-globals
 [submodule "05-drivers-gpio-uart"]
 	path = 05-drivers-gpio-uart
-	url = ssh://git@github.com/RustOS2/rust-raspberrypi-OS-tutorials
+	url = https://github.com/RustOS2/flamingos.git
 	branch = 05-drivers-gpio-uart
 [submodule "06-uart-chainloader"]
 	path = 06-uart-chainloader
-	url = ssh://git@github.com/RustOS2/rust-raspberrypi-OS-tutorials
+	url = https://github.com/RustOS2/flamingos.git
 	branch = 06-uart-chainloader
