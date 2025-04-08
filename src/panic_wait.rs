@@ -55,11 +55,6 @@ fn panic(info: &PanicInfo) -> ! {
         {}",
         timestamp.as_secs(),
         timestamp.subsec_micros(),
-        "[  {:>3}.{:06}] Kernel panic!\n\n\
-        Panic location:\n      File '{}', line {}, column {}\n\n\
-        {}",
-        timestamp.as_secs(),
-        timestamp.subsec_micros(),
         location,
         line,
         column,
