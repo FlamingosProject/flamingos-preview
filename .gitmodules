@@ -34,3 +34,7 @@
 	path = 09-privilege-level
 	url = https://github.com/RustOS2/flamingos.git
 	branch = 09-privilege-level
+[submodule "10-virtual-mem-part1"]
+	path = 10-virtual-mem-part1
+	url = https://github.com/RustOS2/flamingos.git
+	branch = 10-virtual-mem-part1
