@@ -18,7 +18,7 @@ use crate::{
     memory::mmu::{translation_table::KernelTranslationTable, TranslationGranule},
 };
 use aarch64_cpu::{asm::barrier, registers::*};
-use core::intrinsics::unlikely;
+// use core::hint::unlikely;      uncomment once stable
 use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
 
 //--------------------------------------------------------------------------------------------------
@@ -27,6 +27,13 @@ use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
 
 /// Memory Management Unit type.
 struct MemoryManagementUnit;
+
+/// no-op placeholder until `core::hint::unlikely` is stable
+///
+/// Tracking issue: https://github.com/rust-lang/rust/issues/136873
+const fn unlikely(b: bool) -> bool {
+    b
+}
 
 //--------------------------------------------------------------------------------------------------
 // Public Definitions
