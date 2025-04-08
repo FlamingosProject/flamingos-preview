@@ -110,11 +110,6 @@
 #![no_main]
 #![no_std]
 
-#[cfg(not(any(feature = "bsp_rpi3", feature = "bsp_rpi4")))]
-compile_error!(
-    "Either feature \"bsp_rpi3\" or \"bsp_rpi4\" must be enabled for this crate.",
-);
-
 mod bsp;
 mod console;
 mod cpu;
@@ -122,6 +117,7 @@ mod driver;
 mod panic_wait;
 mod print;
 mod synchronization;
+mod time;
 
 /// Early init code.
 ///
@@ -143,65 +139,30 @@ unsafe fn kernel_init() -> ! {
     kernel_main()
 }
 
-const MINILOAD_LOGO: &str = r#"
- __  __ _      _ _                 _
-|  \/  (_)_ _ (_) |   ___  __ _ __| |
-| |\/| | | ' \| | |__/ _ \/ _` / _` |
-|_|  |_|_|_||_|_|____\___/\__,_\__,_|
-"#;
-
-fn display_logo() {
-    for c in MINILOAD_LOGO.chars() {
-        if c == '\n' {
-            print!("\r");
-        }
-        print!("{c}");
-    }
-}
-
 /// The main function running after the early init.
 fn kernel_main() -> ! {
-    use console::console;
+    use core::time::Duration;
 
-    display_logo();
-    println!("{:^37}", bsp::board_name());
-    println!();
-    println!("[ML] Requesting binary");
-    console().flush();
+    info!(
+        "{} version {}",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION")
+    );
+    info!("Booting on: {}", bsp::board_name());
 
-    // Discard any spurious received characters before starting with the loader protocol.
-    console().clear_rx();
+    info!(
+        "Architectural timer resolution: {} ns",
+        time::time_manager().resolution().as_nanos()
+    );
 
-    // Notify `Minipush` to send the binary.
-    for _ in 0..3 {
-        console().write_byte(3);
+    info!("Drivers loaded:");
+    driver::driver_manager().enumerate();
+
+    // Test a failing timer case.
+    time::time_manager().spin_for(Duration::from_nanos(1));
+
+    loop {
+        info!("Spinning for 1 second");
+        time::time_manager().spin_for(Duration::from_secs(1));
     }
-
-    // Read the binary's size.
-    let mut size: u32 = u32::from(console().read_byte());
-    size |= u32::from(console().read_byte()) << 8;
-    size |= u32::from(console().read_byte()) << 16;
-    size |= u32::from(console().read_byte()) << 24;
-
-    // Trust it's not too big.
-    console().write_byte(b'O');
-    console().write_byte(b'K');
-
-    let kernel_addr = bsp::memory::board_default_load_addr();
-    unsafe {
-        // Read the kernel byte by byte.
-        let la = kernel_addr as *mut u8;
-        for i in 0..size {
-            core::ptr::write_volatile(la.offset(i as isize), console().read_byte())
-        }
-    }
-
-    println!("[ML] Loaded! Executing the payload now\n");
-    console().flush();
-
-    // Use black magic to create a function pointer.
-    let kernel: fn() -> ! = unsafe { core::mem::transmute(kernel_addr) };
-
-    // Jump to loaded kernel!
-    kernel()
 }
