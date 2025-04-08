@@ -1,167 +1,174 @@
-# Tutorial 08 - Hardware Debugging using JTAG
+# Tutorial 09 - Privilege Level
 
 ## tl;dr
 
-In the exact order as listed:
-
-1. `make jtagboot` and keep terminal open.
-2. Connect USB serial device.
-3. Connect `JTAG` debugger USB device.
-4. In new terminal, `make openocd` and keep terminal open.
-5. In new terminal, `make gdb` or make `make gdb-opt0`.
-
-![Demo](../doc/09_demo.gif)
+- In early boot code, we transition from the `Hypervisor` privilege level (`EL2` in AArch64) to the
+  `Kernel` (`EL1`) privilege level.
 
 ## Table of Contents
 
-- [Tutorial 08 - Hardware Debugging using JTAG](#tutorial-08---hardware-debugging-using-jtag)
+- [Tutorial 09 - Privilege Level](#tutorial-09---privilege-level)
   - [tl;dr](#tldr)
   - [Table of Contents](#table-of-contents)
   - [Introduction](#introduction)
-  - [Outline](#outline)
-  - [Software Setup](#software-setup)
-  - [Hardware Setup](#hardware-setup)
-    - [Wiring](#wiring)
-  - [Getting ready to connect](#getting-ready-to-connect)
-  - [OpenOCD](#openocd)
-  - [GDB](#gdb)
-    - [Remarks](#remarks)
-      - [Optimization](#optimization)
-      - [GDB control](#gdb-control)
-  - [Notes on USB connection constraints](#notes-on-usb-connection-constraints)
-  - [Additional resources](#additional-resources)
-  - [Acknowledgments](#acknowledgments)
+  - [Scope of this tutorial](#scope-of-this-tutorial)
+  - [Checking for EL2 in the entrypoint](#checking-for-el2-in-the-entrypoint)
+  - [Transition preparation](#transition-preparation)
+  - [Returning from an exception that never happened](#returning-from-an-exception-that-never-happened)
+  - [Test it](#test-it)
 
 ## Introduction
 
-In the upcoming tutorials, we are going to touch sensitive areas of the RPi's SoC that can make our
-debugging life very hard. For example, changing the processor's `Privilege Level` or introducing
-`Virtual Memory`.
+Application-grade CPUs have so-called `privilege levels`, which have different purposes:
 
-A hardware based debugger can sometimes be the last resort when searching for a tricky bug.
-Especially for debugging intricate, architecture-specific HW issues, it will be handy, because in
-this area `QEMU` sometimes can not help, since it abstracts certain features of the HW and doesn't
-simulate down to the very last bit.
+| Typically used for     | AArch64 | RISC-V | x86     |
+| ---------------------- | ------- | ------ | ------- |
+| Userspace applications | EL0     | U/VU   | Ring 3  |
+| OS Kernel              | EL1     | S/VS   | Ring 0  |
+| Hypervisor             | EL2     | HS     | Ring -1 |
+| Low-Level Firmware     | EL3     | M      |         |
 
-So lets introduce `JTAG` debugging. Once set up, it will allow us to single-step through our kernel
-on the real HW. How cool is that?!
+`EL` in AArch64 stands for `Exception Level`. If you want more information regarding the other
+architectures, please have a look at the following links:
+- [x86 privilege rings](https://en.wikipedia.org/wiki/Protection_ring).
+- [RISC-V privilege modes](https://content.riscv.org/wp-content/uploads/2017/12/Tue0942-riscv-hypervisor-waterman.pdf).
 
-## Outline
+At this point, I strongly recommend that you glimpse over `Chapter 3` of the [Programmer’s Guide for
+ARMv8-A] before you continue. It gives a concise overview about the topic.
 
-From kernel perspective, this tutorial is the same as the previous one. We are just wrapping
-infrastructure for JTAG debugging around it.
+[Programmer’s Guide for ARMv8-A]: http://infocenter.arm.com/help/topic/com.arm.doc.den0024a/DEN0024A_v8_architecture_PG.pdf
 
-## Software Setup
+## Scope of this tutorial
 
-We need to add another line to the `config.txt` file from the SD Card:
+By default, the Raspberry will always start executing in `EL2`. Since we are writing a traditional
+`Kernel`, we have to transition into the more appropriate `EL1`.
 
-```toml
-arm_64bit=1
-init_uart_clock=48000000
-enable_jtag_gpio=1
+## Checking for EL2 in the entrypoint
+
+First of all, we need to ensure that we actually execute in `EL2` before we can call respective code
+to transition to `EL1`. Therefore, we add a new checkt to the top of `boot.s`, which parks the CPU
+core should it not be in `EL2`.
+
+```
+// Only proceed if the core executes in EL2. Park it otherwise.
+mrs	x0, CurrentEL
+cmp	x0, {CONST_CURRENTEL_EL2}
+b.ne	.L_parking_loop
 ```
 
-## Hardware Setup
+Afterwards, we continue with preparing the `EL2` -> `EL1` transition by calling
+`prepare_el2_to_el1_transition()` in `boot.rs`:
 
-Unlike microcontroller boards like the `STM32F3DISCOVERY`, which is used in our WG's [Embedded Rust
-Book], the Raspberry Pi does not have an embedded debugger on its board. Hence, you need to buy one.
+```rust
+#[no_mangle]
+pub unsafe extern "C" fn _start_rust(phys_boot_core_stack_end_exclusive_addr: u64) -> ! {
+    prepare_el2_to_el1_transition(phys_boot_core_stack_end_exclusive_addr);
 
-For this tutorial, we will use the [ARM-USB-TINY-H] from OLIMEX. It has a standard [ARM JTAG 20
-connector]. Unfortunately, the RPi does not, so we have to connect it via jumper wires.
+    // Use `eret` to "return" to EL1. This results in execution of kernel_init() in EL1.
+    asm::eret()
+}
+```
 
-[Embedded Rust Book]: https://rust-embedded.github.io/book/start/hardware.html
-[ARM-USB-TINY-H]: https://www.olimex.com/Products/ARM/JTAG/ARM-USB-TINY-H
-[ARM JTAG 20 connector]: http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.dui0499dj/BEHEIHCE.html
+## Transition preparation
 
-### Wiring
+Since `EL2` is more privileged than `EL1`, it has control over various processor features and can
+allow or disallow `EL1` code to use them. One such example is access to timer and counter registers.
+We are already using them since [tutorial 07](../07_timestamps/), so of course we want to keep them.
+Therefore we set the respective flags in the [Counter-timer Hypervisor Control register] and
+additionally set the virtual offset to zero so that we get the real physical value everytime:
 
-<table>
-    <thead>
-        <tr>
-            <th>GPIO #</th>
-			<th>Name</th>
-			<th>JTAG #</th>
-			<th>Note</th>
-			<th width="60%">Diagram</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td></td>
-            <td>VTREF</td>
-            <td>1</td>
-            <td>to 3.3V</td>
-            <td rowspan="8"><img src="../doc/09_wiring_jtag.png"></td>
-        </tr>
-        <tr>
-            <td></td>
-            <td>GND</td>
-            <td>4</td>
-            <td>to GND</td>
-        </tr>
-        <tr>
-            <td>22</td>
-            <td>TRST</td>
-            <td>3</td>
-            <td></td>
-        </tr>
-        <tr>
-            <td>26</td>
-            <td>TDI</td>
-            <td>5</td>
-            <td></td>
-        </tr>
-        <tr>
-            <td>27</td>
-            <td>TMS</td>
-            <td>7</td>
-            <td></td>
-        </tr>
-        <tr>
-            <td>25</td>
-            <td>TCK</td>
-            <td>9</td>
-            <td></td>
-        </tr>
-        <tr>
-            <td>23</td>
-            <td>RTCK</td>
-            <td>11</td>
-            <td></td>
-        </tr>
-        <tr>
-            <td>24</td>
-            <td>TDO</td>
-            <td>13</td>
-            <td></td>
-        </tr>
-    </tbody>
-</table>
+[Counter-timer Hypervisor Control register]:  https://docs.rs/aarch64-cpu/9.0.0/src/aarch64_cpu/registers/cnthctl_el2.rs.html
 
-<p align="center"><img src="../doc/09_image_jtag_connected.jpg" width="50%"></p>
+```rust
+// Enable timer counter registers for EL1.
+CNTHCTL_EL2.write(CNTHCTL_EL2::EL1PCEN::SET + CNTHCTL_EL2::EL1PCTEN::SET);
 
-## Getting ready to connect
+// No offset for reading the counters.
+CNTVOFF_EL2.set(0);
+```
 
-Upon booting, thanks to the changes we made to `config.txt`, the RPi's firmware will configure the
-respective GPIO pins for `JTAG` functionality.
+Next, we configure the [Hypervisor Configuration Register] such that `EL1` runs in `AArch64` mode,
+and not in `AArch32`, which would also be possible.
 
-What is left to do now is to pause the execution of the RPi and then connect
-over `JTAG`. Therefore, we add a new `Makefile` target, `make jtagboot`, which
-uses the `chainboot` approach to load a tiny helper binary onto the RPi that
-just parks the executing core into a waiting state.
+[Hypervisor Configuration Register]: https://docs.rs/aarch64-cpu/9.0.0/src/aarch64_cpu/registers/hcr_el2.rs.html
 
-The helper binary is maintained separately in this repository's [X1_JTAG_boot] folder, and is a
-modified version of the kernel we used in our tutorials so far.
+```rust
+// Set EL1 execution state to AArch64.
+HCR_EL2.write(HCR_EL2::RW::EL1IsAarch64);
+```
 
-[X1_JTAG_boot]: ../X1_JTAG_boot
+## Returning from an exception that never happened
+
+There is actually only one way to transition from a higher EL to a lower EL, which is by way of
+executing the [ERET] instruction.
+
+[ERET]: https://docs.rs/aarch64-cpu/9.0.0/src/aarch64_cpu/asm.rs.html#92-101
+
+This instruction will copy the contents of the [Saved Program Status Register - EL2] to `Current
+Program Status Register - EL1` and jump to the instruction address that is stored in the [Exception
+Link Register - EL2].
+
+This is basically the reverse of what is happening when an exception is taken. You'll learn about
+that in an upcoming tutorial.
+
+[Saved Program Status Register - EL2]: https://docs.rs/aarch64-cpu/9.0.0/src/aarch64_cpu/registers/spsr_el2.rs.html
+[Exception Link Register - EL2]: https://docs.rs/aarch64-cpu/9.0.0/src/aarch64_cpu/registers/elr_el2.rs.html
+
+```rust
+// Set up a simulated exception return.
+//
+// First, fake a saved program status where all interrupts were masked and SP_EL1 was used as a
+// stack pointer.
+SPSR_EL2.write(
+    SPSR_EL2::D::Masked
+        + SPSR_EL2::A::Masked
+        + SPSR_EL2::I::Masked
+        + SPSR_EL2::F::Masked
+        + SPSR_EL2::M::EL1h,
+);
+
+// Second, let the link register point to kernel_init().
+ELR_EL2.set(crate::kernel_init as *const () as u64);
+
+// Set up SP_EL1 (stack pointer), which will be used by EL1 once we "return" to it. Since there
+// are no plans to ever return to EL2, just re-use the same stack.
+SP_EL1.set(phys_boot_core_stack_end_exclusive_addr);
+```
+
+As you can see, we are populating `ELR_EL2` with the address of the `kernel_init()` function that we
+earlier used to call directly from the entrypoint. Finally, we set the stack pointer for `SP_EL1`.
+
+You might have noticed that the stack's address was supplied as a function argument. As you might
+remember, in  `_start()` in `boot.s`, we are already setting up the stack for `EL2`. Since there
+are no plans to ever return to `EL2`, we can just re-use the same stack for `EL1`, so its address is
+forwarded using function arguments.
+
+Lastly, back in `_start_rust()` a call to `ERET` is made:
+
+```rust
+#[no_mangle]
+pub unsafe extern "C" fn _start_rust(phys_boot_core_stack_end_exclusive_addr: u64) -> ! {
+    prepare_el2_to_el1_transition(phys_boot_core_stack_end_exclusive_addr);
+
+    // Use `eret` to "return" to EL1. This results in execution of kernel_init() in EL1.
+    asm::eret()
+}
+```
+
+## Test it
+
+In `main.rs`, we print the `current privilege level` and additionally inspect if the mask bits in
+`SPSR_EL2` made it to `EL1` as well:
 
 ```console
-$ make jtagboot
+$ make chainboot
+[...]
 Minipush 1.0
 
 [MP] ⏳ Waiting for /dev/ttyUSB0
 [MP] ✅ Serial connected
 [MP] 🔌 Please power the target now
+
  __  __ _      _ _                 _
 |  \/  (_)_ _ (_) |   ___  __ _ __| |
 | |\/| | | ' \| | |__/ _ \/ _` / _` |
@@ -170,137 +177,22 @@ Minipush 1.0
            Raspberry Pi 3
 
 [ML] Requesting binary
-[MP] ⏩ Pushing 7 KiB ==========================================🦀 100% 0 KiB/s Time: 00:00:00
+[MP] ⏩ Pushing 14 KiB =========================================🦀 100% 0 KiB/s Time: 00:00:00
 [ML] Loaded! Executing the payload now
 
-[    0.394532] Parking CPU core. Please connect over JTAG now.
+[    0.162546] mingo version 0.9.0
+[    0.162745] Booting on: Raspberry Pi 3
+[    0.163201] Current privilege level: EL1
+[    0.163677] Exception handling state:
+[    0.164122]       Debug:  Masked
+[    0.164511]       SError: Masked
+[    0.164901]       IRQ:    Masked
+[    0.165291]       FIQ:    Masked
+[    0.165681] Architectural timer resolution: 52 ns
+[    0.166255] Drivers loaded:
+[    0.166592]       1. BCM PL011 UART
+[    0.167014]       2. BCM GPIO
+[    0.167371] Timer test, spinning for 1 second
+[    1.167904] Echoing input now
 ```
-
-It is important to keep the USB serial connected and the terminal with the `jtagboot` open and
-running. When we load the actual kernel later, `UART` output will appear here.
-
-## OpenOCD
-
-Next, we need to launch the [Open On-Chip Debugger], aka `OpenOCD` to actually connect the `JTAG`.
-
-[Open On-Chip Debugger]: http://openocd.org
-
-As always, our tutorials try to be as painless as possible regarding dev-tools, which is why we have
-packaged everything into the [dedicated Docker container] that is already used for chainbooting and
-`QEMU`.
-
-[dedicated Docker container]: ../docker/rustembedded-osdev-utils
-
-Connect the Olimex USB JTAG debugger, open a new terminal and in the same folder, type `make
-openocd` (in that order!). You will see some initial output:
-
-```console
-$ make openocd
-[...]
-Open On-Chip Debugger 0.10.0
-[...]
-Info : Listening on port 6666 for tcl connections
-Info : Listening on port 4444 for telnet connections
-Info : clock speed 1000 kHz
-Info : JTAG tap: rpi3.tap tap/device found: 0x4ba00477 (mfg: 0x23b (ARM Ltd.), part: 0xba00, ver: 0x4)
-Info : rpi3.core0: hardware has 6 breakpoints, 4 watchpoints
-Info : rpi3.core1: hardware has 6 breakpoints, 4 watchpoints
-Info : rpi3.core2: hardware has 6 breakpoints, 4 watchpoints
-Info : rpi3.core3: hardware has 6 breakpoints, 4 watchpoints
-Info : Listening on port 3333 for gdb connections
-Info : Listening on port 3334 for gdb connections
-Info : Listening on port 3335 for gdb connections
-Info : Listening on port 3336 for gdb connections
-```
-
-`OpenOCD` has detected the four cores of the RPi, and opened four network ports to which `gdb` can
-now connect to debug the respective core.
-
-## GDB
-
-Finally, we need an `AArch64`-capable version of `gdb`. You guessed right, it's already packaged in
-the osdev container. It can be launched via `make gdb`.
-
-This Makefile target actually does a little more. It builds a special version of our kernel with
-debug information included. This enables `gdb` to show the `Rust` source code line we are currently
-debugging. It also launches `gdb` such that it already loads this debug build (`kernel_for_jtag`).
-
-We can now use the `gdb` commandline to
-  1. Set breakpoints in our kernel
-  2. Load the kernel via JTAG into memory (remember that currently, the RPi is still executing the
-     minimal JTAG boot binary).
-  3. Manipulate the program counter of the RPi to start execution at our kernel's entry point.
-  4. Single-step through its execution.
-
-```console
-$ make gdb
-[...]
->>> target remote :3333                          # Connect to OpenOCD, core0
->>> load                                         # Load the kernel into the RPi's DRAM over JTAG.
-Loading section .text, size 0x2454 lma 0x80000
-Loading section .rodata, size 0xa1d lma 0x82460
-Loading section .got, size 0x10 lma 0x82e80
-Loading section .data, size 0x20 lma 0x82e90
-Start address 0x0000000000080000, load size 11937
-Transfer rate: 63 KB/sec, 2984 bytes/write.
->>> set $pc = 0x80000                            # Set RPI's program counter to the start of the
-                                                 # kernel binary.
->>> break main.rs:158
-Breakpoint 1 at 0x8025c: file src/main.rs, line 158.
->>> cont
->>> step                                         # Single-step through the kernel
->>> step
->>> ...
-```
-
-### Remarks
-
-#### Optimization
-
-When debugging an OS binary, you have to make a trade-off between the granularity at which you can
-step through your Rust source-code and the optimization level of the generated binary. The `make`
-and `make gdb` targets produce a `--release` binary, which includes an optimization level of three
-(`-opt-level=3`). However, in this case, the compiler will inline very aggressively and pack
-together reads and writes where possible. As a result, it will not always be possible to hit
-breakpoints exactly where you want to regarding the line of source code file.
-
-For this reason, the Makefile also provides the `make gdb-opt0` target, which uses `-opt-level=0`.
-Hence, it will allow you to have finer debugging granularity. However, please keep in mind that when
-debugging code that closely deals with HW, a compiler optimization that squashes reads or writes to
-volatile registers can make all the difference in execution. FYI, the demo gif above has been
-recorded with `gdb-opt0`.
-
-#### GDB control
-
-At some point, you may reach delay loops or code that waits on user input from the serial. Here,
-single stepping might not be feasible or work anymore. You can jump over these roadblocks by setting
-other breakpoints beyond these areas, and reach them using the `cont` command.
-
-Pressing `ctrl+c` in `gdb` will stop execution of the RPi again in case you continued it without
-further breakpoints.
-
-## Notes on USB connection constraints
-
-If you followed the tutorial from top to bottom, everything should be fine regarding USB
-connections.
-
-Still, please note that in its current form, our `Makefile` makes implicit assumptions about the
-naming of the connected USB devices. It expects `/dev/ttyUSB0` to be the `UART` device.
-
-Hence, please ensure the following order of connecting the devices to your box:
-  1. Connect the USB serial.
-  2. Afterwards, the Olimex debugger.
-
-This way, the host OS enumerates the devices accordingly. This has to be done only once. It is fine
-to disconnect and connect the serial multiple times, e.g. for kicking off different `make jtagboot`
-runs, while keeping the debugger connected.
-
-## Additional resources
-
-- https://metebalci.com/blog/bare-metal-raspberry-pi-3b-jtag
-- https://www.suse.com/c/debugging-raspberry-pi-3-with-jtag
-
-## Acknowledgments
-
-Thanks to [@naotaco](https://github.com/naotaco) for laying the groundwork for this tutorial.
 
