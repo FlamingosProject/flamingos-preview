@@ -26,7 +26,7 @@
 	path = 07-timestamps
 	url = https://github.com/RustOS2/flamingos.git
 	branch = 07-timestamps
-[submodule "07-hw-debug-jtag"]
-	path = 07-hw-debug-jtag
+[submodule "08-hw-debug-jtag"]
+	path = 08-hw-debug-jtag
 	url = https://github.com/RustOS2/flamingos.git
 	branch = 08-hw-debug-jtag
