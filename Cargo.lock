@@ -8,7 +8,7 @@ version = "10.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a21cd0131c25c438e19cd6a774adf7e3f64f7f4d723022882facc2dee0f8bc9"
 dependencies = [
- "tock-registers 0.9.0",
+ "tock-registers",
 ]
 
 [[package]]
@@ -16,14 +16,8 @@ name = "mingo"
 version = "0.5.0"
 dependencies = [
  "aarch64-cpu",
- "tock-registers 0.8.1",
+ "tock-registers",
 ]
-
-[[package]]
-name = "tock-registers"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "696941a0aee7e276a165a978b37918fd5d22c55c3d6bda197813070ca9c0f21c"
 
 [[package]]
 name = "tock-registers"
