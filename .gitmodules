@@ -30,3 +30,7 @@
 	path = 08-hw-debug-jtag
 	url = https://github.com/RustOS2/flamingos.git
 	branch = 08-hw-debug-jtag
+[submodule "09-privilege-level"]
+	path = 09-privilege-level
+	url = https://github.com/RustOS2/flamingos.git
+	branch = 09-privilege-level
