@@ -38,3 +38,7 @@
 	path = 10-virtual-mem-part1
 	url = https://github.com/RustOS2/flamingos.git
 	branch = 10-virtual-mem-part1
+[submodule "11-exceptions-part1"]
+	path = 11-exceptions-part1
+	url = https://github.com/RustOS2/flamingos.git
+	branch = 11-exceptions-part1
