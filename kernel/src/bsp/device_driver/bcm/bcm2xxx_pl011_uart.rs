@@ -491,7 +491,7 @@ impl exception::asynchronous::interface::IRQHandler for PL011Uart {
             inner.registers.ICR.write(ICR::ALL::CLEAR);
 
             // Check for any kind of RX interrupt.
-            if pending.matches_any(MIS::RXMIS::SET + MIS::RTMIS::SET) {
+            if pending.any_matching_bits_set(MIS::RXMIS::SET + MIS::RTMIS::SET) {
                 // Echo any received characters.
                 while let Some(c) = inner.read_byte(BlockingMode::NonBlocking) {
                     inner.write_byte(c)
