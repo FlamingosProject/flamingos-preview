@@ -4,7 +4,7 @@
 
 //! A panic handler that infinitely waits.
 
-use crate::{cpu, println};
+use crate::{cpu, exception, println};
 use core::panic::PanicInfo;
 
 //--------------------------------------------------------------------------------------------------
@@ -54,6 +54,8 @@ fn panic_prevent_reenter() {
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
+    exception::asynchronous::local_irq_mask();
+
     // Protect against panic infinite loops if any of the following code panics itself.
     panic_prevent_reenter();
 

@@ -11,7 +11,7 @@
 #![no_main]
 #![no_std]
 
-use libkernel::{bsp, console, driver, exception, info, memory, time};
+use libkernel::{bsp, cpu, driver, exception, info, memory, state, time};
 
 /// Early init code.
 ///
@@ -21,7 +21,7 @@ use libkernel::{bsp, console, driver, exception, info, memory, time};
 /// - The init calls in this function must appear in the correct order:
 ///     - MMU + Data caching must be activated at the earliest. Without it, any atomic operations,
 ///       e.g. the yet-to-be-introduced spinlocks in the device drivers (which currently employ
-///       NullLocks instead of spinlocks), will fail to work (properly) on the RPi SoCs.
+///       IRQSafeNullLocks instead of spinlocks), will fail to work (properly) on the RPi SoCs.
 #[no_mangle]
 unsafe fn kernel_init() -> ! {
     use memory::mmu::interface::MMU;
@@ -38,8 +38,13 @@ unsafe fn kernel_init() -> ! {
     }
 
     // Initialize all device drivers.
-    driver::driver_manager().init_drivers();
-    // println! is usable from here on.
+    driver::driver_manager().init_drivers_and_irqs();
+
+    // Unmask interrupts on the boot CPU core.
+    exception::asynchronous::local_irq_unmask();
+
+    // Announce conclusion of the kernel_init() phase.
+    state::state_manager().transition_to_single_core_main();
 
     // Transition from unsafe to safe.
     kernel_main()
@@ -47,8 +52,6 @@ unsafe fn kernel_init() -> ! {
 
 /// The main function running after the early init.
 fn kernel_main() -> ! {
-    use console::console;
-
     info!("{}", libkernel::version());
     info!("Booting on: {}", bsp::board_name());
 
@@ -69,12 +72,9 @@ fn kernel_main() -> ! {
     info!("Drivers loaded:");
     driver::driver_manager().enumerate();
 
-    info!("Echoing input now");
+    info!("Registered IRQ handlers:");
+    exception::asynchronous::irq_manager().print_handler();
 
-    // Discard any spurious received characters before going into echo mode.
-    console().clear_rx();
-    loop {
-        let c = console().read_byte();
-        console().write_byte(c);
-    }
+    info!("Echoing input now");
+    cpu::wait_forever();
 }

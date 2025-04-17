@@ -10,8 +10,11 @@
 //! - <https://developer.arm.com/documentation/ddi0183/latest>
 
 use crate::{
-    bsp::device_driver::common::MMIODerefWrapper, console, cpu, driver, synchronization,
-    synchronization::NullLock,
+    bsp::device_driver::common::MMIODerefWrapper,
+    console, cpu, driver,
+    exception::{self, asynchronous::IRQNumber},
+    synchronization,
+    synchronization::IRQSafeNullLock,
 };
 use core::fmt;
 use tock_registers::{
@@ -134,6 +137,52 @@ register_bitfields! {
         ]
     ],
 
+    /// Interrupt FIFO Level Select Register.
+    IFLS [
+        /// Receive interrupt FIFO level select. The trigger points for the receive interrupt are as
+        /// follows.
+        RXIFLSEL OFFSET(3) NUMBITS(5) [
+            OneEigth = 0b000,
+            OneQuarter = 0b001,
+            OneHalf = 0b010,
+            ThreeQuarters = 0b011,
+            SevenEights = 0b100
+        ]
+    ],
+
+    /// Interrupt Mask Set/Clear Register.
+    IMSC [
+        /// Receive timeout interrupt mask. A read returns the current mask for the UARTRTINTR
+        /// interrupt.
+        ///
+        /// - On a write of 1, the mask of the UARTRTINTR interrupt is set.
+        /// - A write of 0 clears the mask.
+        RTIM OFFSET(6) NUMBITS(1) [
+            Disabled = 0,
+            Enabled = 1
+        ],
+
+        /// Receive interrupt mask. A read returns the current mask for the UARTRXINTR interrupt.
+        ///
+        /// - On a write of 1, the mask of the UARTRXINTR interrupt is set.
+        /// - A write of 0 clears the mask.
+        RXIM OFFSET(4) NUMBITS(1) [
+            Disabled = 0,
+            Enabled = 1
+        ]
+    ],
+
+    /// Masked Interrupt Status Register.
+    MIS [
+        /// Receive timeout masked interrupt status. Returns the masked interrupt state of the
+        /// UARTRTINTR interrupt.
+        RTMIS OFFSET(6) NUMBITS(1) [],
+
+        /// Receive masked interrupt status. Returns the masked interrupt state of the UARTRXINTR
+        /// interrupt.
+        RXMIS OFFSET(4) NUMBITS(1) []
+    ],
+
     /// Interrupt Clear Register.
     ICR [
         /// Meta field for all pending interrupts.
@@ -152,7 +201,10 @@ register_structs! {
         (0x28 => FBRD: WriteOnly<u32, FBRD::Register>),
         (0x2c => LCR_H: WriteOnly<u32, LCR_H::Register>),
         (0x30 => CR: WriteOnly<u32, CR::Register>),
-        (0x34 => _reserved3),
+        (0x34 => IFLS: ReadWrite<u32, IFLS::Register>),
+        (0x38 => IMSC: ReadWrite<u32, IMSC::Register>),
+        (0x3C => _reserved3),
+        (0x40 => MIS: ReadOnly<u32, MIS::Register>),
         (0x44 => ICR: WriteOnly<u32, ICR::Register>),
         (0x48 => @END),
     }
@@ -179,7 +231,7 @@ struct PL011UartInner {
 
 /// Representation of the UART.
 pub struct PL011Uart {
-    inner: NullLock<PL011UartInner>,
+    inner: IRQSafeNullLock<PL011UartInner>,
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -246,6 +298,14 @@ impl PL011UartInner {
         self.registers
             .LCR_H
             .write(LCR_H::WLEN::EightBit + LCR_H::FEN::FifosEnabled);
+
+        // Set RX FIFO fill level at 1/8.
+        self.registers.IFLS.write(IFLS::RXIFLSEL::OneEigth);
+
+        // Enable RX IRQ + RX timeout IRQ.
+        self.registers
+            .IMSC
+            .write(IMSC::RXIM::Enabled + IMSC::RTIM::Enabled);
 
         // Turn the UART on.
         self.registers
@@ -332,7 +392,7 @@ impl PL011Uart {
     /// - The user must ensure to provide a correct MMIO start address.
     pub const unsafe fn new(mmio_start_addr: usize) -> Self {
         Self {
-            inner: NullLock::new(PL011UartInner::new(mmio_start_addr)),
+            inner: IRQSafeNullLock::new(PL011UartInner::new(mmio_start_addr)),
         }
     }
 }
@@ -343,12 +403,28 @@ impl PL011Uart {
 use synchronization::interface::Mutex;
 
 impl driver::interface::DeviceDriver for PL011Uart {
+    type IRQNumberType = IRQNumber;
+
     fn compatible(&self) -> &'static str {
         Self::COMPATIBLE
     }
 
     unsafe fn init(&self) -> Result<(), &'static str> {
         self.inner.lock(|inner| inner.init());
+
+        Ok(())
+    }
+
+    fn register_and_enable_irq_handler(
+        &'static self,
+        irq_number: &Self::IRQNumberType,
+    ) -> Result<(), &'static str> {
+        use exception::asynchronous::{irq_manager, IRQHandlerDescriptor};
+
+        let descriptor = IRQHandlerDescriptor::new(*irq_number, Self::COMPATIBLE, self);
+
+        irq_manager().register_handler(descriptor)?;
+        irq_manager().enable(irq_number);
 
         Ok(())
     }
@@ -405,3 +481,24 @@ impl console::interface::Statistics for PL011Uart {
 }
 
 impl console::interface::Console for PL011Uart {}
+
+impl exception::asynchronous::interface::IRQHandler for PL011Uart {
+    fn handle(&self) -> Result<(), &'static str> {
+        self.inner.lock(|inner| {
+            let pending = inner.registers.MIS.extract();
+
+            // Clear all pending IRQs.
+            inner.registers.ICR.write(ICR::ALL::CLEAR);
+
+            // Check for any kind of RX interrupt.
+            if pending.matches_any(MIS::RXMIS::SET + MIS::RTMIS::SET) {
+                // Echo any received characters.
+                while let Some(c) = inner.read_byte(BlockingMode::NonBlocking) {
+                    inner.write_byte(c)
+                }
+            }
+        });
+
+        Ok(())
+    }
+}

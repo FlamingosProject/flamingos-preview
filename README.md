@@ -1,915 +1,774 @@
-# Tutorial 12 - Integrated Testing
+# Tutorial 13 - Exceptions Part 2: Peripheral IRQs
 
 ## tl;dr
 
-- We implement our own integrated test framework using `Rust`'s [custom_test_frameworks] feature by
-  enabling `Unit Tests` and `Integration Tests` using `QEMU`.
-- It is also possible to have test automation for I/O with the kernel's `console` (provided over
-  `UART` in our case). That is, sending strings/characters to the console and expecting specific
-  answers in return.
-- The already existing basic `boot test` remains unchanged.
+- We write `device drivers` for the two interrupt controllers on the **Raspberry Pi 3** (`Broadcom`
+  custom controller) and **Pi 4** (`ARM` Generic Interrupt Controller v2, `GICv2`).
+- Modularity is ensured by interfacing everything through a trait named `IRQManager`.
+- Handling for our first peripheral IRQs is implemented: The `UART`'s receive IRQs.
 
-<img src="../doc/12_demo.gif" width="880">
+![Header](../doc/14_header.png)
 
 ## Table of Contents
 
-- [Tutorial 12 - Integrated Testing](#tutorial-12---integrated-testing)
+- [Tutorial 13 - Exceptions Part 2: Peripheral IRQs](#tutorial-13---exceptions-part-2-peripheral-irqs)
   - [tl;dr](#tldr)
   - [Table of Contents](#table-of-contents)
   - [Introduction](#introduction)
-  - [Challenges](#challenges)
-    - [Acknowledgements](#acknowledgements)
-  - [Folder Restructuring](#folder-restructuring)
+  - [Different Controllers: A Usecase for Abstraction](#different-controllers-a-usecase-for-abstraction)
+  - [New Challenges: Reentrancy](#new-challenges-reentrancy)
   - [Implementation](#implementation)
-    - [Test Organization](#test-organization)
-    - [Enabling `custom_test_frameworks` for Unit Tests](#enabling-custom_test_frameworks-for-unit-tests)
-      - [The Unit Test Runner](#the-unit-test-runner)
-      - [Calling the Test `main()` Function](#calling-the-test-main-function)
-    - [Quitting QEMU with user-defined Exit Codes](#quitting-qemu-with-user-defined-exit-codes)
-      - [Exiting Unit Tests](#exiting-unit-tests)
-    - [Controlling Test Kernel Execution](#controlling-test-kernel-execution)
-      - [Wrapping QEMU Test Execution](#wrapping-qemu-test-execution)
-    - [Writing Unit Tests](#writing-unit-tests)
-    - [Integration Tests](#integration-tests)
-      - [Test Harness](#test-harness)
-      - [No Test Harness](#no-test-harness)
-      - [Overriding Panic Behavior](#overriding-panic-behavior)
-    - [Console Tests](#console-tests)
+    - [The Kernel's Interfaces for Interrupt Handling](#the-kernels-interfaces-for-interrupt-handling)
+      - [Uniquely Identifying an IRQ](#uniquely-identifying-an-irq)
+        - [The BCM IRQ Number Scheme](#the-bcm-irq-number-scheme)
+        - [The GICv2 IRQ Number Scheme](#the-gicv2-irq-number-scheme)
+      - [Registering IRQ Handlers](#registering-irq-handlers)
+      - [Handling Pending IRQs](#handling-pending-irqs)
+    - [Reentrancy: What to protect?](#reentrancy-what-to-protect)
+    - [The Interrupt Controller Device Drivers](#the-interrupt-controller-device-drivers)
+      - [The BCM Driver (Pi 3)](#the-bcm-driver-pi-3)
+        - [Peripheral Controller Register Access](#peripheral-controller-register-access)
+        - [The IRQ Handler Table](#the-irq-handler-table)
+      - [The GICv2 Driver (Pi 4)](#the-gicv2-driver-pi-4)
+        - [GICC Details](#gicc-details)
+        - [GICD Details](#gicd-details)
   - [Test it](#test-it)
 
 ## Introduction
 
-Through the course of the previous tutorials, we silently started to adopt a kind of anti-pattern:
-Using the kernel's main function to not only boot the target, but also test or showcase
-functionality. For example:
-  - Stalling execution during boot to test the kernel's timekeeping code by spinning for 1 second.
-  - Willingly causing exceptions to see the exception handler running.
+In [tutorial 11], we laid the groundwork for exception handling from the processor architecture
+side. Handler stubs for the different exception types were set up, and a first glimpse at exception
+handling was presented by causing a `synchronous` exception by means of a `page fault`.
 
-The feature set of the kernel is now rich enough so that it makes sense to introduce proper
-integrated testing modeled after Rust's [native testing framework]. This tutorial extends our single
-existing kernel test with three new testing facilities:
-  - Classic `Unit Tests`.
-  - [Integration Tests] (self-contained tests stored in the `$CRATE/tests/` directory).
-  - `Console I/O Tests`. These are integration tests acting on external stimuli - aka `console`
-    input. Sending strings/characters to the console and expecting specific answers in return.
+[tutorial 11]: ../11_exceptions_part1_groundwork
 
-[native testing framework]: https://doc.rust-lang.org/book/ch11-00-testing.html
+In this tutorial, we will add a first level of support for one of the three types of `asynchronous`
+exceptions that are defined for `AArch64`: `IRQs`. The overall goal for this tutorial is to get rid
+of the  busy-loop at the end of our current `kernel_main()` function, which actively polls the
+`UART` for newly received characters. Instead, we will let the processor idle and wait for the
+`UART`'s RX IRQs, which indicate that new characters were received. A respective `IRQ` service
+routine, provided by the `UART` driver, will run in response to the `IRQ` and print the characters.
 
-## Challenges
+## Different Controllers: A Usecase for Abstraction
 
-Testing Rust `#![no_std]` code like our kernel is, at the point of writing this tutorial, not an
-easy endeavor. The short version is: We cannot use Rust's [native testing framework] straight away.
-Utilizing the `#[test]` attribute macro and running `cargo test` would throw compilation errors,
-because there are dependencies on the standard library.
+One very exciting aspect of this tutorial is that the `Pi 3` and the `Pi 4` feature completely
+different interrupt controllers. This is also a first in all of the tutorial series. Until now, both
+Raspberrys did not need differentiation with respect to their devices.
 
-[native testing framework]: https://doc.rust-lang.org/book/ch11-00-testing.html
+The `Pi 3` has a very simple custom controller made by Broadcom (BCM), the manufacturer of the Pi's
+`System-on-Chip`. The `Pi 4` features an implementation of `ARM`'s Generic Interrupt Controller
+version 2 (`GICv2`). Since ARM's GIC controllers are the prevalent interrupt controllers in ARM
+application procesors, it is very beneficial to finally have it on the Raspberry Pi. It will enable
+people to learn about one of the most common building blocks in ARM-based embedded computing.
 
-We have to fall back to Rust's unstable [custom_test_frameworks] feature. It relieves us from
-dependencies on the standard library, but comes at the cost of having a reduced feature set. Instead
-of annotating functions with `#[test]`, the `#[test_case]` attribute must be used. Additionally, we
-need to write a `test_runner` function, which is supposed to execute all the functions annotated
-with `#[test_case]`. This is barely enough to get `Unit Tests` running, though. There will be some
-more challenges that need be solved for getting `Integration Tests` running as well.
+This also means that we can finally make full use of all the infrastructure for abstraction that we
+prepared already. We will design an `IRQManager` interface trait and implement it in both controller
+drivers. The generic part of our `kernel` code will only be exposed to this trait (compare to the
+diagram in the [tl;dr] section). This common idiom of *program to an interface, not an
+implementation* enables a clean abstraction and makes the code modular and pluggable.
 
-Please note that for automation purposes, all testing will be done in `QEMU` and not on real
-hardware.
+[tl;dr]: #tldr
 
-[custom_test_frameworks]: https://doc.rust-lang.org/unstable-book/language-features/custom-test-frameworks.html
-[Integration Tests]: https://doc.rust-lang.org/book/ch11-03-test-organization.html#integration-tests
+## New Challenges: Reentrancy
 
-### Acknowledgements
+Enabling interrupts also poses new challenges with respect to protecting certain code sections in
+the kernel from being [re-entered]. Please read the linked article for background on that topic.
 
-On this occasion, kudos to [@phil-opp] for his x86-based [testing] article. It helped a lot in
-putting together this tutorial. Please go ahead and read it for a different perspective and
-additional insights.
+[re-entered]: https://en.wikipedia.org/wiki/Reentrancy_(computing)
 
-[testing]: https://os.phil-opp.com/testing
+Our `kernel` is still running on a single core. For this reason, we are still using our `NullLock`
+pseudo-locks for `Critical Sections` or `shared resources`, instead of real `Spinlocks`. Hence,
+interrupt handling at this point in time does not put us at risk of running into one of those
+dreaded `deadlocks`, which is one of several side-effects that reentrancy can cause. For example, a
+`deadlock` because of interrupts can happen happen when the executing CPU core has locked a
+`Spinlock` at the beginning of a function, an IRQ happens, and the IRQ service routine is trying to
+execute the same function. Since the lock is already locked, the core would spin forever waiting for
+it to be released.
 
-## Folder Restructuring
-
-For reasons explained later, in this tutorial, we need to add two support crates next to our main
-kernel crate. To keep everything organized in separate directories, we are switching to what `cargo`
-calls a [virtual manifest]. The kernel crate moves to `$ROOT/kernel`, and the support crates will go
-into `$ROOT/libraries/`. The `Cargo.toml` in the `$ROOT` folder desribes this layout:
-
-```toml
-[workspace]
-
-members = [
-        "libraries/*",
-        "kernel"
-]
-```
-
-[virtual manifest]: https://doc.rust-lang.org/cargo/reference/workspaces.html#virtual-manifest
+There is no straight-forward way to tell if a function is `reentrantcy`-safe or not. It usually
+needs careful manual checking to conclude. Even though it might be technically safe to `re-enter` a
+function, sometimes you don't want that to happen for functional reasons. For example, printing of a
+string should not be interrupted by a an interrupt service routine that starts printing another
+string, so that the output mixes. In the course of this tutorial, we will check and see where we
+want to protect against `reentrancy`.
 
 ## Implementation
 
-We introduce two new `Makefile` targets:
+Okay, let's start. The following sections cover the the implementation in a top-down fashion,
+starting with the trait that interfaces all the `kernel` components to each other.
 
-```console
-$ make test_unit
-$ make test_integration
-```
+### The Kernel's Interfaces for Interrupt Handling
 
-In essence, the `make test_*` targets will execute `cargo test` instead of `cargo rustc`. The
-details will be explained in due course. The rest of the tutorial will explain as chronologically as
-possible what happens when `make test_*` aka `cargo test` runs.
+First, we design the `IRQManager` trait that interrupt controller drivers must implement. The
+minimal set of functionality that we need for starters is:
 
-Please note that the new targets are added to the existing `make test` target, so this is now your
-one-stop target to execute all possible tests for the kernel:
+1. Registering an IRQ `handler` for a given IRQ `number`.
+2. Enabling an IRQ (from the controller side).
+3. Handling pending IRQs.
+4. Printing the list of registered IRQ handlers.
 
-```Makefile
-test: test_boot test_unit test_integration
-```
-
-### Test Organization
-
-Until now, our kernel crate was a so-called `binary crate`. As [explained in the official Rust
-book], this crate type disallows having `integration tests`. Quoting the book:
-
-[explained in the official Rust book]: https://doc.rust-lang.org/book/ch11-03-test-organization.html#integration-tests-for-binary-crates
-
-> If our project is a binary crate that only contains a _src/main.rs_ file and doesn’t have a
-> _src/lib.rs_ file, we can’t create integration tests in the _tests_ directory and bring functions
-> defined in the _src/main.rs_ file into scope with a `use` statement. Only library crates expose
-> functions that other crates can use; binary crates are meant to be run on their own.
-
-> This is one of the reasons Rust projects that provide a binary have a straightforward
-> _src/main.rs_ file that calls logic that lives in the _src/lib.rs_ file. Using that structure,
-> integration tests _can_ test the library crate with `use` to make the important functionality
-> available. If the important functionality works, the small amount of code in the _src/main.rs_
-> file will work as well, and that small amount of code doesn’t need to be tested.
-
-So let's do that first: We add a `lib.rs` to our crate that aggregates and exports the lion's share
-of the kernel code. The `main.rs` file is stripped down to the minimum. It only keeps the
-`kernel_init() -> !` and `kernel_main() -> !` functions, everything else is brought into scope with
-`use` statements.
-
-Since it is not possible to use `kernel` as the name for both the library and the binary part of the
-crate, new entries in `$ROOT/kernel/Cargo.toml` are needed to differentiate the names. What's more,
-`cargo test` would try to compile and run `unit tests` for both. In our case, it will be sufficient
-to have all the unit test code in `lib.rs`, so test generation for `main.rs` can be disabled in
-`Cargo.toml` as well through the `test` flag:
-
-```toml
-[lib]
-name = "libkernel"
-test = true
-
-[[bin]]
-name = "kernel"
-test = false
-```
-
-### Enabling `custom_test_frameworks` for Unit Tests
-
-In `lib.rs`, we add the following headers to get started with `custom_test_frameworks`:
+The trait is defined as `exception::asynchronous::interface::IRQManager`:
 
 ```rust
-// Testing
-#![cfg_attr(test, no_main)]
-#![feature(custom_test_frameworks)]
-#![reexport_test_harness_main = "test_main"]
-#![test_runner(crate::test_runner)]
+pub trait IRQManager {
+    /// The IRQ number type depends on the implementation.
+    type IRQNumberType: Copy;
+
+    /// Register a handler.
+    fn register_handler(
+        &self,
+        irq_handler_descriptor: super::IRQHandlerDescriptor<Self::IRQNumberType>,
+    ) -> Result<(), &'static str>;
+
+    /// Enable an interrupt in the controller.
+    fn enable(&self, irq_number: &Self::IRQNumberType);
+
+    /// Handle pending interrupts.
+    ///
+    /// This function is called directly from the CPU's IRQ exception vector. On AArch64,
+    /// this means that the respective CPU core has disabled exception handling.
+    /// This function can therefore not be preempted and runs start to finish.
+    ///
+    /// Takes an IRQContext token to ensure it can only be called from IRQ context.
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    fn handle_pending_irqs<'irq_context>(
+        &'irq_context self,
+        ic: &super::IRQContext<'irq_context>,
+    );
+
+    /// Print list of registered handlers.
+    fn print_handler(&self) {}
+}
 ```
 
-Since this is a library now, we do not keep the `#![no_main]` inner attribute that `main.rs` has,
-because a library has no `main()` entry function, so the attribute does not apply. When compiling
-for testing, though, it is still needed. The reason is that `cargo test` basically turns `lib.rs`
-into a binary again by inserting a generated `main()` function (which is then calling a function
-that runs all the unit tests, but more about that in a second...).
+#### Uniquely Identifying an IRQ
 
-However, since  our kernel code [overrides the compiler-inserted `main` shim] by way of using
-`#![no_main]`, we need the same when `cargo test` is producing its test kernel binary. After all,
-what we want is a minimal kernel that boots on the target and runs its own unit tests. Therefore, we
-conditionally set this attribute (`#![cfg_attr(test, no_main)]`) when the `test` flag is set, which
-it is when `cargo test` runs.
+The first member of the trait is the [associated type] `IRQNumberType`. The following explains why
+we make it customizable for the implementor and do not define the type as a plain integer right
+away.
 
-[overrides the compiler-inserted `main` shim]: https://doc.rust-lang.org/unstable-book/language-features/lang-items.html?highlight=no_main#writing-an-executable-without-stdlib
+Interrupts can generally be characterizied with the following properties:
 
-#### The Unit Test Runner
+[associated type]: https://doc.rust-lang.org/book/ch19-03-advanced-traits.html#specifying-placeholder-types-in-trait-definitions-with-associated-types
 
-The `#![test_runner(crate::test_runner)]` attribute declares the path of the test runner function
-that we are supposed to provide. This is the one that will be called by the `cargo test` generated
-`main()` function. Here is the implementation in `lib.rs`:
+1. Software-generated vs hardware-generated.
+2. Private vs shared.
+
+Different interrupt controllers take different approaches at categorizing and numbering IRQs that
+have one or the other property. Often times, this leads to situations where a plain integer does not
+suffice to uniquely identify an IRQ, and makes it necessary to encode additional information in the
+used type. Letting the respective interrupt controller driver define `IRQManager::IRQNumberType`
+itself addresses this issue. The rest of the `BSP` must then conditionally use this type.
+
+##### The BCM IRQ Number Scheme
+
+The `BCM` controller of the `Raspberry Pi 3`, for example, is composed of two functional parts: A
+**local** controller and a **peripheral** controller. The BCM's **local controller** handles all
+`private` IRQs, which means private SW-generated IRQs and IRQs of private HW devices. An example for
+the latter would be the `ARMv8` timer. Each  CPU core has its own private instance of it. The BCM's
+**peripheral controller** handles all IRQs of `non-private` HW devices such as the `UART` (if those
+IRQs can be declared as `shared` according to our taxonomy above is a different discussion, because
+the BCM controller allows these HW interrupts to be routed to _only one CPU core at a time_).
+
+The IRQ numbers of the BCM **local controller** range from `0..11`. The numbers of the **peripheral
+controller** range from `0..63`. This demonstrates why a primitive integer type would not be
+sufficient to uniquely encode the IRQs, because their ranges overlap. In the driver for the `BCM`
+controller, we therefore define the associated type as follows:
 
 ```rust
-/// The default runner for unit tests.
-pub fn test_runner(tests: &[&test_types::UnitTest]) {
-    // This line will be printed as the test header.
-    println!("Running {} tests", tests.len());
+pub type LocalIRQ = BoundedUsize<{ InterruptController::MAX_LOCAL_IRQ_NUMBER }>;
+pub type PeripheralIRQ = BoundedUsize<{ InterruptController::MAX_PERIPHERAL_IRQ_NUMBER }>;
 
-    for (i, test) in tests.iter().enumerate() {
-        print!("{:>3}. {:.<58}", i + 1, test.name);
+/// Used for the associated type of trait [`exception::asynchronous::interface::IRQManager`].
+#[derive(Copy, Clone)]
+#[allow(missing_docs)]
+pub enum IRQNumber {
+    Local(LocalIRQ),
+    Peripheral(PeripheralIRQ),
+}
+```
 
-        // Run the actual test.
-        (test.test_func)();
+The type `BoundedUsize` is a newtype around an `usize` that uses a [const generic] to ensure that
+the value of the encapsulated IRQ number is in the allowed range (e.g. `0..MAX_LOCAL_IRQ_NUMBER` for
+`LocalIRQ`, with `MAX_LOCAL_IRQ_NUMBER == 11`).
 
-        // Failed tests call panic!(). Execution reaches here only if the test has passed.
-        println!("[ok]")
+[const generic]: https://github.com/rust-lang/rfcs/blob/master/text/2000-const-generics.md
+
+##### The GICv2 IRQ Number Scheme
+
+The `GICv2` in the `Raspberry Pi 4`, on the other hand, uses a different scheme. IRQ numbers `0..31`
+are for `private` IRQs. Those are further subdivided into `SW-generated` (SGIs, `0..15`) and
+`HW-generated` (PPIs, Private Peripheral Interrupts, `16..31`). Numbers `32..1019` are for `shared
+hardware-generated` interrupts (SPI, Shared Peripheral Interrupts).
+
+There are no overlaps, so this scheme enables us to actually have a plain integer as a unique
+identifier for the IRQs. We define the type as follows:
+
+```rust
+/// Used for the associated type of trait [`exception::asynchronous::interface::IRQManager`].
+pub type IRQNumber = BoundedUsize<{ GICv2::MAX_IRQ_NUMBER }>;
+```
+
+#### Registering IRQ Handlers
+
+To enable the controller driver to manage interrupt handling, it must know where to find respective
+handlers, and it must know how to call them. For the latter, we define an `IRQHandler` trait in
+`exception::asynchronous` that must be implemented by any SW entity that wants to handle IRQs:
+
+```rust
+/// Implemented by types that handle IRQs.
+pub trait IRQHandler {
+    /// Called when the corresponding interrupt is asserted.
+    fn handle(&self) -> Result<(), &'static str>;
+}
+```
+
+The `PL011Uart` driver gets the honors for being our first driver to ever implement this trait. In
+this tutorial, the `RX IRQ` and the `RX Timeout IRQ` will be configured. This means that the
+`PL011Uart` will assert it's interrupt line when one of following conditions is met:
+
+1. `RX IRQ`: The RX FIFO fill level is equal or more than the configured trigger level (which will be 1/8 of
+   the total FIFO size in our case).
+1. `RX Timeout IRQ`: The RX FIFO fill level is greater than zero, but less than the configured fill
+   level, and the characters have not been pulled for a certain amount of time. The exact time is
+   not documented in the respective `PL011Uart` datasheet. Usually, it is a single-digit multiple of
+   the time it takes to receive or transmit one character on the serial line.
+
+ In the handler, our standard scheme of echoing any received characters back to the host is used:
+
+```rust
+impl exception::asynchronous::interface::IRQHandler for PL011Uart {
+    fn handle(&self) -> Result<(), &'static str> {
+        self.inner.lock(|inner| {
+            let pending = inner.registers.MIS.extract();
+
+            // Clear all pending IRQs.
+            inner.registers.ICR.write(ICR::ALL::CLEAR);
+
+            // Check for any kind of RX interrupt.
+            if pending.matches_any(MIS::RXMIS::SET + MIS::RTMIS::SET) {
+                // Echo any received characters.
+                while let Some(c) = inner.read_char_converting(BlockingMode::NonBlocking) {
+                    inner.write_char(c)
+                }
+            }
+        });
+
+        Ok(())
     }
 }
 ```
 
-The function signature shows that `test_runner` takes one argument: A slice of
-`test_types::UnitTest` references. This type definition lives in an external crate stored at
-`$ROOT/libraries/test_types`. It is external because the type is also needed for a self-made
-[procedural macro] that we'll use to write unit tests, and procedural macros _have_ to live in their
-own crate. So to avoid a circular dependency between kernel and proc-macro, this split was needed.
-Anyways, here is the type definition:
-
-[procedural macro]: https://doc.rust-lang.org/reference/procedural-macros.html
+Registering and enabling handlers in the interrupt controller is supposed to be done by the
+respective drivers themselves. Therefore, we added a new function to the standard device driver
+trait in `driver::interface::DeviceDriver` that must be implemented if IRQ handling is supported:
 
 ```rust
-/// Unit test container.
-pub struct UnitTest {
-    /// Name of the test.
-    pub name: &'static str,
-
-    /// Function pointer to the test.
-    pub test_func: fn(),
-}
-```
-
-A `UnitTest` provides a name and a classic function pointer to the unit test function. The
-`test_runner` just iterates over the slice, prints the respective test's name and calls the test
-function.
-
-The convetion is that as long as the test function does not `panic!`, the test was successful.
-
-#### Calling the Test `main()` Function
-
-The last of the attributes we added is `#![reexport_test_harness_main = "test_main"]`. Remember that
-our kernel uses the `no_main` attribute, and that we also set it for the test compilation. We did
-that because we wrote our own `_start()` function, which kicks off the following call chain during
-kernel boot:
-
-|     | Function                 | File                    |
-| --- | ------------------------ | ----------------------- |
-| 1.  | `_start()`               | The library's `boot.s`  |
-| 2.  | (some more aarch64 code) | The library's `boot.rs` |
-| 3.  | `kernel_init()`          | `main.rs`               |
-| 4.  | `kernel_main()`          | `main.rs`               |
-
-A function named `main` is never called. Hence, the `main()` function generated by `cargo test`
-would be silently dropped, and therefore the tests would never be executed. As you can see, the
-first function getting called in our carved-out `main.rs` is `kernel_init()`. So in order to get the
-tests to execute, we add a test-environment version of `kernel_init()` to `lib.rs` as well
-(conditional compilation ensures it is only present when the test flag is set), and call the `cargo
-test` generated `main()` function from there.
-
-This is where `#![reexport_test_harness_main = "test_main"]` finally comes into picture. It declares
-the name of the generated main function so that we can manually call it. Here is the final
-implementation in `lib.rs`:
-
-```rust
-/// The `kernel_init()` for unit tests.
-#[cfg(test)]
-#[no_mangle]
-unsafe fn kernel_init() -> ! {
-    exception::handling_init();
-    bsp::driver::qemu_bring_up_console();
-
-    test_main();
-
-    cpu::qemu_exit_success()
-}
-```
-
-Note the call to `bsp::driver::qemu_bring_up_console()`. Since we are running all our tests inside
-`QEMU`, we need to ensure that whatever peripheral implements the kernel's `console` interface is
-initialized, so that we can print from our tests. If you recall [tutorial 03], bringing up
-peripherals in `QEMU` might not need the full initialization as is needed on real hardware (setting
-clocks, config registers, etc...) due to the abstractions in `QEMU`'s emulation code. So this is an
-opportunity to cut down on setup code.
-
-[tutorial 03]: ../03_hacky_hello_world
-
-As a matter of fact, for the `Raspberrys`, nothing needs to be done, so the function is empy. But
-this might be different for other hardware emulated by `QEMU`, so it makes sense to introduce the
-function now to make it easier in case new `BSPs` are added to the kernel in the future.
-
-Next, the reexported `test_main()` is called, which will call our `test_runner()` which finally
-prints the unit test names and executes them.
-
-### Quitting QEMU with user-defined Exit Codes
-
-Let's recap where we are right now:
-
-We've enabled `custom_test_frameworks` in `lib.rs` to a point where, when using a `make test_unit`
-target, the code gets compiled to a test kernel binary that eventually executes all the
-(yet-to-be-defined) `UnitTest` instances by executing all the way from `_start()` to our
-`test_runner()` function.
-
-Through mechanisms that are explained later, `cargo` will now instantiate a `QEMU` process that
-exectues this test kernel. The question now is: How is test success/failure communicated to `cargo`?
-Answer: `cargo` inspects `QEMU`'s [exit status]:
-
-  - `0` translates to testing was successful.
-  - `non-0` means failure.
-
-Hence, we need a clever trick now so that our Rust kernel code can get `QEMU` to exit itself with an
-exit status that the kernel code supplies. In [@phil-opp]'s testing article, you [learned how to do
-this] for `x86 QEMU` systems by using a special `ISA` debug-exit device. Unfortunately, we can't
-have that one for our `aarch64` system because it is not compatible.
-
-In our case, we can leverage the ARM [semihosting] emulation of `QEMU` and do a `SYS_EXIT`
-semihosting call with an additional parameter for the exit code. I've written a separate crate,
-[qemu-exit], to do this. So let us import it and utilize it in `_arch/aarch64/cpu.rs` to provide the
-following exit calls for the kernel:
-
-```rust
-//--------------------------------------------------------------------------------------------------
-// Testing
-//--------------------------------------------------------------------------------------------------
-#[cfg(feature = "test_build")]
-use qemu_exit::QEMUExit;
-
-#[cfg(feature = "test_build")]
-const QEMU_EXIT_HANDLE: qemu_exit::AArch64 = qemu_exit::AArch64::new();
-
-/// Make the host QEMU binary execute `exit(1)`.
-#[cfg(feature = "test_build")]
-pub fn qemu_exit_failure() -> ! {
-    QEMU_EXIT_HANDLE.exit_failure()
-}
-
-/// Make the host QEMU binary execute `exit(0)`.
-#[cfg(feature = "test_build")]
-pub fn qemu_exit_success() -> ! {
-    QEMU_EXIT_HANDLE.exit_success()
-}
-```
-
-[Click here] in case you are interested in the implementation. Note that for the functions to work,
-the `-semihosting` flag must be added to the `QEMU` invocation.
-
-You might have also noted the `#[cfg(feature = "test_build")]`. In the `Makefile`, we ensure that
-this feature is only enabled when `cargo test` runs. This way, it is ensured that testing-specific
-code is conditionally compiled only for testing.
-
-[exit status]: https://en.wikipedia.org/wiki/Exit_status
-[@phil-opp]: https://github.com/phil-opp
-[learned how to do this]: https://os.phil-opp.com/testing/#exiting-qemu
-[semihosting]: https://static.docs.arm.com/100863/0200/semihosting.pdf
-[qemu-exit]: https://github.com/andre-richter/qemu-exit
-[Click here]: https://github.com/andre-richter/qemu-exit/blob/master/src/aarch64.rs
-
-#### Exiting Unit Tests
-
-Unit test failure shall be triggered by the `panic!` macro, either directly or by way of using
-`assert!` macros. Until now, our `panic!` implementation finally called `cpu::wait_forever()` to
-safely park the panicked CPU core in a busy loop. This can't be used for the unit tests, because
-`cargo` would wait forever for `QEMU` to exit and stall the whole test run. Again, conditional
-compilation is used to differentiate between a release and testing version of how a `panic!`
-concludes:
-
-```rust
-/// The point of exit for `libkernel`.
+/// Called by the kernel to register and enable the device's IRQ handler.
 ///
-/// It is linked weakly, so that the integration tests can overload its standard behavior.
-#[linkage = "weak"]
+/// Rust's type system will prevent a call to this function unless the calling instance
+/// itself has static lifetime.
+fn register_and_enable_irq_handler(
+    &'static self,
+    irq_number: &Self::IRQNumberType,
+) -> Result<(), &'static str> {
+    panic!(
+        "Attempt to enable IRQ {} for device {}, but driver does not support this",
+        irq_number,
+        self.compatible()
+    )
+}
+```
+
+Here is the implementation for the `PL011Uart`:
+
+```rust
+fn register_and_enable_irq_handler(
+    &'static self,
+    irq_number: &Self::IRQNumberType,
+) -> Result<(), &'static str> {
+    use exception::asynchronous::{irq_manager, IRQHandlerDescriptor};
+
+    let descriptor = IRQHandlerDescriptor::new(*irq_number, Self::COMPATIBLE, self);
+
+    irq_manager().register_handler(descriptor)?;
+    irq_manager().enable(irq_number);
+
+    Ok(())
+}
+```
+
+The `exception::asynchronous::irq_manager()` function used here returns a reference to an
+implementor of the `IRQManager` trait. Since the implementation is supposed to be done by the
+platform's interrupt controller, this call will redirect to the `kernel`'s instance of either the
+driver for the `BCM` controller (`Raspberry Pi 3`) or the driver for the `GICv2` (`Pi 4`). We will
+look into the  implementation of the `register_handler()` function from the driver's perspective
+later. The gist here is that the calls on `irq_manager()` will make the platform's interrupt
+controller aware that the `UART` driver (i) wants to handle its interrupt and (ii) which function it
+provides to do so.
+
+Also note how `irq_number` is supplied as a function argument and not hardcoded. The reason is that
+the `UART` driver code is agnostic about the **IRQ numbers** that are associated to it. This is
+vendor-supplied information and as such typically part of the Board Support Package (`BSP`). It can
+vary from `BSP` to `BSP`, same like the board's memory map, which provides the `UART`'s MMIO
+register addresses.
+
+With all this in place, we can finally let drivers register and enable their IRQ handlers with the
+interrupt controller, and unmask IRQ reception on the boot CPU core during the kernel init phase.
+The global `driver_manager` takes care of this in the function `init_drivers_and_irqs()` (before
+this tutorial, the function's name was `init_drivers()`), where this happens as the third and last
+step of initializing all registered device drivers:
+
+```rust
+pub unsafe fn init_drivers_and_irqs(&self) {
+    self.for_each_descriptor(|descriptor| {
+        // 1. Initialize driver.
+        if let Err(x) = descriptor.device_driver.init() {
+            // omitted for brevity
+        }
+
+        // 2. Call corresponding post init callback.
+        if let Some(callback) = &descriptor.post_init_callback {
+            // omitted for brevity
+        }
+    });
+
+    // 3. After all post-init callbacks were done, the interrupt controller should be
+    //    registered and functional. So let drivers register with it now.
+    self.for_each_descriptor(|descriptor| {
+        if let Some(irq_number) = &descriptor.irq_number {
+            if let Err(x) = descriptor
+                .device_driver
+                .register_and_enable_irq_handler(irq_number)
+            {
+                panic!(
+                    "Error during driver interrupt handler registration: {}: {}",
+                    descriptor.device_driver.compatible(),
+                    x
+                );
+            }
+        }
+    });
+}
+```
+
+
+In `main.rs`, IRQs are unmasked right afterwards, after which point IRQ handling is live:
+
+```rust
+// Initialize all device drivers.
+driver::driver_manager().init_drivers_and_irqs();
+
+// Unmask interrupts on the boot CPU core.
+exception::asynchronous::local_irq_unmask();
+```
+
+#### Handling Pending IRQs
+
+Now that interrupts can happen, the `kernel` needs a way of requesting the interrupt controller
+driver to handle pending interrupts. Therefore, implementors of the trait `IRQManager` must also
+supply the following function:
+
+```rust
+fn handle_pending_irqs<'irq_context>(
+    &'irq_context self,
+    ic: &super::IRQContext<'irq_context>,
+);
+```
+
+An important aspect of this function signature is that we want to ensure that IRQ handling is only
+possible from IRQ context. Part of the reason is that this invariant allows us to make some implicit
+assumptions (which might depend on the target architecture, though). For example, as we have learned
+in [tutorial 11], in `AArch64`, _"all kinds of exceptions are turned off upon taking an exception,
+so that by default, exception handlers can not get interrupted themselves"_ (note that an IRQ is an
+exception). This is a useful property that relieves us from explicitly protecting IRQ handling from
+being interrupted itself. Another reason would be that calling IRQ handling functions from arbitrary
+execution contexts just doesn't make a lot of sense.
+
+[tutorial 11]: ../11_exceptions_part1_groundwork/
+
+So in order to ensure that this function is only being called from IRQ context, we borrow a
+technique that I first saw in the [Rust embedded WG]'s [bare-metal crate]. It uses Rust's type
+system to create a "token" that is only valid for the duration of the IRQ context. We create it
+directly at the top of the IRQ vector function in `_arch/aarch64/exception.rs`, and pass it on to
+the the implementation of the trait's handling function:
+
+[Rust embedded WG]: https://github.com/rust-embedded/bare-metal
+[bare-metal crate]: https://github.com/rust-embedded/bare-metal/blob/master/src/lib.rs#L20
+
+```rust
 #[no_mangle]
-fn _panic_exit() -> ! {
-    #[cfg(not(feature = "test_build"))]
-    {
-        cpu::wait_forever()
-    }
-
-    #[cfg(feature = "test_build")]
-    {
-        cpu::qemu_exit_failure()
-    }
+extern "C" fn current_elx_irq(_e: &mut ExceptionContext) {
+    let token = unsafe { &exception::asynchronous::IRQContext::new() };
+    exception::asynchronous::irq_manager().handle_pending_irqs(token);
 }
 ```
 
-In case _none_ of the unit tests panicked, `lib.rs`'s `kernel_init()` calls
-`cpu::qemu_exit_success()` to successfully conclude the unit test run.
+By requiring the caller of the function `handle_pending_irqs()` to provide this `IRQContext` token,
+we can prevent that the same function is accidentally being called from somewhere else. It is
+evident, though, that for this to work, it is the _user's responsibility_ to only ever create this
+token from within an IRQ context. If you want to circumvent this on purpose, you can do it.
 
-### Controlling Test Kernel Execution
+### Reentrancy: What to protect?
 
-Now is a good time to catch up on how the test kernel binary is actually being executed. Normally,
-`cargo test` would try to execute the compiled binary as a normal child process. This would fail
-horribly because we build a kernel, and not a userspace process. Also, chances are high that you sit
-in front of an `x86` machine, whereas the RPi kernel is `AArch64`.
+Now that interrupt handling is live, we need to think about `reentrancy`. At [the beginning of this
+tutorial], we mused about the need to protect certain functions from being re-entered, and that it
+is not straight-forward to identify all the places that need protection.
 
-Therefore, we need to install some hooks that make sure the test kernel gets executed inside `QEMU`,
-quite like it is done for the existing `make qemu` target that is in place since `tutorial 1`. The
-first step is to add a new file to the project, `.cargo/config.toml`:
+[the beginning of this tutorial]: #new-challenges-reentrancy
 
-```toml
-[target.'cfg(target_os = "none")']
-runner = "target/kernel_test_runner.sh"
-```
+In this tutorial, we will keep this part short nonetheless by taking a better-safe-than-sorry
+approach. In the past, we already made efforts to prepare parts of `shared resources` (e.g. global
+device driver instances) to be protected against parallel access. We did so by wrapping them into
+`NullLocks`, which we will upgrade to real `Spinlocks` once we boot secondary CPU cores.
 
-Instead of executing a compilation result directly, the `runner` flag will instruct `cargo` to
-delegate the execution. Using the setting depicted above, `target/kernel_test_runner.sh` will be
-executed and given the full path to the compiled test kernel as the first command line argument.
-
-The file `kernel_test_runner.sh` does not exist by default. We generate it on demand when one of the
-`make test_*` targets is called:
-
-```Makefile
-##------------------------------------------------------------------------------
-## Helpers for unit and integration test targets
-##------------------------------------------------------------------------------
-define KERNEL_TEST_RUNNER
-    #!/usr/bin/env bash
-
-    # The cargo test runner seems to change into the crate under test's directory. Therefore, ensure
-    # this script executes from the root.
-    cd $(shell pwd)
-
-    TEST_ELF=$$(echo $$1 | sed -e 's/.*target/target/g')
-    TEST_BINARY=$$(echo $$1.img | sed -e 's/.*target/target/g')
-
-    $(OBJCOPY_CMD) $$TEST_ELF $$TEST_BINARY
-    $(DOCKER_TEST) $(EXEC_TEST_DISPATCH) $(EXEC_QEMU) $(QEMU_TEST_ARGS) -kernel $$TEST_BINARY
-endef
-
-export KERNEL_TEST_RUNNER
-
-define test_prepare
-    @mkdir -p target
-    @echo "$$KERNEL_TEST_RUNNER" > target/kernel_test_runner.sh
-    @chmod +x target/kernel_test_runner.sh
-endef
-
-##------------------------------------------------------------------------------
-## Run unit test(s)
-##------------------------------------------------------------------------------
-test_unit:
-	$(call color_header, "Compiling unit test(s) - $(BSP)")
-	$(call test_prepare)
-	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(TEST_CMD) --lib
-```
-
-It first does the standard `objcopy` step to strip the `ELF` down to a raw binary. Just like in all
-the other Makefile targets. Next, the script generates a relative path from the absolute path
-provided to it by `cargo`, and finally compiles a `docker` command to execute the test kernel. For
-reference, here it is fully resolved for an `RPi3 BSP`:
-
-```bash
-docker run -t --rm -v /opt/rust-raspberrypi-OS-tutorials/12_integrated_testing:/work/tutorial -w /work/tutorial -v /opt/rust-raspberrypi-OS-tutorials/12_integrated_testing/../common:/work/common rustembedded/osdev-utils:2021.12 ruby ../common/tests/dispatch.rb qemu-system-aarch64 -M raspi3 -serial stdio -display none -semihosting -kernel $TEST_BINARY
-```
-
-This command is quite similar to the one used in the `make test_boot` target that we have since
-`tutorial 3`. However, we never bothered explaining it, so lets take a closer look this time. One of
-the key ingredients is that we execute this script: `ruby ../common/tests/dispatch.rb`.
-
-#### Wrapping QEMU Test Execution
-
-`dispatch.rb` is a [Ruby] script which first determines what kind of test is due by inspecting the
-`QEMU`-command that was given to it. In case of `unit tests`, we are only interested if they all
-executed successfully, which can be checked by inspecting `QEMU`'s exit code. So the script takes
-the provided qemu command it got from `ARGV`, and creates and runs an instance of `ExitCodeTest`:
-
-```ruby
-qemu_cmd = ARGV.join(' ')
-binary = ARGV.last
-test_name = binary.gsub(%r{.*deps/}, '').split('-')[0]
-
-# Check if virtual manifest (tutorial 12 or later) or not
-path_prefix = File.exist?('kernel/Cargo.toml') ? 'kernel/' : ''
-
-case test_name
-when 'kernel8.img'
-    load "#{path_prefix}tests/boot_test_string.rb" # provides 'EXPECTED_PRINT'
-    BootTest.new(qemu_cmd, EXPECTED_PRINT).run # Doesn't return
-
-when 'libkernel'
-    ExitCodeTest.new(qemu_cmd, 'Kernel library unit tests').run # Doesn't return
-```
-
-The easy case is `QEMU` exiting by itself by means of `aarch64::exit_success()` or
-`aarch64::exit_failure()`. But the script can also catch the case of a test that gets stuck, e.g. in
-an unintentional busy loop or a crash. If `ExitCodeTest` does not observe any output of the test
-kernel for `MAX_WAIT_SECS`, it cancels the execution and marks the test as failed. Test success or
-failure is finally reported back to `cargo`.
-
-Here is the essential part happening in `class ExitCodeTest` (If `QEMU` exits itself, an `EOFError`
-is thrown):
-
-```ruby
-def run_concrete_test
-    Timeout.timeout(MAX_WAIT_SECS) do
-        @test_output << @qemu_serial.read_nonblock(1024) while @qemu_serial.wait_readable
-    end
-rescue EOFError
-    @qemu_serial.close
-    @test_error = $CHILD_STATUS.to_i.zero? ? false : 'QEMU exit status != 0'
-rescue Timeout::Error
-    @test_error = 'Timed out waiting for test'
-rescue StandardError => e
-    @test_error = e.inspect
-end
-```
-
-Please note that `dispatch.rb` and all its dependencies live in the shared folder
-`../common/tests/`.
-
-[Ruby]: https://www.ruby-lang.org/
-
-### Writing Unit Tests
-
-Alright, that's a wrap for the whole chain from `make test_unit` all the way to reporting the test
-exit status back to `cargo test`. It is a lot to digest already, but we haven't even learned to
-write `Unit Tests` yet.
-
-In essence, it is almost like in `std` environments, with the difference that `#[test]` can't be
-used, because it is part of the standard library. The `no_std` replacement attribute provided by
-`custom_test_frameworks` is `#[test_case]`. You can put `#[test_case]` before functions, constants
-or statics (you have to decide for one and stick with it). Each attributed item is added to the
-"list" that is then passed to the `test_runner` function.
-
-As you learned earlier, we decided that our tests shall be instances of `test_types::UnitTest`. Here
-is the type definition again:
+We can hook on that previous work and reason that anything that we wanted protected against parallel
+access so far, we also want it protected against reentrancy now. Therefore, we upgrade all
+`NullLocks` to `IRQSafeNullocks`:
 
 ```rust
-/// Unit test container.
-pub struct UnitTest {
-    /// Name of the test.
-    pub name: &'static str,
+impl<T> interface::Mutex for IRQSafeNullLock<T> {
+    type Data = T;
 
-    /// Function pointer to the test.
-    pub test_func: fn(),
-}
-```
+    fn lock<R>(&self, f: impl FnOnce(&mut Self::Data) -> R) -> R {
+        // In a real lock, there would be code encapsulating this line that ensures that this
+        // mutable reference will ever only be given out once at a time.
+        let data = unsafe { &mut *self.data.get() };
 
-So what we could do now is write something like:
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test_case]
-    const TEST1: test_types::UnitTest = test_types::UnitTest {
-            name: "test_runner_executes_in_kernel_mode",
-            test_func: || {
-                let (level, _) = current_privilege_level();
-
-                assert!(level == PrivilegeLevel::Kernel)
-            },
-        };
-}
-```
-
-Since this is a bit boiler-platy with the const and name definition, let's write a [procedural
-macro] named `#[kernel_test]` to simplify this. It should work this way:
-
-  1. Must be put before functions that take no arguments and return nothing.
-  1. Automatically constructs a `const UnitTest` from attributed functions like shown above by:
-      1. Converting the function name to the `name` member of the `UnitTest` struct.
-      1. Populating the `test_func` member with a closure that executes the body of the attributed
-         function.
-
-For the sake of brevity, we're not going to discuss the macro implementation. [The source is in the
-test-macros crate] if you're interested in it. Using the macro, the example shown before now boils
-down to this (this is now an actual example from [exception.rs]:
-
-[procedural macro]: https://doc.rust-lang.org/reference/procedural-macros.html
-[The source is in the test-macros crate]: test-macros/src/lib.rs
-[exception.rs]: src/exception.rs
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use test_macros::kernel_test;
-
-    /// Libkernel unit tests must execute in kernel mode.
-    #[kernel_test]
-    fn test_runner_executes_in_kernel_mode() {
-        let (level, _) = current_privilege_level();
-
-        assert!(level == PrivilegeLevel::Kernel)
+        // Execute the closure while IRQs are masked.
+        exception::asynchronous::exec_with_irq_masked(|| f(data))
     }
 }
 ```
 
-Note that since proc macros need to live in their own crates, we need to create a new one at
-`$ROOT/libraries/test-macros` and save it there.
-
-Aaaaaand that's how you write unit tests. We're finished with that part for good now :raised_hands:.
-
-### Integration Tests
-
-We are still not done with the tutorial, though :scream:.
-
-Integration tests need some special attention here and there too. As you already learned, they live
-in `$CRATE/tests/`. Each `.rs` file in there gets compiled into its own test kernel binary and
-executed separately by `cargo test`. The code in the integration tests includes the library part of
-our kernel (`libkernel`) through `use` statements.
-
-Also note that the entry point for each `integration test` must be the `kernel_init()` function
-again, just like in the `unit test` case.
-
-#### Test Harness
-
-By default, `cargo test` will pull in the test harness (that's the official name for the generated
-`main()` function) into integration tests as well. This gives you a further means of partitioning
-your test code into individual chunks. For example, take a look at `tests/01_timer_sanity.rs`:
+The new part is that the call to `f(data)` is executed as a closure in
+`exception::asynchronous::exec_with_irq_masked()`. Inside that function, IRQs on the executing CPU
+core are masked before the `f(data)` is being executed, and restored afterwards:
 
 ```rust
-//! Timer sanity tests.
-
-#![feature(custom_test_frameworks)]
-#![no_main]
-#![no_std]
-#![reexport_test_harness_main = "test_main"]
-#![test_runner(libkernel::test_runner)]
-
-use core::time::Duration;
-use libkernel::{bsp, cpu, exception, time};
-use test_macros::kernel_test;
-
-#[no_mangle]
-unsafe fn kernel_init() -> ! {
-    exception::handling_init();
-    bsp::driver::qemu_bring_up_console();
-
-    // Depending on CPU arch, some timer bring-up code could go here. Not needed for the RPi.
-
-    test_main();
-
-    cpu::qemu_exit_success()
-}
-
-/// Simple check that the timer is running.
-#[kernel_test]
-fn timer_is_counting() {
-    assert!(time::time_manager().uptime().as_nanos() > 0)
-}
-
-/// Timer resolution must be sufficient.
-#[kernel_test]
-fn timer_resolution_is_sufficient() {
-    assert!(time::time_manager().resolution().as_nanos() > 0);
-    assert!(time::time_manager().resolution().as_nanos() < 100)
-}
-```
-
-Note how the `test_runner` from `libkernel` is pulled in through
-`#![test_runner(libkernel::test_runner)]`.
-
-#### No Test Harness
-
-For some tests, however, it is not needed to have the harness, because there is no need or
-possibility to partition the test into individual pieces. In this case, all the test code can live
-in `kernel_init()`, and harness generation can be turned off through `$ROOT/kernel/Cargo.toml`. This
-tutorial introduces two tests that don't need a harness. Here is how harness generation is turned
-off for them:
-
-```toml
-# List of tests without harness.
-[[test]]
-name = "00_console_sanity"
-harness = false
-
-[[test]]
-name = "02_exception_sync_page_fault"
-harness = false
-
-[[test]]
-name = "03_exception_restore_sanity"
-harness = false
-```
-
-#### Overriding Panic Behavior
-
-Did you notice the `#[linkage = "weak"]` attribute some chapters earlier at the `_panic_exit()`
-function? This marks the function in `lib.rs` as a [weak symbol]. Let's look at it again:
-
-```rust
-/// The point of exit for `libkernel`.
+/// Executes the provided closure while IRQs are masked on the executing core.
 ///
-/// It is linked weakly, so that the integration tests can overload its standard behavior.
-#[linkage = "weak"]
-#[no_mangle]
-fn _panic_exit() -> ! {
-    #[cfg(not(feature = "test_build"))]
-    {
-        cpu::wait_forever()
+/// While the function temporarily changes the HW state of the executing core, it restores it to the
+/// previous state before returning, so this is deemed safe.
+#[inline(always)]
+pub fn exec_with_irq_masked<T>(f: impl FnOnce() -> T) -> T {
+    let saved = local_irq_mask_save();
+    let ret = f();
+    local_irq_restore(saved);
+
+    ret
+}
+```
+
+The helper functions used here are defined in `src/_arch/aarch64/exception/asynchronous.rs`.
+
+### The Interrupt Controller Device Drivers
+
+The previous sections explained how the `kernel` uses the `IRQManager` trait. Now, let's have a look
+at the driver-side of it in the Raspberry Pi `BSP`. We start with the Broadcom interrupt controller
+featured in the `Pi 3`.
+
+#### The BCM Driver (Pi 3)
+
+As mentioned earlier, the `BCM` driver consists of two subcomponents, a **local** and a
+**peripheral** controller. The local controller owns a bunch of configuration registers, among
+others, the `routing` configuration for peripheral IRQs such as those from the `UART`. Peripheral
+IRQs can be routed to _one core only_. In our case, we leave the default unchanged, which means
+everything is routed to the boot CPU core. The image below depicts the `struct diagram` of the
+driver implementation.
+
+![BCM Driver](../doc/14_BCM_driver.png)
+
+We have a top-level driver, which implements the `IRQManager` trait. _Only the top-level driver_ is
+exposed to the rest of the `kernel`. The top-level itself has two members, representing the local
+and the peripheral controller, respectively, which implement the `IRQManager` trait as well. This
+design allows for easy forwarding of function calls from the top-level driver to one of the
+subcontrollers.
+
+For this tutorial, we leave out implementation of the local controller, because we will only be
+concerned with the peripheral  `UART` IRQ.
+
+##### Peripheral Controller Register Access
+
+When writing a device driver for a kernel with exception handling and multi-core support, it is
+always important to analyze what parts of the driver will need protection against reentrancy (we
+talked about this earlier in this tutorial) and/or parallel execution of other driver parts. If a
+driver function needs to follow a vendor-defined sequence of multiple register operations that
+include `write operations`, this is usually a good hint that protection might be needed. But that is
+only one of many examples.
+
+For the driver implementation in this tutorial, we are following a simple rule: Register read access
+is deemed always safe. Write access is guarded by an `IRQSafeNullLock`, which means that we are safe
+against `reentrancy` issues, and also in the future when the kernel will be running on multiple
+cores, we can easily upgrade to a real spinlock, which serializes register write operations from
+different CPU cores.
+
+In fact, for this tutorial, we probably would not have needed any protection yet, because all the
+driver does is read from the `PENDING_*` registers for the `handle_pending_irqs()` implementation,
+and writing to the `ENABLE_*` registers for the `enable()` implementation. However, the chosen
+architecture will have us set up for future extensions, when more complex register manipulation
+sequences might be needed.
+
+Since nothing complex is happening in the implementation, it is not covered in detail here. Please
+refer to [the source of the **peripheral** controller] to check it out.
+
+[the source of the **peripheral** controller]: kernel/src/bsp/device_driver/bcm/bcm2xxx_interrupt_controller/peripheral_ic.rs
+
+##### The IRQ Handler Table
+
+Calls to `register_handler()` result in the driver inserting the provided handler reference in a
+specific table (the handler reference is a member of `IRQDescriptor`):
+
+```rust
+type HandlerTable = [Option<exception::asynchronous::IRQHandlerDescriptor<PeripheralIRQ>>;
+    PeripheralIRQ::MAX_INCLUSIVE + 1];
+```
+
+One of the requirements for safe operation of the `kernel` is that those handlers are not
+registered, removed or exchanged in the middle of an IRQ handling situation. This, again, is a
+multi-core scenario where one core might look up a handler entry while another core is modifying the
+same in parallel.
+
+While we want to allow drivers to take the decision of registering or not registering a handler at
+runtime, there is no need to allow it for the _whole_ runtime of the kernel. It is fine to restrict
+this option to the kernel `init phase`, at which only a single boot core runs and IRQs are masked.
+
+We introduce the so called `InitStateLock` for cases like that. From an API-perspective, it is a
+special variant of a `Read/Write exclusion synchronization primitive`. RWLocks in the Rust standard
+library [are characterized] as allowing _"a number of readers or at most one writer at any point in
+time"_. For the `InitStateLock`, we only implement the `read()` and `write()` functions:
+
+[are characterized]: https://doc.rust-lang.org/std/sync/struct.RwLock.html
+
+```rust
+impl<T> interface::ReadWriteEx for InitStateLock<T> {
+    type Data = T;
+
+    fn write<R>(&self, f: impl FnOnce(&mut Self::Data) -> R) -> R {
+        assert!(
+            state::state_manager().is_init(),
+            "InitStateLock::write called after kernel init phase"
+        );
+        assert!(
+            !exception::asynchronous::is_local_irq_masked(),
+            "InitStateLock::write called with IRQs unmasked"
+        );
+
+        let data = unsafe { &mut *self.data.get() };
+
+        f(data)
     }
 
-    #[cfg(feature = "test_build")]
-    {
-        cpu::qemu_exit_failure()
+    fn read<R>(&self, f: impl FnOnce(&Self::Data) -> R) -> R {
+        let data = unsafe { &*self.data.get() };
+
+        f(data)
     }
 }
 ```
 
-[weak symbol]: https://en.wikipedia.org/wiki/Weak_symbol
-
-This enables integration tests in `$CRATE/tests/` to override this function according to their
-needs. This is useful, because depending on the kind of test, a `panic!` could mean success or
-failure. For example, `tests/02_exception_sync_page_fault.rs` is intentionally causing a page fault,
-so the wanted outcome is a `panic!`. Here is the whole test (minus some inline comments):
+The `write()` function is guarded by two `assertions`. One ensures that IRQs are masked, the other
+checks the `state::state_manager()` if the kernel is still in the init phase. The `State Manager` is
+new since this tutorial, and implemented in `src/state.rs`. It provides atomic state transition and
+reporting functions that are called when the kernel enters a new phase. In the current kernel, the
+only call is happening before the transition from `kernel_init()` to `kernel_main()`:
 
 ```rust
-//! Page faults must result in synchronous exceptions.
+// Announce conclusion of the kernel_init() phase.
+state::state_manager().transition_to_single_core_main();
+```
 
-#![feature(format_args_nl)]
-#![no_main]
-#![no_std]
+P.S.: Since the use case for the `InitStateLock` also applies to a few other places in the kernel
+(for example, registering the system-wide console during early boot), `InitStateLock`s have been
+incorporated in those other places as well.
 
-mod panic_exit_success;
+#### The GICv2 Driver (Pi 4)
 
-use libkernel::{bsp, cpu, exception, info, memory, println};
+As we learned earlier, the ARM `GICv2` in the `Raspberry Pi 4` features a continuous interrupt
+number range:
+- IRQ numbers `0..31` represent IRQs that are private (aka local) to the respective processor core.
+- IRQ numbers `32..1019` are for shared IRQs.
 
-#[no_mangle]
-unsafe fn kernel_init() -> ! {
-    use memory::mmu::interface::MMU;
+The `GIC` has a so-called `Distributor`, the `GICD`, and a `CPU Interface`, the `GICC`. The `GICD`,
+among other things, is used to enable IRQs and route them to one or more CPU cores. The `GICC` is
+used by CPU cores to check which IRQs are pending, and to acknowledge them once they were handled.
+There is one dedicated `GICC` for _each CPU core_.
 
-    exception::handling_init();
-    bsp::driver::qemu_bring_up_console();
+One neat thing about the `GICv2` is that any MMIO registers that are associated to core-private IRQs
+are `banked`. That means that different CPU cores can assert the same MMIO address, but they will
+end up accessing a core-private copy of the referenced register. This makes it very comfortable to
+program the `GIC`, because this hardware design ensures that each core only ever gets access to its
+own resources. Preventing one core to accidentally or willfully fiddle with the IRQ state of another
+core must therefore not be enforced in software.
 
-    // This line will be printed as the test header.
-    println!("Testing synchronous exception handling by causing a page fault");
+In summary, this means that any registers in the `GICD` that deal with the core-private IRQ range
+are banked. Since there is one `GICC` per CPU core, the whole thing is banked. This allows us to
+design the following `struct diagram` for our driver implementation:
 
-    if let Err(string) = memory::mmu::mmu().enable_mmu_and_caching() {
-        info!("MMU: {}", string);
-        cpu::qemu_exit_failure()
+![GICv2 Driver](../doc/14_GICv2_driver.png)
+
+The top-level struct is composed of a `GICD`, a `GICC` and a `HandlerTable`. The latter is
+implemented identically as in the `Pi 3`.
+
+##### GICC Details
+
+Since the `GICC` is banked wholly, the top-level driver can directly forward any requests to it,
+without worrying about concurrency issues for now. Note that this only works as long as the `GICC`
+implementation is only accessing the banked `GICC` registers, and does not save any state in member
+variables that are stored in `DRAM`. The two main duties of the `GICC` struct are to read the `IAR`
+(Interrupt Acknowledge) register, which returns the number of the highest-priority pending IRQ, and
+writing to the `EOIR` (End Of Interrupt) register, which tells the hardware that handling of an
+interrupt is now concluded.
+
+##### GICD Details
+
+The `GICD` hardware block differentiates between `shared` and `banked` registers. As with the
+`GICC`, we don't have to protect the banked registers against concurrent access. The shared
+registers are wrapped into an `IRQSafeNullLock` again. The important parts of the `GICD` for this
+tutorial are the `ITARGETSR[256]` and `ISENABLER[32]` register arrays.
+
+Each `ITARGETSR` is subdivided into four _bytes_. Each byte represents one IRQ, and stores a bitmask
+that encodes all the `GICCs` to which the respective IRQ is forwarded. For example,
+`ITARGETSR[0].byte0` would represent IRQ number 0, and `ITARGETSR[0].byte3` IRQ number 3. In the
+`ISENABLER`, each _bit_ represents an IRQ. For example, `ISENABLER[0].bit3` is IRQ number 3.
+
+In summary, this means that `ITARGETSR[0..7]` and `ISENABLER[0]` represent the first 32 IRQs (the
+banked ones), and as such, we split the register block into `shared` and `banked` parts accordingly
+in `gicd.rs`:
+
+```rust
+register_structs! {
+    #[allow(non_snake_case)]
+    SharedRegisterBlock {
+        (0x000 => CTLR: ReadWrite<u32, CTLR::Register>),
+        (0x004 => TYPER: ReadOnly<u32, TYPER::Register>),
+        (0x008 => _reserved1),
+        (0x104 => ISENABLER: [ReadWrite<u32>; 31]),
+        (0x180 => _reserved2),
+        (0x820 => ITARGETSR: [ReadWrite<u32, ITARGETSR::Register>; 248]),
+        (0xC00 => @END),
     }
+}
 
-    info!("Writing beyond mapped area to address 9 GiB...");
-    let big_addr: u64 = 9 * 1024 * 1024 * 1024;
-    core::ptr::read_volatile(big_addr as *mut u64);
-
-    // If execution reaches here, the memory access above did not cause a page fault exception.
-    cpu::qemu_exit_failure()
+register_structs! {
+    #[allow(non_snake_case)]
+    BankedRegisterBlock {
+        (0x000 => _reserved1),
+        (0x100 => ISENABLER: ReadWrite<u32>),
+        (0x104 => _reserved2),
+        (0x800 => ITARGETSR: [ReadOnly<u32, ITARGETSR::Register>; 8]),
+        (0x820 => @END),
+    }
 }
 ```
 
-The `_panic_exit()` version that makes `QEMU` return `0` (indicating test success) is pulled in by
-`mod panic_exit_success;`, and it will take precedence over the `weak` version from `lib.rs`.
+As with the implementation of the BCM interrupt controller driver, we won't cover the remaining
+parts in exhaustive detail. For that, please refer to [this folder] folder which contains all the
+sources.
 
-### Console Tests
-
-As the kernel or OS grows, it will be more and more interesting to test user/kernel interaction
-through the serial console. That is, sending strings/characters to the console and expecting
-specific answers in return. The `dispatch.rb` wrapper script provides infrastructure to recognize
-and dispatch console I/O tests with little overhead. It basically works like this:
-
-  1. For each integration test, check if a companion file to the `.rs` test file exists.
-      - A companion file has the same name, but ends in `.rb`.
-      - The companion file contains one or more console I/O subtests.
-  1. If it exists, load the file to dynamically import the console subtests.
-  1. Create a `ConsoleIOTest` instance and run it.
-      - This first spawns `QEMU` and attaches to `QEMU`'s serial console emulation.
-      - Then it runs all console subtests on it.
-
-Here is an excerpt from `00_console_sanity.rb` showing a subtest that does a handshake with the
-kernel over the console:
-
-```ruby
-require 'console_io_test'
-
-# Verify sending and receiving works as expected.
-class TxRxHandshakeTest < SubtestBase
-    def name
-        'Transmit and Receive handshake'
-    end
-
-    def run(qemu_out, qemu_in)
-        qemu_in.write_nonblock('ABC')
-        expect_or_raise(qemu_out, 'OK1234')
-    end
-end
-```
-
-The subtest first sends `"ABC"` over the console to the kernel, and then expects to receive
-`"OK1234"` back. On the kernel side, it looks like this in `00_console_sanity.rs`:
-
-```rust
-#![feature(format_args_nl)]
-#![no_main]
-#![no_std]
-
-/// Console tests should time out on the I/O harness in case of panic.
-mod panic_wait_forever;
-
-use libkernel::{bsp, console, cpu, exception, print};
-
-#[no_mangle]
-unsafe fn kernel_init() -> ! {
-    use console::console;
-
-    exception::handling_init();
-    bsp::driver::qemu_bring_up_console();
-
-    // Handshake
-    assert_eq!(console().read_char(), 'A');
-    assert_eq!(console().read_char(), 'B');
-    assert_eq!(console().read_char(), 'C');
-    print!("OK1234");
-```
+[this folder]: kernel/src/bsp/device_driver/arm
 
 ## Test it
 
-Believe it or not, that is all. There are four ways you can run tests now:
+When you load the kernel, any keystroke results in echoing back the character by way of IRQ
+handling. There is no more polling done at the end of `kernel_main()`, just waiting for events such
+as IRQs:
 
-  1. `make test` will run all tests back-to-back. That is, the ever existing `boot test` first, then
-     `unit tests`, then `integration tests`.
-  1. `make test_unit` will run `libkernel`'s unit tests.
-  1. `make test_integration` will run all integration tests back-to-back.
-  1. `TEST=TEST_NAME make test_integration` will run a specficic integration test.
-      - For example, `TEST=01_timer_sanity make test_integration`
+```rust
+fn kernel_main() -> ! {
+
+    // omitted for brevity
+
+    info!("Echoing input now");
+    cpu::wait_forever();
+}
+```
+
+Raspberry Pi 3:
 
 ```console
-$ make test
+$ make chainboot
 [...]
+Minipush 1.0
 
-     Running unittests (target/aarch64-unknown-none-softfloat/release/deps/libkernel-142a8d94bc9c615a)
-         -------------------------------------------------------------------
-         🦀 Running 6 tests
-         -------------------------------------------------------------------
+[MP] ⏳ Waiting for /dev/ttyUSB0
+[MP] ✅ Serial connected
+[MP] 🔌 Please power the target now
 
-           1. virt_mem_layout_sections_are_64KiB_aligned................[ok]
-           2. virt_mem_layout_has_no_overlaps...........................[ok]
-           3. test_runner_executes_in_kernel_mode.......................[ok]
-           4. kernel_tables_in_bss......................................[ok]
-           5. size_of_tabledescriptor_equals_64_bit.....................[ok]
-           6. size_of_pagedescriptor_equals_64_bit......................[ok]
+ __  __ _      _ _                 _
+|  \/  (_)_ _ (_) |   ___  __ _ __| |
+| |\/| | | ' \| | |__/ _ \/ _` / _` |
+|_|  |_|_|_||_|_|____\___/\__,_\__,_|
 
-         -------------------------------------------------------------------
-         ✅ Success: Kernel library unit tests
-         -------------------------------------------------------------------
+           Raspberry Pi 3
 
+[ML] Requesting binary
+[MP] ⏩ Pushing 66 KiB =========================================🦀 100% 0 KiB/s Time: 00:00:00
+[ML] Loaded! Executing the payload now
 
+[    0.822492] mingo version 0.13.0
+[    0.822700] Booting on: Raspberry Pi 3
+[    0.823155] MMU online. Special regions:
+[    0.823632]       0x00080000 - 0x0008ffff |  64 KiB | C   RO PX  | Kernel code and RO data
+[    0.824650]       0x3f000000 - 0x4000ffff |  17 MiB | Dev RW PXN | Device MMIO
+[    0.825539] Current privilege level: EL1
+[    0.826015] Exception handling state:
+[    0.826459]       Debug:  Masked
+[    0.826849]       SError: Masked
+[    0.827239]       IRQ:    Unmasked
+[    0.827651]       FIQ:    Masked
+[    0.828041] Architectural timer resolution: 52 ns
+[    0.828615] Drivers loaded:
+[    0.828951]       1. BCM PL011 UART
+[    0.829373]       2. BCM GPIO
+[    0.829731]       3. BCM Interrupt Controller
+[    0.830262] Registered IRQ handlers:
+[    0.830695]       Peripheral handler:
+[    0.831141]              57. BCM PL011 UART
+[    0.831649] Echoing input now
+```
 
-Compiling integration test(s) - rpi3
-    Finished release [optimized] target(s) in 0.00s
-     Running tests/00_console_sanity.rs (target/aarch64-unknown-none-softfloat/release/deps/00_console_sanity-c06130838f14dbff)
-         -------------------------------------------------------------------
-         🦀 Running 3 console I/O tests
-         -------------------------------------------------------------------
+Raspberry Pi 4:
 
-           1. Transmit and Receive handshake............................[ok]
-           2. Transmit statistics.......................................[ok]
-           3. Receive statistics........................................[ok]
+```console
+$ BSP=rpi4 make chainboot
+[...]
+Minipush 1.0
 
-         Console log:
-           ABCOK123463
+[MP] ⏳ Waiting for /dev/ttyUSB0
+[MP] ✅ Serial connected
+[MP] 🔌 Please power the target now
 
-         -------------------------------------------------------------------
-         ✅ Success: 00_console_sanity.rs
-         -------------------------------------------------------------------
+ __  __ _      _ _                 _
+|  \/  (_)_ _ (_) |   ___  __ _ __| |
+| |\/| | | ' \| | |__/ _ \/ _` / _` |
+|_|  |_|_|_||_|_|____\___/\__,_\__,_|
 
+           Raspberry Pi 4
 
-     Running tests/01_timer_sanity.rs (target/aarch64-unknown-none-softfloat/release/deps/01_timer_sanity-62a954d22239d1a3)
-         -------------------------------------------------------------------
-         🦀 Running 3 tests
-         -------------------------------------------------------------------
+[ML] Requesting binary
+[MP] ⏩ Pushing 73 KiB =========================================🦀 100% 0 KiB/s Time: 00:00:00
+[ML] Loaded! Executing the payload now
 
-           1. timer_is_counting.........................................[ok]
-           2. timer_resolution_is_sufficient............................[ok]
-           3. spin_accuracy_check_1_second..............................[ok]
-
-         -------------------------------------------------------------------
-         ✅ Success: 01_timer_sanity.rs
-         -------------------------------------------------------------------
-
-
-     Running tests/02_exception_sync_page_fault.rs (target/aarch64-unknown-none-softfloat/release/deps/02_exception_sync_page_fault-2d8ec603ef1c4d8e)
-         -------------------------------------------------------------------
-         🦀 Testing synchronous exception handling by causing a page fault
-         -------------------------------------------------------------------
-
-         [    0.132792] Writing beyond mapped area to address 9 GiB...
-         [    0.134563] Kernel panic!
-
-         Panic location:
-               File 'src/_arch/aarch64/exception.rs', line 58, column 5
-
-         CPU Exception!
-
-         ESR_EL1: 0x96000004
-               Exception Class         (EC) : 0x25 - Data Abort, current EL
-         [...]
-
-         -------------------------------------------------------------------
-         ✅ Success: 02_exception_sync_page_fault.rs
-         -------------------------------------------------------------------
-
-
-     Running tests/03_exception_restore_sanity.rs (target/aarch64-unknown-none-softfloat/release/deps/03_exception_restore_sanity-a56e14285bb26e0e)
-         -------------------------------------------------------------------
-         🦀 Running 1 console I/O tests
-         -------------------------------------------------------------------
-
-           1. Exception restore.........................................[ok]
-
-         Console log:
-           Testing exception restore
-           [    0.130757] Making a dummy system call
-           [    0.132592] Back from system call!
-
-         -------------------------------------------------------------------
-         ✅ Success: 03_exception_restore_sanity.rs
-         -------------------------------------------------------------------
-
+[    0.886853] mingo version 0.13.0
+[    0.886886] Booting on: Raspberry Pi 4
+[    0.887341] MMU online. Special regions:
+[    0.887818]       0x00080000 - 0x0008ffff |  64 KiB | C   RO PX  | Kernel code and RO data
+[    0.888836]       0xfe000000 - 0xff84ffff |  25 MiB | Dev RW PXN | Device MMIO
+[    0.889725] Current privilege level: EL1
+[    0.890201] Exception handling state:
+[    0.890645]       Debug:  Masked
+[    0.891035]       SError: Masked
+[    0.891425]       IRQ:    Unmasked
+[    0.891837]       FIQ:    Masked
+[    0.892227] Architectural timer resolution: 18 ns
+[    0.892801] Drivers loaded:
+[    0.893137]       1. BCM PL011 UART
+[    0.893560]       2. BCM GPIO
+[    0.893917]       3. GICv2 (ARM Generic Interrupt Controller v2)
+[    0.894654] Registered IRQ handlers:
+[    0.895087]       Peripheral handler:
+[    0.895534]             153. BCM PL011 UART
+[    0.896042] Echoing input now
 ```
 

@@ -6,7 +6,7 @@
 
 mod null_console;
 
-use crate::synchronization::{self, NullLock};
+use crate::synchronization;
 
 //--------------------------------------------------------------------------------------------------
 // Public Definitions
@@ -53,7 +53,6 @@ pub mod interface {
         fn bytes_read(&self) -> usize;
     }
 
-    // XXX Consoles should not be required to provide statistics.
     /// Trait alias for a full-fledged console.
     pub trait Console: Write + Read + Statistics {}
 }
@@ -62,22 +61,22 @@ pub mod interface {
 // Global instances
 //--------------------------------------------------------------------------------------------------
 
-static CUR_CONSOLE: NullLock<&'static (dyn interface::Console + Sync)> =
-    NullLock::new(&null_console::NULL_CONSOLE);
+static CUR_CONSOLE: InitStateLock<&'static (dyn interface::Console + Sync)> =
+    InitStateLock::new(&null_console::NULL_CONSOLE);
 
 //--------------------------------------------------------------------------------------------------
 // Public Code
 //--------------------------------------------------------------------------------------------------
-use synchronization::interface::Mutex;
+use synchronization::{interface::ReadWriteEx, InitStateLock};
 
 /// Register a new console.
 pub fn register_console(new_console: &'static (dyn interface::Console + Sync)) {
-    CUR_CONSOLE.lock(|con| *con = new_console);
+    CUR_CONSOLE.write(|con| *con = new_console);
 }
 
 /// Return a reference to the currently registered console.
 ///
 /// This is the global console used by all printing macros.
 pub fn console() -> &'static dyn interface::Console {
-    CUR_CONSOLE.lock(|con| *con)
+    CUR_CONSOLE.read(|con| *con)
 }
