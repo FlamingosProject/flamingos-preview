@@ -25,12 +25,13 @@ ifeq ($(BSP),rpi3)
     QEMU_BINARY       = qemu-system-aarch64
     QEMU_MACHINE_TYPE = raspi3b
     QEMU_RELEASE_ARGS = -serial stdio -display none
+    QEMU_TEST_ARGS    = $(QEMU_RELEASE_ARGS) -semihosting
     OBJDUMP_BINARY    = aarch64-none-elf-objdump
     NM_BINARY         = aarch64-none-elf-nm
     READELF_BINARY    = aarch64-none-elf-readelf
     OPENOCD_ARG       = -f /openocd/tcl/interface/ftdi/olimex-arm-usb-tiny-h.cfg -f /openocd/rpi3.cfg
     JTAG_BOOT_IMAGE   = ../X1_JTAG_boot/jtag_boot_rpi3.img
-    LD_SCRIPT_PATH    = $(shell pwd)/src/bsp/raspberrypi
+    LD_SCRIPT_PATH    = $(shell pwd)/kernel/src/bsp/raspberrypi
     RUSTC_MISC_ARGS   = -C target-cpu=cortex-a53
 else ifeq ($(BSP),rpi4)
     TARGET            = aarch64-unknown-none-softfloat
@@ -38,12 +39,13 @@ else ifeq ($(BSP),rpi4)
     QEMU_BINARY       = qemu-system-aarch64
     QEMU_MACHINE_TYPE =
     QEMU_RELEASE_ARGS = -serial stdio -display none
+    QEMU_TEST_ARGS    = $(QEMU_RELEASE_ARGS) -semihosting
     OBJDUMP_BINARY    = aarch64-none-elf-objdump
     NM_BINARY         = aarch64-none-elf-nm
     READELF_BINARY    = aarch64-none-elf-readelf
     OPENOCD_ARG       = -f /openocd/tcl/interface/ftdi/olimex-arm-usb-tiny-h.cfg -f /openocd/rpi4.cfg
     JTAG_BOOT_IMAGE   = ../X1_JTAG_boot/jtag_boot_rpi4.img
-    LD_SCRIPT_PATH    = $(shell pwd)/src/bsp/raspberrypi
+    LD_SCRIPT_PATH    = $(shell pwd)/kernel/src/bsp/raspberrypi
     RUSTC_MISC_ARGS   = -C target-cpu=cortex-a72
 endif
 
@@ -55,7 +57,7 @@ export LD_SCRIPT_PATH
 ##--------------------------------------------------------------------------------------------------
 ## Targets and Prerequisites
 ##--------------------------------------------------------------------------------------------------
-KERNEL_MANIFEST      = Cargo.toml
+KERNEL_MANIFEST      = kernel/Cargo.toml
 KERNEL_LINKER_SCRIPT = kernel.ld
 LAST_BUILD_CONFIG    = target/$(BSP).build_config
 
@@ -81,9 +83,10 @@ COMPILER_ARGS = --target=$(TARGET) \
     $(FEATURES)                    \
     --release
 
-RUSTC_CMD   = cargo rustc $(COMPILER_ARGS)
+RUSTC_CMD   = cargo rustc $(COMPILER_ARGS) --manifest-path $(KERNEL_MANIFEST)
 DOC_CMD     = cargo doc $(COMPILER_ARGS)
 CLIPPY_CMD  = cargo clippy $(COMPILER_ARGS)
+TEST_CMD    = cargo test $(COMPILER_ARGS) --manifest-path $(KERNEL_MANIFEST)
 OBJCOPY_CMD = rust-objcopy \
     --strip-all            \
     -O binary

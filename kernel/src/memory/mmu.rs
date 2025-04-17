@@ -67,7 +67,6 @@ pub struct AddressSpace<const AS_SIZE: usize>;
 
 /// Architecture agnostic translation types.
 #[allow(missing_docs)]
-#[allow(dead_code)]
 #[derive(Copy, Clone)]
 pub enum Translation {
     Identity,
@@ -249,5 +248,10 @@ impl<const NUM_SPECIAL_RANGES: usize> KernelVirtualLayout<{ NUM_SPECIAL_RANGES }
         for i in self.inner.iter() {
             info!("{}", i);
         }
+    }
+
+    #[cfg(test)]
+    pub fn inner(&self) -> &[TranslationDescriptor; NUM_SPECIAL_RANGES] {
+        &self.inner
     }
 }

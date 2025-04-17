@@ -290,3 +290,31 @@ impl<const NUM_TABLES: usize> FixedSizeTranslationTable<NUM_TABLES> {
         self.lvl2.phys_start_addr_u64()
     }
 }
+
+//--------------------------------------------------------------------------------------------------
+// Testing
+//--------------------------------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_macros::kernel_test;
+
+    /// Check if the size of `struct TableDescriptor` is as expected.
+    #[kernel_test]
+    fn size_of_tabledescriptor_equals_64_bit() {
+        assert_eq!(
+            core::mem::size_of::<TableDescriptor>(),
+            core::mem::size_of::<u64>()
+        );
+    }
+
+    /// Check if the size of `struct PageDescriptor` is as expected.
+    #[kernel_test]
+    fn size_of_pagedescriptor_equals_64_bit() {
+        assert_eq!(
+            core::mem::size_of::<PageDescriptor>(),
+            core::mem::size_of::<u64>()
+        );
+    }
+}

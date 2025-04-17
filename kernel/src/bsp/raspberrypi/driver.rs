@@ -69,3 +69,10 @@ pub unsafe fn init() -> Result<(), &'static str> {
     INIT_DONE.store(true, Ordering::Relaxed);
     Ok(())
 }
+
+/// Minimal code needed to bring up the console in QEMU (for testing only). This is often less steps
+/// than on real hardware due to QEMU's abstractions.
+#[cfg(feature = "test_build")]
+pub fn qemu_bring_up_console() {
+    console::register_console(&PL011_UART);
+}

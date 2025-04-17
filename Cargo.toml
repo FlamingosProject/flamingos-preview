@@ -1,0 +1,9 @@
+[workspace]
+
+members = [
+        "libraries/*",
+        "kernel"
+]
+
+[profile.release]
+lto = true

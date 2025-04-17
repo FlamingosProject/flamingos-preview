@@ -1,489 +1,915 @@
-# Tutorial 11 - Exceptions Part 1: Groundwork
+# Tutorial 12 - Integrated Testing
 
 ## tl;dr
 
-- We lay the groundwork for all the architectural `CPU exceptions`.
-- For now, only print an elaborate system state through a `panic!` call, and halt execution
-- This will help finding bugs during development and runtime.
-- For demo purposes, MMU `page faults` are used to demonstrate (i) returning from an exception and
-  (ii) the default `panic!` behavior.
+- We implement our own integrated test framework using `Rust`'s [custom_test_frameworks] feature by
+  enabling `Unit Tests` and `Integration Tests` using `QEMU`.
+- It is also possible to have test automation for I/O with the kernel's `console` (provided over
+  `UART` in our case). That is, sending strings/characters to the console and expecting specific
+  answers in return.
+- The already existing basic `boot test` remains unchanged.
+
+<img src="../doc/12_demo.gif" width="880">
 
 ## Table of Contents
 
-- [Tutorial 11 - Exceptions Part 1: Groundwork](#tutorial-11---exceptions-part-1-groundwork)
+- [Tutorial 12 - Integrated Testing](#tutorial-12---integrated-testing)
   - [tl;dr](#tldr)
   - [Table of Contents](#table-of-contents)
   - [Introduction](#introduction)
-  - [Exception Types](#exception-types)
-  - [Exception entry](#exception-entry)
-    - [Exception Vectors](#exception-vectors)
-  - [Handler Code and Offsets](#handler-code-and-offsets)
-  - [Rust and Assembly Implementation](#rust-and-assembly-implementation)
-    - [Context Save and Restore](#context-save-and-restore)
-    - [Exception Vector Table](#exception-vector-table)
-    - [Implementing handlers](#implementing-handlers)
-  - [Causing an Exception - Testing the Code](#causing-an-exception---testing-the-code)
+  - [Challenges](#challenges)
+    - [Acknowledgements](#acknowledgements)
+  - [Folder Restructuring](#folder-restructuring)
+  - [Implementation](#implementation)
+    - [Test Organization](#test-organization)
+    - [Enabling `custom_test_frameworks` for Unit Tests](#enabling-custom_test_frameworks-for-unit-tests)
+      - [The Unit Test Runner](#the-unit-test-runner)
+      - [Calling the Test `main()` Function](#calling-the-test-main-function)
+    - [Quitting QEMU with user-defined Exit Codes](#quitting-qemu-with-user-defined-exit-codes)
+      - [Exiting Unit Tests](#exiting-unit-tests)
+    - [Controlling Test Kernel Execution](#controlling-test-kernel-execution)
+      - [Wrapping QEMU Test Execution](#wrapping-qemu-test-execution)
+    - [Writing Unit Tests](#writing-unit-tests)
+    - [Integration Tests](#integration-tests)
+      - [Test Harness](#test-harness)
+      - [No Test Harness](#no-test-harness)
+      - [Overriding Panic Behavior](#overriding-panic-behavior)
+    - [Console Tests](#console-tests)
   - [Test it](#test-it)
 
 ## Introduction
 
-Now that we are executing in `EL1`, and have activated the `MMU`, time is due for implementing `CPU
-exceptions`. For now, we only set up a scaffold with very basic functionality that will help us to
-find bugs along the way. A follow-up `Interrupt` tutorial later will continue the work we start
-here.
+Through the course of the previous tutorials, we silently started to adopt a kind of anti-pattern:
+Using the kernel's main function to not only boot the target, but also test or showcase
+functionality. For example:
+  - Stalling execution during boot to test the kernel's timekeeping code by spinning for 1 second.
+  - Willingly causing exceptions to see the exception handler running.
 
-Please note that this tutorial is specific to the `AArch64` architecture. It does not contain any
-generic exception handling code yet.
+The feature set of the kernel is now rich enough so that it makes sense to introduce proper
+integrated testing modeled after Rust's [native testing framework]. This tutorial extends our single
+existing kernel test with three new testing facilities:
+  - Classic `Unit Tests`.
+  - [Integration Tests] (self-contained tests stored in the `$CRATE/tests/` directory).
+  - `Console I/O Tests`. These are integration tests acting on external stimuli - aka `console`
+    input. Sending strings/characters to the console and expecting specific answers in return.
 
-## Exception Types
+[native testing framework]: https://doc.rust-lang.org/book/ch11-00-testing.html
 
-In `AArch64`, it is differentiated between four types of exceptions. These are:
-- Synchronous
-  - For example, a `data abort` (e.g. `page fault`) or a `system call`. They happen in direct
-    consequence of executing a certain CPU instruction, hence _synchronously_.
-- Interrupt Request (`IRQ`)
-  - For example, an external device, like a timer, is asserting a physical interrupt line. IRQs
-    happen _asynchronously_.
-- Fast Interrupt Request (`FIQ`)
-  - These are basically interrupts that take priority over normal IRQs and have some more traits
-    that make them suitable to implement super-fast processing. However, this is out of scope for
-    this tutorial. For the sake of keeping these tutorials compact and concise, we will more or less
-    ignore FIQs and only implement a dummy handler that would halt the CPU core.
-- System Error (`SError`)
-  - Like IRQs, SErrors happen asynchronously and are technically more or less the same. They are
-    intended to signal rather fatal errors in the system, e.g. if a transaction times out on the
-    `SoC` interconnect. They are very implementation specific and it is up to the SoC vendor to
-    decide which events are delivered as SErrors instead of normal IRQs.
+## Challenges
 
-## Exception entry
+Testing Rust `#![no_std]` code like our kernel is, at the point of writing this tutorial, not an
+easy endeavor. The short version is: We cannot use Rust's [native testing framework] straight away.
+Utilizing the `#[test]` attribute macro and running `cargo test` would throw compilation errors,
+because there are dependencies on the standard library.
 
-I recommend to read pages D1-5355 of the [ARMv8 Architecture Reference Manual][ARMv8_Manual Ja] to
-understand the mechanisms of taking an exception.
+[native testing framework]: https://doc.rust-lang.org/book/ch11-00-testing.html
 
-Here's an excerpt of important features for this tutorial:
-- Exception entry moves the processor to the same or a higher `Exception Level`, but never to a
-  lower `EL`.
-- The program status is saved in the `SPSR_ELx` register at the target `EL`.
-- The preferred return address is saved in the `ELR_ELx` register.
-  - "Preferred" here means that `ELR_ELx` may hold the instruction address of the instructions that
-    caused the exception (`synchronous case`) or the first instruction that did not complete due to
-    an `asynchronous` exception. Details in pages D1-5357 of the [ARMv8 Architecture Reference
-    Manual][ARMv8_Manual Ja].
-- All kinds of exceptions are turned off upon taking an exception, so that by default, exception
-  handlers can not get interrupted themselves.
-- Taking an exception will select the dedicated stack pointer of the target `EL`.
-  - For example, if an exception in `EL0` is taken, the Stack Pointer Select register `SPSel` will
-    switch from `0` to `1`, meaning that `SP_EL1` will be used by the exception vector code unless
-    you explicitly change it back to `SP_EL0`.
+We have to fall back to Rust's unstable [custom_test_frameworks] feature. It relieves us from
+dependencies on the standard library, but comes at the cost of having a reduced feature set. Instead
+of annotating functions with `#[test]`, the `#[test_case]` attribute must be used. Additionally, we
+need to write a `test_runner` function, which is supposed to execute all the functions annotated
+with `#[test_case]`. This is barely enough to get `Unit Tests` running, though. There will be some
+more challenges that need be solved for getting `Integration Tests` running as well.
 
+Please note that for automation purposes, all testing will be done in `QEMU` and not on real
+hardware.
 
-### Exception Vectors
+[custom_test_frameworks]: https://doc.rust-lang.org/unstable-book/language-features/custom-test-frameworks.html
+[Integration Tests]: https://doc.rust-lang.org/book/ch11-03-test-organization.html#integration-tests
 
-`AArch64` has a total of `16` exception vectors. There is one for each of the four kinds that were
-introduced already, and additionally, it is taken into account _where_ the exception was taken from
-and what the circumstances were.
+### Acknowledgements
 
-Here is a copy of the decision table as shown in pages D1-5358 of the [ARMv8 Architecture
-Reference Manual][ARMv8_Manual Ja]:
+On this occasion, kudos to [@phil-opp] for his x86-based [testing] article. It helped a lot in
+putting together this tutorial. Please go ahead and read it for a different perspective and
+additional insights.
 
-[ARMv8_Manual Ja]: https://developer.arm.com/documentation/ddi0487/ja/
+[testing]: https://os.phil-opp.com/testing
 
-<table>
-    <thead>
-        <tr>
-            <th rowspan=2>Exception taken from </th>
-            <th colspan=4>Offset for exception type</th>
-        </tr>
-        <tr>
-            <th>Synchronous</th>
-            <th>IRQ or vIRQ</th>
-            <th>FIQ or vFIQ</th>
-            <th>SError or vSError</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td width="40%">Current Exception level with SP_EL0.</td>
-            <td align="center">0x000</td>
-            <td align="center">0x080</td>
-            <td align="center">0x100</td>
-            <td align="center">0x180</td>
-        </tr>
-        <tr>
-            <td>Current Exception level with SP_ELx, x>0.</td>
-            <td align="center">0x200</td>
-            <td align="center">0x280</td>
-            <td align="center">0x300</td>
-            <td align="center">0x380</td>
-        </tr>
-        <tr>
-            <td>Lower Exception level, where the implemented level immediately lower than the target level is using AArch64.</td>
-            <td align="center">0x400</td>
-            <td align="center">0x480</td>
-            <td align="center">0x500</td>
-            <td align="center">0x580</td>
-        </tr>
-        <tr>
-            <td>Lower Exception level, where the implemented level immediately lower than the target level is using AArch32.</td>
-            <td align="center">0x600</td>
-            <td align="center">0x680</td>
-            <td align="center">0x700</td>
-            <td align="center">0x780</td>
-        </tr>
-    </tbody>
-</table>
+## Folder Restructuring
 
-Since our kernel runs in `EL1`, using `SP_EL1`, if we'd cause a synchronous exception, the exception
-vector at offset `0x200` would be executed. But what does that even mean?
+For reasons explained later, in this tutorial, we need to add two support crates next to our main
+kernel crate. To keep everything organized in separate directories, we are switching to what `cargo`
+calls a [virtual manifest]. The kernel crate moves to `$ROOT/kernel`, and the support crates will go
+into `$ROOT/libraries/`. The `Cargo.toml` in the `$ROOT` folder desribes this layout:
 
-## Handler Code and Offsets
+```toml
+[workspace]
 
-In many architectures, Operating Systems register their exception handlers (aka vectors) by
-compiling an architecturally defined data structure that stores function pointers to the different
-handlers. This can be as simple as an ordinary array of function pointers. The `base address` of
-this data structure is then stored into a special purpose register so that the CPU can branch to the
-respective handler function upon taking an exception. The classic `x86_64` architecture follows this
-principle, for example.
-
-In `AArch64`, it is a bit different. Here, we have the special purpose register as well, called
-`VBAR_EL1`: Vector Base Address Register.
-
-However, it does not store the base address of an array of function pointers, but the base address
-of a **memory location that contains code** for the 16 handlers, one handler back-to-back after the
-other. Each handler can take a maximum space of `0x80` bytes, aka `128` bytes. That's why the table
-above shows `offsets`: To indicate at which offset a certain handler starts.
-
-Of course, you are not obliged to cram all your handler code into only 128 bytes. You are free to
-branch off to any other functions at any time. Actually, that is needed in most cases anyways,
-because the context-saving code alone would take up most of the available space (you'll learn what
-context saving is shortly).
-
-Additionally, there is a requirement that the `Vector Base Address` is aligned to `0x800` aka `2048`
-bytes.
-
-## Rust and Assembly Implementation
-
-The implementation uses a mix of `Rust` and `Assembly` code.
-
-### Context Save and Restore
-
-Exception vectors, just like any other code, use a bunch of commonly shared processor resources.
-Most of all, the set of `General Purpose Registers` (GPRs) that each core in `AArch64` provides
-(`x0`-`x30`).
-
-In order to not taint these registers when executing exception vector code, it is general practice
-to save these shared resources in memory (the stack, to be precise) as the very first action. This
-is commonly described as *saving the context*. Exception vector code can then use the shared
-resources in its own code without bothering, and as a last action before returning from exception
-handling code, restore the context, so that the processor can continue where it left off before
-taking the exception.
-
-Context save and restore is one of the few places in system software where there is no way around
-some hand-crafted assembly. Introducing `exception.s`:
-
-```asm
-/// Call the function provided by parameter `\handler` after saving the exception context. Provide
-/// the context as the first parameter to '\handler'.
-.macro CALL_WITH_CONTEXT handler
-__vector_\handler:
-	// Make room on the stack for the exception context.
-	sub	sp,  sp,  #16 * 17
-
-	// Store all general purpose registers on the stack.
-	stp	x0,  x1,  [sp, #16 * 0]
-	stp	x2,  x3,  [sp, #16 * 1]
-	stp	x4,  x5,  [sp, #16 * 2]
-	stp	x6,  x7,  [sp, #16 * 3]
-	stp	x8,  x9,  [sp, #16 * 4]
-	stp	x10, x11, [sp, #16 * 5]
-	stp	x12, x13, [sp, #16 * 6]
-	stp	x14, x15, [sp, #16 * 7]
-	stp	x16, x17, [sp, #16 * 8]
-	stp	x18, x19, [sp, #16 * 9]
-	stp	x20, x21, [sp, #16 * 10]
-	stp	x22, x23, [sp, #16 * 11]
-	stp	x24, x25, [sp, #16 * 12]
-	stp	x26, x27, [sp, #16 * 13]
-	stp	x28, x29, [sp, #16 * 14]
-
-	// Add the exception link register (ELR_EL1), saved program status (SPSR_EL1) and exception
-	// syndrome register (ESR_EL1).
-	mrs	x1,  ELR_EL1
-	mrs	x2,  SPSR_EL1
-	mrs	x3,  ESR_EL1
-
-	stp	lr,  x1,  [sp, #16 * 15]
-	stp	x2,  x3,  [sp, #16 * 16]
-
-	// x0 is the first argument for the function called through `\handler`.
-	mov	x0,  sp
-
-	// Call `\handler`.
-	bl	\handler
-
-	// After returning from exception handling code, replay the saved context and return via
-	// `eret`.
-	b	__exception_restore_context
-
-.size	__vector_\handler, . - __vector_\handler
-.type	__vector_\handler, function
-.endm
+members = [
+        "libraries/*",
+        "kernel"
+]
 ```
 
-First, a macro for saving the context is defined. It eventually jumps to follow-up handler code, and
-finally restores the context. In advance, we reserve space on the stack for the context. That is,
-the 30 `GPRs`, the `link register`, the `exception link register` (holding the preferred return
-address), the `saved program status` and the `exception syndrome register`. Afterwards, we store
-those registers, save the current stack address in `x0` and branch off to follow-up handler-code,
-whose function name is supplied as an argument to the macro (`\handler`).
+[virtual manifest]: https://doc.rust-lang.org/cargo/reference/workspaces.html#virtual-manifest
 
-The handler code will be written in Rust, but use the platform's `C` ABI. This way, we can define a
-function signature that has a pointer to the context-data on the stack as its first argument, and
-know that this argument is expected to be in the `x0` register. We need to use the `C` ABI here
-because `Rust` has no stable convention ([yet](https://github.com/rust-lang/rfcs/issues/600)).
+## Implementation
 
-### Exception Vector Table
+We introduce two new `Makefile` targets:
 
-Next, we craft the exception vector table:
-
-```asm
-// Align by 2^11 bytes, as demanded by ARMv8-A. Same as ALIGN(2048) in an ld script.
-.align 11
-
-// Export a symbol for the Rust code to use.
-__exception_vector_start:
-
-// Current exception level with SP_EL0.
-//
-// .org sets the offset relative to section start.
-//
-// # Safety
-//
-// - It must be ensured that `CALL_WITH_CONTEXT` <= 0x80 bytes.
-.org 0x000
-	CALL_WITH_CONTEXT current_el0_synchronous
-.org 0x080
-	CALL_WITH_CONTEXT current_el0_irq
-.org 0x100
-	FIQ_SUSPEND
-.org 0x180
-	CALL_WITH_CONTEXT current_el0_serror
-
-// Current exception level with SP_ELx, x > 0.
-.org 0x200
-	CALL_WITH_CONTEXT current_elx_synchronous
-.org 0x280
-	CALL_WITH_CONTEXT current_elx_irq
-.org 0x300
-	FIQ_SUSPEND
-.org 0x380
-	CALL_WITH_CONTEXT current_elx_serror
-
-[...]
+```console
+$ make test_unit
+$ make test_integration
 ```
 
-Note how each vector starts at the required offset from the section start using the `.org`
-directive. Each macro call introduces an explicit handler function name, which is implemented in
-`Rust` in `exception.rs`.
+In essence, the `make test_*` targets will execute `cargo test` instead of `cargo rustc`. The
+details will be explained in due course. The rest of the tutorial will explain as chronologically as
+possible what happens when `make test_*` aka `cargo test` runs.
 
-### Implementing handlers
+Please note that the new targets are added to the existing `make test` target, so this is now your
+one-stop target to execute all possible tests for the kernel:
 
-The file `exception.rs` first defines a `struct` of the exception context that is stored on the
-stack by the assembly code:
+```Makefile
+test: test_boot test_unit test_integration
+```
+
+### Test Organization
+
+Until now, our kernel crate was a so-called `binary crate`. As [explained in the official Rust
+book], this crate type disallows having `integration tests`. Quoting the book:
+
+[explained in the official Rust book]: https://doc.rust-lang.org/book/ch11-03-test-organization.html#integration-tests-for-binary-crates
+
+> If our project is a binary crate that only contains a _src/main.rs_ file and doesn’t have a
+> _src/lib.rs_ file, we can’t create integration tests in the _tests_ directory and bring functions
+> defined in the _src/main.rs_ file into scope with a `use` statement. Only library crates expose
+> functions that other crates can use; binary crates are meant to be run on their own.
+
+> This is one of the reasons Rust projects that provide a binary have a straightforward
+> _src/main.rs_ file that calls logic that lives in the _src/lib.rs_ file. Using that structure,
+> integration tests _can_ test the library crate with `use` to make the important functionality
+> available. If the important functionality works, the small amount of code in the _src/main.rs_
+> file will work as well, and that small amount of code doesn’t need to be tested.
+
+So let's do that first: We add a `lib.rs` to our crate that aggregates and exports the lion's share
+of the kernel code. The `main.rs` file is stripped down to the minimum. It only keeps the
+`kernel_init() -> !` and `kernel_main() -> !` functions, everything else is brought into scope with
+`use` statements.
+
+Since it is not possible to use `kernel` as the name for both the library and the binary part of the
+crate, new entries in `$ROOT/kernel/Cargo.toml` are needed to differentiate the names. What's more,
+`cargo test` would try to compile and run `unit tests` for both. In our case, it will be sufficient
+to have all the unit test code in `lib.rs`, so test generation for `main.rs` can be disabled in
+`Cargo.toml` as well through the `test` flag:
+
+```toml
+[lib]
+name = "libkernel"
+test = true
+
+[[bin]]
+name = "kernel"
+test = false
+```
+
+### Enabling `custom_test_frameworks` for Unit Tests
+
+In `lib.rs`, we add the following headers to get started with `custom_test_frameworks`:
 
 ```rust
-/// The exception context as it is stored on the stack on exception entry.
-#[repr(C)]
-struct ExceptionContext {
-    /// General Purpose Registers.
-    gpr: [u64; 30],
+// Testing
+#![cfg_attr(test, no_main)]
+#![feature(custom_test_frameworks)]
+#![reexport_test_harness_main = "test_main"]
+#![test_runner(crate::test_runner)]
+```
 
-    /// The link register, aka x30.
-    lr: u64,
+Since this is a library now, we do not keep the `#![no_main]` inner attribute that `main.rs` has,
+because a library has no `main()` entry function, so the attribute does not apply. When compiling
+for testing, though, it is still needed. The reason is that `cargo test` basically turns `lib.rs`
+into a binary again by inserting a generated `main()` function (which is then calling a function
+that runs all the unit tests, but more about that in a second...).
 
-    /// Exception link register. The program counter at the time the exception happened.
-    elr_el1: u64,
+However, since  our kernel code [overrides the compiler-inserted `main` shim] by way of using
+`#![no_main]`, we need the same when `cargo test` is producing its test kernel binary. After all,
+what we want is a minimal kernel that boots on the target and runs its own unit tests. Therefore, we
+conditionally set this attribute (`#![cfg_attr(test, no_main)]`) when the `test` flag is set, which
+it is when `cargo test` runs.
 
-    /// Saved program status.
-    spsr_el1: SpsrEL1,
+[overrides the compiler-inserted `main` shim]: https://doc.rust-lang.org/unstable-book/language-features/lang-items.html?highlight=no_main#writing-an-executable-without-stdlib
 
-    // Exception syndrome register.
-    esr_el1: EsrEL1,
+#### The Unit Test Runner
+
+The `#![test_runner(crate::test_runner)]` attribute declares the path of the test runner function
+that we are supposed to provide. This is the one that will be called by the `cargo test` generated
+`main()` function. Here is the implementation in `lib.rs`:
+
+```rust
+/// The default runner for unit tests.
+pub fn test_runner(tests: &[&test_types::UnitTest]) {
+    // This line will be printed as the test header.
+    println!("Running {} tests", tests.len());
+
+    for (i, test) in tests.iter().enumerate() {
+        print!("{:>3}. {:.<58}", i + 1, test.name);
+
+        // Run the actual test.
+        (test.test_func)();
+
+        // Failed tests call panic!(). Execution reaches here only if the test has passed.
+        println!("[ok]")
+    }
 }
 ```
 
-The handlers take a `struct ExceptionContext` argument. Since we do not plan to implement handlers
-for each exception yet, a default handler is provided:
+The function signature shows that `test_runner` takes one argument: A slice of
+`test_types::UnitTest` references. This type definition lives in an external crate stored at
+`$ROOT/libraries/test_types`. It is external because the type is also needed for a self-made
+[procedural macro] that we'll use to write unit tests, and procedural macros _have_ to live in their
+own crate. So to avoid a circular dependency between kernel and proc-macro, this split was needed.
+Anyways, here is the type definition:
+
+[procedural macro]: https://doc.rust-lang.org/reference/procedural-macros.html
 
 ```rust
-/// Prints verbose information about the exception and then panics.
-fn default_exception_handler(exc: &ExceptionContext) {
-    panic!(
-        "CPU Exception!\n\n\
-        {}",
-        exc
-    );
+/// Unit test container.
+pub struct UnitTest {
+    /// Name of the test.
+    pub name: &'static str,
+
+    /// Function pointer to the test.
+    pub test_func: fn(),
 }
 ```
 
-The actual handlers referenced from the assembly can now branch to it for the time being, e.g.:
+A `UnitTest` provides a name and a classic function pointer to the unit test function. The
+`test_runner` just iterates over the slice, prints the respective test's name and calls the test
+function.
+
+The convetion is that as long as the test function does not `panic!`, the test was successful.
+
+#### Calling the Test `main()` Function
+
+The last of the attributes we added is `#![reexport_test_harness_main = "test_main"]`. Remember that
+our kernel uses the `no_main` attribute, and that we also set it for the test compilation. We did
+that because we wrote our own `_start()` function, which kicks off the following call chain during
+kernel boot:
+
+|     | Function                 | File                    |
+| --- | ------------------------ | ----------------------- |
+| 1.  | `_start()`               | The library's `boot.s`  |
+| 2.  | (some more aarch64 code) | The library's `boot.rs` |
+| 3.  | `kernel_init()`          | `main.rs`               |
+| 4.  | `kernel_main()`          | `main.rs`               |
+
+A function named `main` is never called. Hence, the `main()` function generated by `cargo test`
+would be silently dropped, and therefore the tests would never be executed. As you can see, the
+first function getting called in our carved-out `main.rs` is `kernel_init()`. So in order to get the
+tests to execute, we add a test-environment version of `kernel_init()` to `lib.rs` as well
+(conditional compilation ensures it is only present when the test flag is set), and call the `cargo
+test` generated `main()` function from there.
+
+This is where `#![reexport_test_harness_main = "test_main"]` finally comes into picture. It declares
+the name of the generated main function so that we can manually call it. Here is the final
+implementation in `lib.rs`:
 
 ```rust
+/// The `kernel_init()` for unit tests.
+#[cfg(test)]
 #[no_mangle]
-extern "C" fn current_elx_irq(e: &mut ExceptionContext) {
-    default_exception_handler(e);
+unsafe fn kernel_init() -> ! {
+    exception::handling_init();
+    bsp::driver::qemu_bring_up_console();
+
+    test_main();
+
+    cpu::qemu_exit_success()
 }
 ```
 
-## Causing an Exception - Testing the Code
+Note the call to `bsp::driver::qemu_bring_up_console()`. Since we are running all our tests inside
+`QEMU`, we need to ensure that whatever peripheral implements the kernel's `console` interface is
+initialized, so that we can print from our tests. If you recall [tutorial 03], bringing up
+peripherals in `QEMU` might not need the full initialization as is needed on real hardware (setting
+clocks, config registers, etc...) due to the abstractions in `QEMU`'s emulation code. So this is an
+opportunity to cut down on setup code.
 
-We want to see two cases in action:
-1. How taking, handling and returning from an exception works.
-2. How the `panic!` print for unhandled exceptions looks like.
+[tutorial 03]: ../03_hacky_hello_world
 
-So after setting up exceptions in `main.rs` by calling
+As a matter of fact, for the `Raspberrys`, nothing needs to be done, so the function is empy. But
+this might be different for other hardware emulated by `QEMU`, so it makes sense to introduce the
+function now to make it easier in case new `BSPs` are added to the kernel in the future.
+
+Next, the reexported `test_main()` is called, which will call our `test_runner()` which finally
+prints the unit test names and executes them.
+
+### Quitting QEMU with user-defined Exit Codes
+
+Let's recap where we are right now:
+
+We've enabled `custom_test_frameworks` in `lib.rs` to a point where, when using a `make test_unit`
+target, the code gets compiled to a test kernel binary that eventually executes all the
+(yet-to-be-defined) `UnitTest` instances by executing all the way from `_start()` to our
+`test_runner()` function.
+
+Through mechanisms that are explained later, `cargo` will now instantiate a `QEMU` process that
+exectues this test kernel. The question now is: How is test success/failure communicated to `cargo`?
+Answer: `cargo` inspects `QEMU`'s [exit status]:
+
+  - `0` translates to testing was successful.
+  - `non-0` means failure.
+
+Hence, we need a clever trick now so that our Rust kernel code can get `QEMU` to exit itself with an
+exit status that the kernel code supplies. In [@phil-opp]'s testing article, you [learned how to do
+this] for `x86 QEMU` systems by using a special `ISA` debug-exit device. Unfortunately, we can't
+have that one for our `aarch64` system because it is not compatible.
+
+In our case, we can leverage the ARM [semihosting] emulation of `QEMU` and do a `SYS_EXIT`
+semihosting call with an additional parameter for the exit code. I've written a separate crate,
+[qemu-exit], to do this. So let us import it and utilize it in `_arch/aarch64/cpu.rs` to provide the
+following exit calls for the kernel:
 
 ```rust
-exception::handling_init();
+//--------------------------------------------------------------------------------------------------
+// Testing
+//--------------------------------------------------------------------------------------------------
+#[cfg(feature = "test_build")]
+use qemu_exit::QEMUExit;
+
+#[cfg(feature = "test_build")]
+const QEMU_EXIT_HANDLE: qemu_exit::AArch64 = qemu_exit::AArch64::new();
+
+/// Make the host QEMU binary execute `exit(1)`.
+#[cfg(feature = "test_build")]
+pub fn qemu_exit_failure() -> ! {
+    QEMU_EXIT_HANDLE.exit_failure()
+}
+
+/// Make the host QEMU binary execute `exit(0)`.
+#[cfg(feature = "test_build")]
+pub fn qemu_exit_success() -> ! {
+    QEMU_EXIT_HANDLE.exit_success()
+}
 ```
 
-we cause a data abort exception by reading from memory address `8 GiB`:
+[Click here] in case you are interested in the implementation. Note that for the functions to work,
+the `-semihosting` flag must be added to the `QEMU` invocation.
+
+You might have also noted the `#[cfg(feature = "test_build")]`. In the `Makefile`, we ensure that
+this feature is only enabled when `cargo test` runs. This way, it is ensured that testing-specific
+code is conditionally compiled only for testing.
+
+[exit status]: https://en.wikipedia.org/wiki/Exit_status
+[@phil-opp]: https://github.com/phil-opp
+[learned how to do this]: https://os.phil-opp.com/testing/#exiting-qemu
+[semihosting]: https://static.docs.arm.com/100863/0200/semihosting.pdf
+[qemu-exit]: https://github.com/andre-richter/qemu-exit
+[Click here]: https://github.com/andre-richter/qemu-exit/blob/master/src/aarch64.rs
+
+#### Exiting Unit Tests
+
+Unit test failure shall be triggered by the `panic!` macro, either directly or by way of using
+`assert!` macros. Until now, our `panic!` implementation finally called `cpu::wait_forever()` to
+safely park the panicked CPU core in a busy loop. This can't be used for the unit tests, because
+`cargo` would wait forever for `QEMU` to exit and stall the whole test run. Again, conditional
+compilation is used to differentiate between a release and testing version of how a `panic!`
+concludes:
 
 ```rust
-// Cause an exception by accessing a virtual address for which no translation was set up. This
-// code accesses the address 8 GiB, which is outside the mapped address space.
-//
-// For demo purposes, the exception handler will catch the faulting 8 GiB address and allow
-// execution to continue.
-info!("");
-info!("Trying to read from address 8 GiB...");
-let mut big_addr: u64 = 8 * 1024 * 1024 * 1024;
-unsafe { core::ptr::read_volatile(big_addr as *mut u64) };
-```
-
-This triggers our exception code, because we try to read from a virtual address for which no mapping
-has been installed. Remember, we only mapped up to `4 GiB` of address space in the previous
-tutorial.
-
-To survive this exception, the respective handler has a special demo case:
-
-```rust
+/// The point of exit for `libkernel`.
+///
+/// It is linked weakly, so that the integration tests can overload its standard behavior.
+#[linkage = "weak"]
 #[no_mangle]
-extern "C" fn current_elx_synchronous(e: &mut ExceptionContext) {
-    if e.fault_address_valid() {
-        let far_el1 = FAR_EL1.get();
-
-        // This catches the demo case for this tutorial. If the fault address happens to be 8 GiB,
-        // advance the exception link register for one instruction, so that execution can continue.
-        if far_el1 == 8 * 1024 * 1024 * 1024 {
-            e.elr_el1 += 4;
-
-            return;
-        }
+fn _panic_exit() -> ! {
+    #[cfg(not(feature = "test_build"))]
+    {
+        cpu::wait_forever()
     }
 
-    default_exception_handler(e);
+    #[cfg(feature = "test_build")]
+    {
+        cpu::qemu_exit_failure()
+    }
 }
 ```
 
-It checks if the faulting address equals `8 GiB`, and if so, advances the copy of the `ELR` by 4,
-which makes it point to the next instruction after the instruction that caused the exception. When
-this handler returns, execution continues in the assembly macro we introduced before. The macro has
-only one more line left: `b __exception_restore_context`, which jumps to an assembly function that
-plays back our saved context before finally executing `eret` to return from the exception.
+In case _none_ of the unit tests panicked, `lib.rs`'s `kernel_init()` calls
+`cpu::qemu_exit_success()` to successfully conclude the unit test run.
 
-This will kick us back into `main.rs`. But we also want to see the `panic!` print.
+### Controlling Test Kernel Execution
 
-Therefore, a second read is done, this time from address `9 GiB`. A case which the handler will not
-catch, eventually triggering the `panic!` call from the default handler.
+Now is a good time to catch up on how the test kernel binary is actually being executed. Normally,
+`cargo test` would try to execute the compiled binary as a normal child process. This would fail
+horribly because we build a kernel, and not a userspace process. Also, chances are high that you sit
+in front of an `x86` machine, whereas the RPi kernel is `AArch64`.
+
+Therefore, we need to install some hooks that make sure the test kernel gets executed inside `QEMU`,
+quite like it is done for the existing `make qemu` target that is in place since `tutorial 1`. The
+first step is to add a new file to the project, `.cargo/config.toml`:
+
+```toml
+[target.'cfg(target_os = "none")']
+runner = "target/kernel_test_runner.sh"
+```
+
+Instead of executing a compilation result directly, the `runner` flag will instruct `cargo` to
+delegate the execution. Using the setting depicted above, `target/kernel_test_runner.sh` will be
+executed and given the full path to the compiled test kernel as the first command line argument.
+
+The file `kernel_test_runner.sh` does not exist by default. We generate it on demand when one of the
+`make test_*` targets is called:
+
+```Makefile
+##------------------------------------------------------------------------------
+## Helpers for unit and integration test targets
+##------------------------------------------------------------------------------
+define KERNEL_TEST_RUNNER
+    #!/usr/bin/env bash
+
+    # The cargo test runner seems to change into the crate under test's directory. Therefore, ensure
+    # this script executes from the root.
+    cd $(shell pwd)
+
+    TEST_ELF=$$(echo $$1 | sed -e 's/.*target/target/g')
+    TEST_BINARY=$$(echo $$1.img | sed -e 's/.*target/target/g')
+
+    $(OBJCOPY_CMD) $$TEST_ELF $$TEST_BINARY
+    $(DOCKER_TEST) $(EXEC_TEST_DISPATCH) $(EXEC_QEMU) $(QEMU_TEST_ARGS) -kernel $$TEST_BINARY
+endef
+
+export KERNEL_TEST_RUNNER
+
+define test_prepare
+    @mkdir -p target
+    @echo "$$KERNEL_TEST_RUNNER" > target/kernel_test_runner.sh
+    @chmod +x target/kernel_test_runner.sh
+endef
+
+##------------------------------------------------------------------------------
+## Run unit test(s)
+##------------------------------------------------------------------------------
+test_unit:
+	$(call color_header, "Compiling unit test(s) - $(BSP)")
+	$(call test_prepare)
+	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(TEST_CMD) --lib
+```
+
+It first does the standard `objcopy` step to strip the `ELF` down to a raw binary. Just like in all
+the other Makefile targets. Next, the script generates a relative path from the absolute path
+provided to it by `cargo`, and finally compiles a `docker` command to execute the test kernel. For
+reference, here it is fully resolved for an `RPi3 BSP`:
+
+```bash
+docker run -t --rm -v /opt/rust-raspberrypi-OS-tutorials/12_integrated_testing:/work/tutorial -w /work/tutorial -v /opt/rust-raspberrypi-OS-tutorials/12_integrated_testing/../common:/work/common rustembedded/osdev-utils:2021.12 ruby ../common/tests/dispatch.rb qemu-system-aarch64 -M raspi3 -serial stdio -display none -semihosting -kernel $TEST_BINARY
+```
+
+This command is quite similar to the one used in the `make test_boot` target that we have since
+`tutorial 3`. However, we never bothered explaining it, so lets take a closer look this time. One of
+the key ingredients is that we execute this script: `ruby ../common/tests/dispatch.rb`.
+
+#### Wrapping QEMU Test Execution
+
+`dispatch.rb` is a [Ruby] script which first determines what kind of test is due by inspecting the
+`QEMU`-command that was given to it. In case of `unit tests`, we are only interested if they all
+executed successfully, which can be checked by inspecting `QEMU`'s exit code. So the script takes
+the provided qemu command it got from `ARGV`, and creates and runs an instance of `ExitCodeTest`:
+
+```ruby
+qemu_cmd = ARGV.join(' ')
+binary = ARGV.last
+test_name = binary.gsub(%r{.*deps/}, '').split('-')[0]
+
+# Check if virtual manifest (tutorial 12 or later) or not
+path_prefix = File.exist?('kernel/Cargo.toml') ? 'kernel/' : ''
+
+case test_name
+when 'kernel8.img'
+    load "#{path_prefix}tests/boot_test_string.rb" # provides 'EXPECTED_PRINT'
+    BootTest.new(qemu_cmd, EXPECTED_PRINT).run # Doesn't return
+
+when 'libkernel'
+    ExitCodeTest.new(qemu_cmd, 'Kernel library unit tests').run # Doesn't return
+```
+
+The easy case is `QEMU` exiting by itself by means of `aarch64::exit_success()` or
+`aarch64::exit_failure()`. But the script can also catch the case of a test that gets stuck, e.g. in
+an unintentional busy loop or a crash. If `ExitCodeTest` does not observe any output of the test
+kernel for `MAX_WAIT_SECS`, it cancels the execution and marks the test as failed. Test success or
+failure is finally reported back to `cargo`.
+
+Here is the essential part happening in `class ExitCodeTest` (If `QEMU` exits itself, an `EOFError`
+is thrown):
+
+```ruby
+def run_concrete_test
+    Timeout.timeout(MAX_WAIT_SECS) do
+        @test_output << @qemu_serial.read_nonblock(1024) while @qemu_serial.wait_readable
+    end
+rescue EOFError
+    @qemu_serial.close
+    @test_error = $CHILD_STATUS.to_i.zero? ? false : 'QEMU exit status != 0'
+rescue Timeout::Error
+    @test_error = 'Timed out waiting for test'
+rescue StandardError => e
+    @test_error = e.inspect
+end
+```
+
+Please note that `dispatch.rb` and all its dependencies live in the shared folder
+`../common/tests/`.
+
+[Ruby]: https://www.ruby-lang.org/
+
+### Writing Unit Tests
+
+Alright, that's a wrap for the whole chain from `make test_unit` all the way to reporting the test
+exit status back to `cargo test`. It is a lot to digest already, but we haven't even learned to
+write `Unit Tests` yet.
+
+In essence, it is almost like in `std` environments, with the difference that `#[test]` can't be
+used, because it is part of the standard library. The `no_std` replacement attribute provided by
+`custom_test_frameworks` is `#[test_case]`. You can put `#[test_case]` before functions, constants
+or statics (you have to decide for one and stick with it). Each attributed item is added to the
+"list" that is then passed to the `test_runner` function.
+
+As you learned earlier, we decided that our tests shall be instances of `test_types::UnitTest`. Here
+is the type definition again:
+
+```rust
+/// Unit test container.
+pub struct UnitTest {
+    /// Name of the test.
+    pub name: &'static str,
+
+    /// Function pointer to the test.
+    pub test_func: fn(),
+}
+```
+
+So what we could do now is write something like:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test_case]
+    const TEST1: test_types::UnitTest = test_types::UnitTest {
+            name: "test_runner_executes_in_kernel_mode",
+            test_func: || {
+                let (level, _) = current_privilege_level();
+
+                assert!(level == PrivilegeLevel::Kernel)
+            },
+        };
+}
+```
+
+Since this is a bit boiler-platy with the const and name definition, let's write a [procedural
+macro] named `#[kernel_test]` to simplify this. It should work this way:
+
+  1. Must be put before functions that take no arguments and return nothing.
+  1. Automatically constructs a `const UnitTest` from attributed functions like shown above by:
+      1. Converting the function name to the `name` member of the `UnitTest` struct.
+      1. Populating the `test_func` member with a closure that executes the body of the attributed
+         function.
+
+For the sake of brevity, we're not going to discuss the macro implementation. [The source is in the
+test-macros crate] if you're interested in it. Using the macro, the example shown before now boils
+down to this (this is now an actual example from [exception.rs]:
+
+[procedural macro]: https://doc.rust-lang.org/reference/procedural-macros.html
+[The source is in the test-macros crate]: test-macros/src/lib.rs
+[exception.rs]: src/exception.rs
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_macros::kernel_test;
+
+    /// Libkernel unit tests must execute in kernel mode.
+    #[kernel_test]
+    fn test_runner_executes_in_kernel_mode() {
+        let (level, _) = current_privilege_level();
+
+        assert!(level == PrivilegeLevel::Kernel)
+    }
+}
+```
+
+Note that since proc macros need to live in their own crates, we need to create a new one at
+`$ROOT/libraries/test-macros` and save it there.
+
+Aaaaaand that's how you write unit tests. We're finished with that part for good now :raised_hands:.
+
+### Integration Tests
+
+We are still not done with the tutorial, though :scream:.
+
+Integration tests need some special attention here and there too. As you already learned, they live
+in `$CRATE/tests/`. Each `.rs` file in there gets compiled into its own test kernel binary and
+executed separately by `cargo test`. The code in the integration tests includes the library part of
+our kernel (`libkernel`) through `use` statements.
+
+Also note that the entry point for each `integration test` must be the `kernel_init()` function
+again, just like in the `unit test` case.
+
+#### Test Harness
+
+By default, `cargo test` will pull in the test harness (that's the official name for the generated
+`main()` function) into integration tests as well. This gives you a further means of partitioning
+your test code into individual chunks. For example, take a look at `tests/01_timer_sanity.rs`:
+
+```rust
+//! Timer sanity tests.
+
+#![feature(custom_test_frameworks)]
+#![no_main]
+#![no_std]
+#![reexport_test_harness_main = "test_main"]
+#![test_runner(libkernel::test_runner)]
+
+use core::time::Duration;
+use libkernel::{bsp, cpu, exception, time};
+use test_macros::kernel_test;
+
+#[no_mangle]
+unsafe fn kernel_init() -> ! {
+    exception::handling_init();
+    bsp::driver::qemu_bring_up_console();
+
+    // Depending on CPU arch, some timer bring-up code could go here. Not needed for the RPi.
+
+    test_main();
+
+    cpu::qemu_exit_success()
+}
+
+/// Simple check that the timer is running.
+#[kernel_test]
+fn timer_is_counting() {
+    assert!(time::time_manager().uptime().as_nanos() > 0)
+}
+
+/// Timer resolution must be sufficient.
+#[kernel_test]
+fn timer_resolution_is_sufficient() {
+    assert!(time::time_manager().resolution().as_nanos() > 0);
+    assert!(time::time_manager().resolution().as_nanos() < 100)
+}
+```
+
+Note how the `test_runner` from `libkernel` is pulled in through
+`#![test_runner(libkernel::test_runner)]`.
+
+#### No Test Harness
+
+For some tests, however, it is not needed to have the harness, because there is no need or
+possibility to partition the test into individual pieces. In this case, all the test code can live
+in `kernel_init()`, and harness generation can be turned off through `$ROOT/kernel/Cargo.toml`. This
+tutorial introduces two tests that don't need a harness. Here is how harness generation is turned
+off for them:
+
+```toml
+# List of tests without harness.
+[[test]]
+name = "00_console_sanity"
+harness = false
+
+[[test]]
+name = "02_exception_sync_page_fault"
+harness = false
+
+[[test]]
+name = "03_exception_restore_sanity"
+harness = false
+```
+
+#### Overriding Panic Behavior
+
+Did you notice the `#[linkage = "weak"]` attribute some chapters earlier at the `_panic_exit()`
+function? This marks the function in `lib.rs` as a [weak symbol]. Let's look at it again:
+
+```rust
+/// The point of exit for `libkernel`.
+///
+/// It is linked weakly, so that the integration tests can overload its standard behavior.
+#[linkage = "weak"]
+#[no_mangle]
+fn _panic_exit() -> ! {
+    #[cfg(not(feature = "test_build"))]
+    {
+        cpu::wait_forever()
+    }
+
+    #[cfg(feature = "test_build")]
+    {
+        cpu::qemu_exit_failure()
+    }
+}
+```
+
+[weak symbol]: https://en.wikipedia.org/wiki/Weak_symbol
+
+This enables integration tests in `$CRATE/tests/` to override this function according to their
+needs. This is useful, because depending on the kind of test, a `panic!` could mean success or
+failure. For example, `tests/02_exception_sync_page_fault.rs` is intentionally causing a page fault,
+so the wanted outcome is a `panic!`. Here is the whole test (minus some inline comments):
+
+```rust
+//! Page faults must result in synchronous exceptions.
+
+#![feature(format_args_nl)]
+#![no_main]
+#![no_std]
+
+mod panic_exit_success;
+
+use libkernel::{bsp, cpu, exception, info, memory, println};
+
+#[no_mangle]
+unsafe fn kernel_init() -> ! {
+    use memory::mmu::interface::MMU;
+
+    exception::handling_init();
+    bsp::driver::qemu_bring_up_console();
+
+    // This line will be printed as the test header.
+    println!("Testing synchronous exception handling by causing a page fault");
+
+    if let Err(string) = memory::mmu::mmu().enable_mmu_and_caching() {
+        info!("MMU: {}", string);
+        cpu::qemu_exit_failure()
+    }
+
+    info!("Writing beyond mapped area to address 9 GiB...");
+    let big_addr: u64 = 9 * 1024 * 1024 * 1024;
+    core::ptr::read_volatile(big_addr as *mut u64);
+
+    // If execution reaches here, the memory access above did not cause a page fault exception.
+    cpu::qemu_exit_failure()
+}
+```
+
+The `_panic_exit()` version that makes `QEMU` return `0` (indicating test success) is pulled in by
+`mod panic_exit_success;`, and it will take precedence over the `weak` version from `lib.rs`.
+
+### Console Tests
+
+As the kernel or OS grows, it will be more and more interesting to test user/kernel interaction
+through the serial console. That is, sending strings/characters to the console and expecting
+specific answers in return. The `dispatch.rb` wrapper script provides infrastructure to recognize
+and dispatch console I/O tests with little overhead. It basically works like this:
+
+  1. For each integration test, check if a companion file to the `.rs` test file exists.
+      - A companion file has the same name, but ends in `.rb`.
+      - The companion file contains one or more console I/O subtests.
+  1. If it exists, load the file to dynamically import the console subtests.
+  1. Create a `ConsoleIOTest` instance and run it.
+      - This first spawns `QEMU` and attaches to `QEMU`'s serial console emulation.
+      - Then it runs all console subtests on it.
+
+Here is an excerpt from `00_console_sanity.rb` showing a subtest that does a handshake with the
+kernel over the console:
+
+```ruby
+require 'console_io_test'
+
+# Verify sending and receiving works as expected.
+class TxRxHandshakeTest < SubtestBase
+    def name
+        'Transmit and Receive handshake'
+    end
+
+    def run(qemu_out, qemu_in)
+        qemu_in.write_nonblock('ABC')
+        expect_or_raise(qemu_out, 'OK1234')
+    end
+end
+```
+
+The subtest first sends `"ABC"` over the console to the kernel, and then expects to receive
+`"OK1234"` back. On the kernel side, it looks like this in `00_console_sanity.rs`:
+
+```rust
+#![feature(format_args_nl)]
+#![no_main]
+#![no_std]
+
+/// Console tests should time out on the I/O harness in case of panic.
+mod panic_wait_forever;
+
+use libkernel::{bsp, console, cpu, exception, print};
+
+#[no_mangle]
+unsafe fn kernel_init() -> ! {
+    use console::console;
+
+    exception::handling_init();
+    bsp::driver::qemu_bring_up_console();
+
+    // Handshake
+    assert_eq!(console().read_char(), 'A');
+    assert_eq!(console().read_char(), 'B');
+    assert_eq!(console().read_char(), 'C');
+    print!("OK1234");
+```
 
 ## Test it
 
+Believe it or not, that is all. There are four ways you can run tests now:
+
+  1. `make test` will run all tests back-to-back. That is, the ever existing `boot test` first, then
+     `unit tests`, then `integration tests`.
+  1. `make test_unit` will run `libkernel`'s unit tests.
+  1. `make test_integration` will run all integration tests back-to-back.
+  1. `TEST=TEST_NAME make test_integration` will run a specficic integration test.
+      - For example, `TEST=01_timer_sanity make test_integration`
+
 ```console
-$ make chainboot
+$ make test
 [...]
-Minipush 1.0
 
-[MP] ⏳ Waiting for /dev/ttyUSB0
-[MP] ✅ Serial connected
-[MP] 🔌 Please power the target now
+     Running unittests (target/aarch64-unknown-none-softfloat/release/deps/libkernel-142a8d94bc9c615a)
+         -------------------------------------------------------------------
+         🦀 Running 6 tests
+         -------------------------------------------------------------------
 
- __  __ _      _ _                 _
-|  \/  (_)_ _ (_) |   ___  __ _ __| |
-| |\/| | | ' \| | |__/ _ \/ _` / _` |
-|_|  |_|_|_||_|_|____\___/\__,_\__,_|
+           1. virt_mem_layout_sections_are_64KiB_aligned................[ok]
+           2. virt_mem_layout_has_no_overlaps...........................[ok]
+           3. test_runner_executes_in_kernel_mode.......................[ok]
+           4. kernel_tables_in_bss......................................[ok]
+           5. size_of_tabledescriptor_equals_64_bit.....................[ok]
+           6. size_of_pagedescriptor_equals_64_bit......................[ok]
 
-           Raspberry Pi 3
+         -------------------------------------------------------------------
+         ✅ Success: Kernel library unit tests
+         -------------------------------------------------------------------
 
-[ML] Requesting binary
-[MP] ⏩ Pushing 64 KiB =========================================🦀 100% 0 KiB/s Time: 00:00:00
-[ML] Loaded! Executing the payload now
 
-[    0.798323] mingo version 0.11.0
-[    0.798530] Booting on: Raspberry Pi 3
-[    0.798985] MMU online. Special regions:
-[    0.799462]       0x00080000 - 0x0008ffff |  64 KiB | C   RO PX  | Kernel code and RO data
-[    0.800480]       0x3f000000 - 0x4000ffff |  17 MiB | Dev RW PXN | Device MMIO
-[    0.801369] Current privilege level: EL1
-[    0.801845] Exception handling state:
-[    0.802290]       Debug:  Masked
-[    0.802680]       SError: Masked
-[    0.803069]       IRQ:    Masked
-[    0.803459]       FIQ:    Masked
-[    0.803849] Architectural timer resolution: 52 ns
-[    0.804423] Drivers loaded:
-[    0.804759]       1. BCM PL011 UART
-[    0.805182]       2. BCM GPIO
-[    0.805539] Timer test, spinning for 1 second
-[    1.806070]
-[    1.806074] Trying to read from address 8 GiB...
-[    1.806624] ************************************************
-[    1.807316] Whoa! We recovered from a synchronous exception!
-[    1.808009] ************************************************
-[    1.808703]
-[    1.808876] Let's try again
-[    1.809212] Trying to read from address 9 GiB...
-[    1.809776] Kernel panic!
 
-Panic location:
-      File 'src/_arch/aarch64/exception.rs', line 58, column 5
+Compiling integration test(s) - rpi3
+    Finished release [optimized] target(s) in 0.00s
+     Running tests/00_console_sanity.rs (target/aarch64-unknown-none-softfloat/release/deps/00_console_sanity-c06130838f14dbff)
+         -------------------------------------------------------------------
+         🦀 Running 3 console I/O tests
+         -------------------------------------------------------------------
 
-CPU Exception!
+           1. Transmit and Receive handshake............................[ok]
+           2. Transmit statistics.......................................[ok]
+           3. Receive statistics........................................[ok]
 
-ESR_EL1: 0x96000004
-      Exception Class         (EC) : 0x25 - Data Abort, current EL
-      Instr Specific Syndrome (ISS): 0x4
-FAR_EL1: 0x0000000240000000
-SPSR_EL1: 0x600003c5
-      Flags:
-            Negative (N): Not set
-            Zero     (Z): Set
-            Carry    (C): Set
-            Overflow (V): Not set
-      Exception handling state:
-            Debug  (D): Masked
-            SError (A): Masked
-            IRQ    (I): Masked
-            FIQ    (F): Masked
-      Illegal Execution State (IL): Not set
-ELR_EL1: 0x00000000000845f8
+         Console log:
+           ABCOK123463
 
-General purpose register:
-      x0 : 0x0000000000000000         x1 : 0x0000000000086187
-      x2 : 0x0000000000000027         x3 : 0x0000000000081280
-      x4 : 0x0000000000000006         x5 : 0x1e27329c00000000
-      x6 : 0x0000000000000000         x7 : 0xd3d18908028f0243
-      x8 : 0x0000000240000000         x9 : 0x0000000000086187
-      x10: 0x0000000000000443         x11: 0x000000003f201000
-      x12: 0x0000000000000019         x13: 0x00000000ffffd8f0
-      x14: 0x000000000000147b         x15: 0x00000000ffffff9c
-      x16: 0x000000000007fd38         x17: 0x0000000005f5e0ff
-      x18: 0x00000000000c58fc         x19: 0x0000000000090008
-      x20: 0x0000000000085fc0         x21: 0x000000003b9aca00
-      x22: 0x0000000000082238         x23: 0x00000000000813d4
-      x24: 0x0000000010624dd3         x25: 0xffffffffc4653600
-      x26: 0x0000000000086988         x27: 0x0000000000086080
-      x28: 0x0000000000085f10         x29: 0x0000000000085c00
-      lr : 0x00000000000845ec
+         -------------------------------------------------------------------
+         ✅ Success: 00_console_sanity.rs
+         -------------------------------------------------------------------
+
+
+     Running tests/01_timer_sanity.rs (target/aarch64-unknown-none-softfloat/release/deps/01_timer_sanity-62a954d22239d1a3)
+         -------------------------------------------------------------------
+         🦀 Running 3 tests
+         -------------------------------------------------------------------
+
+           1. timer_is_counting.........................................[ok]
+           2. timer_resolution_is_sufficient............................[ok]
+           3. spin_accuracy_check_1_second..............................[ok]
+
+         -------------------------------------------------------------------
+         ✅ Success: 01_timer_sanity.rs
+         -------------------------------------------------------------------
+
+
+     Running tests/02_exception_sync_page_fault.rs (target/aarch64-unknown-none-softfloat/release/deps/02_exception_sync_page_fault-2d8ec603ef1c4d8e)
+         -------------------------------------------------------------------
+         🦀 Testing synchronous exception handling by causing a page fault
+         -------------------------------------------------------------------
+
+         [    0.132792] Writing beyond mapped area to address 9 GiB...
+         [    0.134563] Kernel panic!
+
+         Panic location:
+               File 'src/_arch/aarch64/exception.rs', line 58, column 5
+
+         CPU Exception!
+
+         ESR_EL1: 0x96000004
+               Exception Class         (EC) : 0x25 - Data Abort, current EL
+         [...]
+
+         -------------------------------------------------------------------
+         ✅ Success: 02_exception_sync_page_fault.rs
+         -------------------------------------------------------------------
+
+
+     Running tests/03_exception_restore_sanity.rs (target/aarch64-unknown-none-softfloat/release/deps/03_exception_restore_sanity-a56e14285bb26e0e)
+         -------------------------------------------------------------------
+         🦀 Running 1 console I/O tests
+         -------------------------------------------------------------------
+
+           1. Exception restore.........................................[ok]
+
+         Console log:
+           Testing exception restore
+           [    0.130757] Making a dummy system call
+           [    0.132592] Back from system call!
+
+         -------------------------------------------------------------------
+         ✅ Success: 03_exception_restore_sanity.rs
+         -------------------------------------------------------------------
+
 ```
 

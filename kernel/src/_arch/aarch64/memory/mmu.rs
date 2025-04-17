@@ -170,3 +170,33 @@ impl memory::mmu::interface::MMU for MemoryManagementUnit {
         SCTLR_EL1.matches_all(SCTLR_EL1::M::Enable)
     }
 }
+
+//--------------------------------------------------------------------------------------------------
+// Testing
+//--------------------------------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::{cell::UnsafeCell, ops::Range};
+    use test_macros::kernel_test;
+
+    /// Check if KERNEL_TABLES is in .bss.
+    #[kernel_test]
+    fn kernel_tables_in_bss() {
+        extern "Rust" {
+            static __bss_start: UnsafeCell<u64>;
+            static __bss_end_exclusive: UnsafeCell<u64>;
+        }
+
+        let bss_range = unsafe {
+            Range {
+                start: __bss_start.get(),
+                end: __bss_end_exclusive.get(),
+            }
+        };
+        let kernel_tables_addr = unsafe { &KERNEL_TABLES as *const _ as usize as *mut u64 };
+
+        assert!(bss_range.contains(&kernel_tables_addr));
+    }
+}

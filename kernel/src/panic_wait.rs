@@ -11,6 +11,23 @@ use core::panic::PanicInfo;
 // Private Code
 //--------------------------------------------------------------------------------------------------
 
+/// The point of exit for `libkernel`.
+///
+/// It is linked weakly, so that the integration tests can overload its standard behavior.
+#[linkage = "weak"]
+#[no_mangle]
+fn _panic_exit() -> ! {
+    #[cfg(not(feature = "test_build"))]
+    {
+        cpu::wait_forever()
+    }
+
+    #[cfg(feature = "test_build")]
+    {
+        cpu::qemu_exit_failure()
+    }
+}
+
 /// Stop immediately if called a second time.
 ///
 /// # Note
@@ -35,7 +52,7 @@ fn panic_prevent_reenter() {
         return;
     }
 
-    cpu::wait_forever()
+    _panic_exit()
 }
 
 #[panic_handler]
@@ -61,5 +78,5 @@ fn panic(info: &PanicInfo) -> ! {
         info.message(),
     );
 
-    cpu::wait_forever()
+    _panic_exit()
 }
