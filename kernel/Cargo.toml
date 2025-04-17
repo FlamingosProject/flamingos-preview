@@ -37,7 +37,8 @@ test-macros = { path = "../libraries/test-macros" }
 # Unit tests are done in the library part of the kernel.
 [lib]
 name = "libkernel"
-test = true
+test = false
+bench = false
 
 # Disable unit tests for the kernel binary.
 [[bin]]
