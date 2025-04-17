@@ -11,7 +11,9 @@
 use super::{PendingIRQs, PeripheralIRQ};
 use crate::{
     bsp::device_driver::common::MMIODerefWrapper,
-    exception, synchronization,
+    exception,
+    memory::{Address, Virtual},
+    synchronization,
     synchronization::{IRQSafeNullLock, InitStateLock},
 };
 use tock_registers::{
@@ -79,7 +81,7 @@ impl PeripheralIC {
     /// # Safety
     ///
     /// - The user must ensure to provide a correct MMIO start address.
-    pub const unsafe fn new(mmio_start_addr: usize) -> Self {
+    pub const unsafe fn new(mmio_start_addr: Address<Virtual>) -> Self {
         Self {
             wo_registers: IRQSafeNullLock::new(WriteOnlyRegisters::new(mmio_start_addr)),
             ro_registers: ReadOnlyRegisters::new(mmio_start_addr),

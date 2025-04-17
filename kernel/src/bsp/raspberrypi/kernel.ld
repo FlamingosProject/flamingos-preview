@@ -38,7 +38,7 @@ SECTIONS
     ***********************************************************************************************/
     .boot_core_stack (NOLOAD) :
     {
-                                             /*   ^             */
+        __boot_core_stack_start = .;         /*   ^             */
                                              /*   | stack       */
         . += __rpi_phys_binary_load_addr;    /*   | growth      */
                                              /*   | direction   */
@@ -67,6 +67,7 @@ SECTIONS
     /***********************************************************************************************
     * Data + BSS
     ***********************************************************************************************/
+    __data_start = .;
     .data : { *(.data*) } :segment_data
 
     /* Section is zeroed in pairs of u64. Align start and end to 16 bytes */
@@ -77,6 +78,18 @@ SECTIONS
         . = ALIGN(16);
         __bss_end_exclusive = .;
     } :segment_data
+
+    . = ALIGN(PAGE_SIZE);
+    __data_end_exclusive = .;
+
+    /***********************************************************************************************
+    * MMIO Remap Reserved
+    ***********************************************************************************************/
+    __mmio_remap_start = .;
+    . += 8 * 1024 * 1024;
+    __mmio_remap_end_exclusive = .;
+
+    ASSERT((. & PAGE_MASK) == 0, "MMIO remap reservation is not page aligned")
 
     /***********************************************************************************************
     * Misc

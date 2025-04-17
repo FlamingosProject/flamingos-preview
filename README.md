@@ -1,688 +1,397 @@
-# Tutorial 13 - Exceptions Part 2: Peripheral IRQs
+# Tutorial 14 - Virtual Memory Part 2: MMIO Remap
 
 ## tl;dr
 
-- We write `device drivers` for the two interrupt controllers on the **Raspberry Pi 3** (`Broadcom`
-  custom controller) and **Pi 4** (`ARM` Generic Interrupt Controller v2, `GICv2`).
-- Modularity is ensured by interfacing everything through a trait named `IRQManager`.
-- Handling for our first peripheral IRQs is implemented: The `UART`'s receive IRQs.
-
-![Header](../doc/14_header.png)
+- We introduce a first set of changes which is eventually needed for separating `kernel` and `user`
+  address spaces.
+- The memory mapping strategy gets more sophisticated as we do away with `identity mapping` the
+  whole of the board's address space.
+- Instead, only ranges that are actually needed are mapped:
+    - The `kernel binary` stays `identity mapped` for now.
+    - Device `MMIO regions` are remapped lazily (to a special reserved virtual address region).
 
 ## Table of Contents
 
-- [Tutorial 13 - Exceptions Part 2: Peripheral IRQs](#tutorial-13---exceptions-part-2-peripheral-irqs)
+- [Tutorial 14 - Virtual Memory Part 2: MMIO Remap](#tutorial-14---virtual-memory-part-2-mmio-remap)
   - [tl;dr](#tldr)
   - [Table of Contents](#table-of-contents)
   - [Introduction](#introduction)
-  - [Different Controllers: A Usecase for Abstraction](#different-controllers-a-usecase-for-abstraction)
-  - [New Challenges: Reentrancy](#new-challenges-reentrancy)
   - [Implementation](#implementation)
-    - [The Kernel's Interfaces for Interrupt Handling](#the-kernels-interfaces-for-interrupt-handling)
-      - [Uniquely Identifying an IRQ](#uniquely-identifying-an-irq)
-        - [The BCM IRQ Number Scheme](#the-bcm-irq-number-scheme)
-        - [The GICv2 IRQ Number Scheme](#the-gicv2-irq-number-scheme)
-      - [Registering IRQ Handlers](#registering-irq-handlers)
-      - [Handling Pending IRQs](#handling-pending-irqs)
-    - [Reentrancy: What to protect?](#reentrancy-what-to-protect)
-    - [The Interrupt Controller Device Drivers](#the-interrupt-controller-device-drivers)
-      - [The BCM Driver (Pi 3)](#the-bcm-driver-pi-3)
-        - [Peripheral Controller Register Access](#peripheral-controller-register-access)
-        - [The IRQ Handler Table](#the-irq-handler-table)
-      - [The GICv2 Driver (Pi 4)](#the-gicv2-driver-pi-4)
-        - [GICC Details](#gicc-details)
-        - [GICD Details](#gicd-details)
+    - [A New Mapping API in `src/memory/mmu/translation_table.rs`](#a-new-mapping-api-in-srcmemorymmutranslation_tablers)
+    - [The new APIs in action](#the-new-apis-in-action)
+    - [MMIO Virtual Address Allocation](#mmio-virtual-address-allocation)
+    - [Supporting Changes](#supporting-changes)
   - [Test it](#test-it)
 
 ## Introduction
 
-In [tutorial 11], we laid the groundwork for exception handling from the processor architecture
-side. Handler stubs for the different exception types were set up, and a first glimpse at exception
-handling was presented by causing a `synchronous` exception by means of a `page fault`.
+This tutorial is a first step of many needed for enabling `userspace applications` (which we
+hopefully will have some day in the very distant future).
 
-[tutorial 11]: ../11_exceptions_part1_groundwork
+For this, one of the features we want is a clean separation of `kernel` and `user` address spaces.
+Fortunately, `ARMv8` has convenient architecture support to realize this. The following text and
+pictue gives some more motivation and technical information. It is quoted from the _[ARM Cortex-A
+Series Programmer’s Guide for ARMv8-A], Chapter 12.2, Separation of kernel and application Virtual
+Address spaces_:
 
-In this tutorial, we will add a first level of support for one of the three types of `asynchronous`
-exceptions that are defined for `AArch64`: `IRQs`. The overall goal for this tutorial is to get rid
-of the  busy-loop at the end of our current `kernel_main()` function, which actively polls the
-`UART` for newly received characters. Instead, we will let the processor idle and wait for the
-`UART`'s RX IRQs, which indicate that new characters were received. A respective `IRQ` service
-routine, provided by the `UART` driver, will run in response to the `IRQ` and print the characters.
+> Operating systems typically have a number of applications or tasks running concurrently. Each of
+> these has its own unique set of translation tables and the kernel switches from one to another as
+> part of the process of switching context between one task and another. However, much of the memory
+> system is used only by the kernel and has fixed virtual to Physical Address mappings where the
+> translation table entries rarely change. The ARMv8 architecture provides a number of features to
+> efficiently handle this requirement.
+>
+> The table base addresses are specified in the Translation Table Base Registers `TTBR0_EL1` and
+> `TTBR1_EL1`. The translation table pointed to by `TTBR0` is selected when the upper bits of the VA
+> are all 0. `TTBR1` is selected when the upper bits of the VA are all set to 1. [...]
+>
+> Figure 12-4 shows how the kernel space can be mapped to the most significant area of memory and
+> the Virtual Address space associated with each application mapped to the least significant area of
+> memory. However, both of these are mapped to a much smaller Physical Address space.
 
-## Different Controllers: A Usecase for Abstraction
+<p align="center">
+    <img src="../doc/15_kernel_user_address_space_partitioning.png" height="500" align="center">
+</p>
 
-One very exciting aspect of this tutorial is that the `Pi 3` and the `Pi 4` feature completely
-different interrupt controllers. This is also a first in all of the tutorial series. Until now, both
-Raspberrys did not need differentiation with respect to their devices.
+This approach is also sometimes called a "[higher half kernel]". To eventually achieve this
+separation, this tutorial makes a start by changing the following things:
 
-The `Pi 3` has a very simple custom controller made by Broadcom (BCM), the manufacturer of the Pi's
-`System-on-Chip`. The `Pi 4` features an implementation of `ARM`'s Generic Interrupt Controller
-version 2 (`GICv2`). Since ARM's GIC controllers are the prevalent interrupt controllers in ARM
-application procesors, it is very beneficial to finally have it on the Raspberry Pi. It will enable
-people to learn about one of the most common building blocks in ARM-based embedded computing.
+1. Instead of bulk-`identity mapping` the whole of the board's address space, only the particular
+   parts that are needed will be mapped.
+1. For now, the `kernel binary` stays identity mapped. This will be changed in the coming tutorials
+   as it is a quite difficult and peculiar exercise to remap the kernel.
+1. Device `MMIO regions` are lazily remapped during device driver bringup (using the new
+   `DriverManage` function `instantiate_drivers()`).
+   1. A dedicated region of virtual addresses that we reserve using `BSP` code and the `linker
+      script` is used for this.
+1. We keep using `TTBR0` for the kernel translation tables for now. This will be changed when we
+   remap the `kernel binary` in the coming tutorials.
 
-This also means that we can finally make full use of all the infrastructure for abstraction that we
-prepared already. We will design an `IRQManager` interface trait and implement it in both controller
-drivers. The generic part of our `kernel` code will only be exposed to this trait (compare to the
-diagram in the [tl;dr] section). This common idiom of *program to an interface, not an
-implementation* enables a clean abstraction and makes the code modular and pluggable.
-
-[tl;dr]: #tldr
-
-## New Challenges: Reentrancy
-
-Enabling interrupts also poses new challenges with respect to protecting certain code sections in
-the kernel from being [re-entered]. Please read the linked article for background on that topic.
-
-[re-entered]: https://en.wikipedia.org/wiki/Reentrancy_(computing)
-
-Our `kernel` is still running on a single core. For this reason, we are still using our `NullLock`
-pseudo-locks for `Critical Sections` or `shared resources`, instead of real `Spinlocks`. Hence,
-interrupt handling at this point in time does not put us at risk of running into one of those
-dreaded `deadlocks`, which is one of several side-effects that reentrancy can cause. For example, a
-`deadlock` because of interrupts can happen happen when the executing CPU core has locked a
-`Spinlock` at the beginning of a function, an IRQ happens, and the IRQ service routine is trying to
-execute the same function. Since the lock is already locked, the core would spin forever waiting for
-it to be released.
-
-There is no straight-forward way to tell if a function is `reentrantcy`-safe or not. It usually
-needs careful manual checking to conclude. Even though it might be technically safe to `re-enter` a
-function, sometimes you don't want that to happen for functional reasons. For example, printing of a
-string should not be interrupted by a an interrupt service routine that starts printing another
-string, so that the output mixes. In the course of this tutorial, we will check and see where we
-want to protect against `reentrancy`.
+[ARM Cortex-A Series Programmer’s Guide for ARMv8-A]: https://developer.arm.com/documentation/den0024/latest/
+[higher half kernel]: https://wiki.osdev.org/Higher_Half_Kernel
 
 ## Implementation
 
-Okay, let's start. The following sections cover the the implementation in a top-down fashion,
-starting with the trait that interfaces all the `kernel` components to each other.
+Until now, the whole address space of the board was identity mapped at once. The **architecture**
+(`src/_arch/_/memory/**`) and **bsp** (`src/bsp/_/memory/**`) parts of the kernel worked
+together directly while setting up the translation tables, without any indirection through **generic
+kernel code** (`src/memory/**`).
 
-### The Kernel's Interfaces for Interrupt Handling
+The way it worked was that the `architectural MMU code` would query the `bsp code` about the start
+and end of the physical address space, and any special regions in this space that need a mapping
+that _is not_ normal chacheable DRAM. It would then go ahead and map the whole address space at once
+and never touch the translation tables again during runtime.
 
-First, we design the `IRQManager` trait that interrupt controller drivers must implement. The
-minimal set of functionality that we need for starters is:
+Changing in this tutorial, **architecture** and **bsp** code will no longer autonomously create the
+virtual memory mappings. Instead, this is now orchestrated by the kernel's **generic MMU subsystem
+code**.
 
-1. Registering an IRQ `handler` for a given IRQ `number`.
-2. Enabling an IRQ (from the controller side).
-3. Handling pending IRQs.
-4. Printing the list of registered IRQ handlers.
+### A New Mapping API in `src/memory/mmu/translation_table.rs`
 
-The trait is defined as `exception::asynchronous::interface::IRQManager`:
+First, we define an interface for operating on `translation tables`:
 
 ```rust
-pub trait IRQManager {
-    /// The IRQ number type depends on the implementation.
-    type IRQNumberType: Copy;
+/// Translation table operations.
+pub trait TranslationTable {
+    /// Anything that needs to run before any of the other provided functions can be used.
+    ///
+    /// # Safety
+    ///
+    /// - Implementor must ensure that this function can run only once or is harmless if invoked
+    ///   multiple times.
+    fn init(&mut self);
 
-    /// Register a handler.
-    fn register_handler(
-        &self,
-        irq_handler_descriptor: super::IRQHandlerDescriptor<Self::IRQNumberType>,
+    /// The translation table's base address to be used for programming the MMU.
+    fn phys_base_address(&self) -> Address<Physical>;
+
+    /// Map the given virtual memory region to the given physical memory region.
+    unsafe fn map_at(
+        &mut self,
+        virt_region: &MemoryRegion<Virtual>,
+        phys_region: &MemoryRegion<Physical>,
+        attr: &AttributeFields,
     ) -> Result<(), &'static str>;
-
-    /// Enable an interrupt in the controller.
-    fn enable(&self, irq_number: &Self::IRQNumberType);
-
-    /// Handle pending interrupts.
-    ///
-    /// This function is called directly from the CPU's IRQ exception vector. On AArch64,
-    /// this means that the respective CPU core has disabled exception handling.
-    /// This function can therefore not be preempted and runs start to finish.
-    ///
-    /// Takes an IRQContext token to ensure it can only be called from IRQ context.
-    #[allow(clippy::trivially_copy_pass_by_ref)]
-    fn handle_pending_irqs<'irq_context>(
-        &'irq_context self,
-        ic: &super::IRQContext<'irq_context>,
-    );
-
-    /// Print list of registered handlers.
-    fn print_handler(&self) {}
 }
 ```
 
-#### Uniquely Identifying an IRQ
+In order to enable the generic kernel code to manipulate the kernel's translation tables, they must
+first be made accessible. Until now, they were just a "hidden" struct in the `architectural` MMU
+driver (`src/arch/.../memory/mmu.rs`). This made sense because the MMU driver code was the only code
+that needed to be concerned with the table data structure, so having it accessible locally
+simplified things.
 
-The first member of the trait is the [associated type] `IRQNumberType`. The following explains why
-we make it customizable for the implementor and do not define the type as a plain integer right
-away.
+Since the tables need to be exposed to the rest of the kernel code now, it makes sense to move them
+to `BSP` code. Because ultimately, it is the `BSP` that is defining the translation table's
+properties, such as the size of the virtual address space that the tables need to cover.
 
-Interrupts can generally be characterizied with the following properties:
-
-[associated type]: https://doc.rust-lang.org/book/ch19-03-advanced-traits.html#specifying-placeholder-types-in-trait-definitions-with-associated-types
-
-1. Software-generated vs hardware-generated.
-2. Private vs shared.
-
-Different interrupt controllers take different approaches at categorizing and numbering IRQs that
-have one or the other property. Often times, this leads to situations where a plain integer does not
-suffice to uniquely identify an IRQ, and makes it necessary to encode additional information in the
-used type. Letting the respective interrupt controller driver define `IRQManager::IRQNumberType`
-itself addresses this issue. The rest of the `BSP` must then conditionally use this type.
-
-##### The BCM IRQ Number Scheme
-
-The `BCM` controller of the `Raspberry Pi 3`, for example, is composed of two functional parts: A
-**local** controller and a **peripheral** controller. The BCM's **local controller** handles all
-`private` IRQs, which means private SW-generated IRQs and IRQs of private HW devices. An example for
-the latter would be the `ARMv8` timer. Each  CPU core has its own private instance of it. The BCM's
-**peripheral controller** handles all IRQs of `non-private` HW devices such as the `UART` (if those
-IRQs can be declared as `shared` according to our taxonomy above is a different discussion, because
-the BCM controller allows these HW interrupts to be routed to _only one CPU core at a time_).
-
-The IRQ numbers of the BCM **local controller** range from `0..11`. The numbers of the **peripheral
-controller** range from `0..63`. This demonstrates why a primitive integer type would not be
-sufficient to uniquely encode the IRQs, because their ranges overlap. In the driver for the `BCM`
-controller, we therefore define the associated type as follows:
+They are now defined in the global instances region of `src/bsp/.../memory/mmu.rs`. To control
+access, they are  guarded by an `InitStateLock`.
 
 ```rust
-pub type LocalIRQ = BoundedUsize<{ InterruptController::MAX_LOCAL_IRQ_NUMBER }>;
-pub type PeripheralIRQ = BoundedUsize<{ InterruptController::MAX_PERIPHERAL_IRQ_NUMBER }>;
+//--------------------------------------------------------------------------------------------------
+// Global instances
+//--------------------------------------------------------------------------------------------------
 
-/// Used for the associated type of trait [`exception::asynchronous::interface::IRQManager`].
-#[derive(Copy, Clone)]
-#[allow(missing_docs)]
-pub enum IRQNumber {
-    Local(LocalIRQ),
-    Peripheral(PeripheralIRQ),
+/// The kernel translation tables.
+static KERNEL_TABLES: InitStateLock<KernelTranslationTable> =
+    InitStateLock::new(KernelTranslationTable::new());
+```
+
+The struct `KernelTranslationTable` is a type alias defined in the same file, which in turn gets its
+definition from an associated type of type `KernelVirtAddrSpace`, which itself is a type alias of
+`memory::mmu::AddressSpace`. I know this sounds horribly complicated, but in the end this is just
+some layers of `const generics` whose implementation is scattered between `generic` and `arch` code.
+This is done to (1) ensure a sane compile-time definition of the translation table struct (by doing
+various bounds checks), and (2) to separate concerns between generic `MMU` code and specializations
+that come from the `architectural` part.
+
+In the end, these tables can be accessed by calling `bsp::memory::mmu::kernel_translation_tables()`:
+
+```rust
+/// Return a reference to the kernel's translation tables.
+pub fn kernel_translation_tables() -> &'static InitStateLock<KernelTranslationTable> {
+    &KERNEL_TABLES
 }
 ```
 
-The type `BoundedUsize` is a newtype around an `usize` that uses a [const generic] to ensure that
-the value of the encapsulated IRQ number is in the allowed range (e.g. `0..MAX_LOCAL_IRQ_NUMBER` for
-`LocalIRQ`, with `MAX_LOCAL_IRQ_NUMBER == 11`).
-
-[const generic]: https://github.com/rust-lang/rfcs/blob/master/text/2000-const-generics.md
-
-##### The GICv2 IRQ Number Scheme
-
-The `GICv2` in the `Raspberry Pi 4`, on the other hand, uses a different scheme. IRQ numbers `0..31`
-are for `private` IRQs. Those are further subdivided into `SW-generated` (SGIs, `0..15`) and
-`HW-generated` (PPIs, Private Peripheral Interrupts, `16..31`). Numbers `32..1019` are for `shared
-hardware-generated` interrupts (SPI, Shared Peripheral Interrupts).
-
-There are no overlaps, so this scheme enables us to actually have a plain integer as a unique
-identifier for the IRQs. We define the type as follows:
+Finally, the generic kernel code (`src/memory/mmu.rs`) now provides a couple of memory mapping
+functions that access and manipulate this instance. They  are exported for the rest of the kernel to
+use:
 
 ```rust
-/// Used for the associated type of trait [`exception::asynchronous::interface::IRQManager`].
-pub type IRQNumber = BoundedUsize<{ GICv2::MAX_IRQ_NUMBER }>;
-```
-
-#### Registering IRQ Handlers
-
-To enable the controller driver to manage interrupt handling, it must know where to find respective
-handlers, and it must know how to call them. For the latter, we define an `IRQHandler` trait in
-`exception::asynchronous` that must be implemented by any SW entity that wants to handle IRQs:
-
-```rust
-/// Implemented by types that handle IRQs.
-pub trait IRQHandler {
-    /// Called when the corresponding interrupt is asserted.
-    fn handle(&self) -> Result<(), &'static str>;
-}
-```
-
-The `PL011Uart` driver gets the honors for being our first driver to ever implement this trait. In
-this tutorial, the `RX IRQ` and the `RX Timeout IRQ` will be configured. This means that the
-`PL011Uart` will assert it's interrupt line when one of following conditions is met:
-
-1. `RX IRQ`: The RX FIFO fill level is equal or more than the configured trigger level (which will be 1/8 of
-   the total FIFO size in our case).
-1. `RX Timeout IRQ`: The RX FIFO fill level is greater than zero, but less than the configured fill
-   level, and the characters have not been pulled for a certain amount of time. The exact time is
-   not documented in the respective `PL011Uart` datasheet. Usually, it is a single-digit multiple of
-   the time it takes to receive or transmit one character on the serial line.
-
- In the handler, our standard scheme of echoing any received characters back to the host is used:
-
-```rust
-impl exception::asynchronous::interface::IRQHandler for PL011Uart {
-    fn handle(&self) -> Result<(), &'static str> {
-        self.inner.lock(|inner| {
-            let pending = inner.registers.MIS.extract();
-
-            // Clear all pending IRQs.
-            inner.registers.ICR.write(ICR::ALL::CLEAR);
-
-            // Check for any kind of RX interrupt.
-            if pending.matches_any(MIS::RXMIS::SET + MIS::RTMIS::SET) {
-                // Echo any received characters.
-                while let Some(c) = inner.read_char_converting(BlockingMode::NonBlocking) {
-                    inner.write_char(c)
-                }
-            }
-        });
-
-        Ok(())
-    }
-}
-```
-
-Registering and enabling handlers in the interrupt controller is supposed to be done by the
-respective drivers themselves. Therefore, we added a new function to the standard device driver
-trait in `driver::interface::DeviceDriver` that must be implemented if IRQ handling is supported:
-
-```rust
-/// Called by the kernel to register and enable the device's IRQ handler.
+/// Raw mapping of a virtual to physical region in the kernel translation tables.
 ///
-/// Rust's type system will prevent a call to this function unless the calling instance
-/// itself has static lifetime.
-fn register_and_enable_irq_handler(
-    &'static self,
-    irq_number: &Self::IRQNumberType,
-) -> Result<(), &'static str> {
-    panic!(
-        "Attempt to enable IRQ {} for device {}, but driver does not support this",
-        irq_number,
-        self.compatible()
-    )
+/// Prevents mapping into the MMIO range of the tables.
+pub unsafe fn kernel_map_at(
+    name: &'static str,
+    virt_region: &MemoryRegion<Virtual>,
+    phys_region: &MemoryRegion<Physical>,
+    attr: &AttributeFields,
+) -> Result<(), &'static str>;
+
+/// MMIO remapping in the kernel translation tables.
+///
+/// Typically used by device drivers.
+pub unsafe fn kernel_map_mmio(
+    name: &'static str,
+    mmio_descriptor: &MMIODescriptor,
+) -> Result<Address<Virtual>, &'static str>;
+
+/// Map the kernel's binary. Returns the translation table's base address.
+pub unsafe fn kernel_map_binary() -> Result<Address<Physical>, &'static str>;
+
+/// Enable the MMU and data + instruction caching.
+pub unsafe fn enable_mmu_and_caching(
+    phys_tables_base_addr: Address<Physical>,
+) -> Result<(), MMUEnableError>;
+```
+
+### The new APIs in action
+
+`kernel_map_binary()` and `enable_mmu_and_caching()` are used early in `kernel_init()` to set up
+virtual memory:
+
+```rust
+let phys_kernel_tables_base_addr = match memory::mmu::kernel_map_binary() {
+    Err(string) => panic!("Error mapping kernel binary: {}", string),
+    Ok(addr) => addr,
+};
+
+if let Err(e) = memory::mmu::enable_mmu_and_caching(phys_kernel_tables_base_addr) {
+    panic!("Enabling MMU failed: {}", e);
 }
 ```
 
-Here is the implementation for the `PL011Uart`:
+Both functions internally use `bsp` and `arch` specific code to achieve their goals. For example,
+`memory::mmu::kernel_map_binary()` itself wraps around a `bsp` function of the same name
+(`bsp::memory::mmu::kernel_map_binary()`):
 
 ```rust
-fn register_and_enable_irq_handler(
-    &'static self,
-    irq_number: &Self::IRQNumberType,
-) -> Result<(), &'static str> {
-    use exception::asynchronous::{irq_manager, IRQHandlerDescriptor};
+/// Map the kernel binary.
+pub unsafe fn kernel_map_binary() -> Result<(), &'static str> {
+    generic_mmu::kernel_map_at(
+        "Kernel boot-core stack",
+        // omitted for brevity.
+    )?;
 
-    let descriptor = IRQHandlerDescriptor::new(*irq_number, Self::COMPATIBLE, self);
+    generic_mmu::kernel_map_at(
+        "Kernel code and RO data",
+        &virt_code_region(),
+        &kernel_virt_to_phys_region(virt_code_region()),
+        &AttributeFields {
+            mem_attributes: MemAttributes::CacheableDRAM,
+            acc_perms: AccessPermissions::ReadOnly,
+            execute_never: false,
+        },
+    )?;
 
-    irq_manager().register_handler(descriptor)?;
-    irq_manager().enable(irq_number);
+    generic_mmu::kernel_map_at(
+        "Kernel data and bss",
+        // omitted for brevity.
+    )?;
 
     Ok(())
 }
 ```
 
-The `exception::asynchronous::irq_manager()` function used here returns a reference to an
-implementor of the `IRQManager` trait. Since the implementation is supposed to be done by the
-platform's interrupt controller, this call will redirect to the `kernel`'s instance of either the
-driver for the `BCM` controller (`Raspberry Pi 3`) or the driver for the `GICv2` (`Pi 4`). We will
-look into the  implementation of the `register_handler()` function from the driver's perspective
-later. The gist here is that the calls on `irq_manager()` will make the platform's interrupt
-controller aware that the `UART` driver (i) wants to handle its interrupt and (ii) which function it
-provides to do so.
+Another user of the new APIs is the **driver subsystem**. As has been said in the introduction, the
+goal is to remap the `MMIO` regions of the drivers. To achieve this in a seamless way, some changes
+to the architecture of the driver subsystem were needed.
 
-Also note how `irq_number` is supplied as a function argument and not hardcoded. The reason is that
-the `UART` driver code is agnostic about the **IRQ numbers** that are associated to it. This is
-vendor-supplied information and as such typically part of the Board Support Package (`BSP`). It can
-vary from `BSP` to `BSP`, same like the board's memory map, which provides the `UART`'s MMIO
-register addresses.
+Until now, the drivers were `static instances` which had their `MMIO addresses` statically set in
+the constructor. This was fine, because even if virtual memory was activated, only `identity
+mapping` was used, so the hardcoded addresses would be valid with and without the MMU being active.
 
-With all this in place, we can finally let drivers register and enable their IRQ handlers with the
-interrupt controller, and unmask IRQ reception on the boot CPU core during the kernel init phase.
-The global `driver_manager` takes care of this in the function `init_drivers_and_irqs()` (before
-this tutorial, the function's name was `init_drivers()`), where this happens as the third and last
-step of initializing all registered device drivers:
+With `remapped MMIO addresses`, this is not possible anymore, since the remapping will only happen
+at runtime. Therefore, the new approach is to defer the whole instantiation of the drivers until the
+remapped addresses are known. To achieve this, in `src/bsp/raspberrypi/drivers.rs`, the static
+driver instances are now wrapped into a `MaybeUninit` (and are also `mut` now):
 
 ```rust
-pub unsafe fn init_drivers_and_irqs(&self) {
-    self.for_each_descriptor(|descriptor| {
-        // 1. Initialize driver.
-        if let Err(x) = descriptor.device_driver.init() {
-            // omitted for brevity
-        }
+static mut PL011_UART: MaybeUninit<device_driver::PL011Uart> = MaybeUninit::uninit();
+static mut GPIO: MaybeUninit<device_driver::GPIO> = MaybeUninit::uninit();
 
-        // 2. Call corresponding post init callback.
-        if let Some(callback) = &descriptor.post_init_callback {
-            // omitted for brevity
-        }
-    });
+#[cfg(feature = "bsp_rpi3")]
+static mut INTERRUPT_CONTROLLER: MaybeUninit<device_driver::InterruptController> =
+    MaybeUninit::uninit();
 
-    // 3. After all post-init callbacks were done, the interrupt controller should be
-    //    registered and functional. So let drivers register with it now.
-    self.for_each_descriptor(|descriptor| {
-        if let Some(irq_number) = &descriptor.irq_number {
-            if let Err(x) = descriptor
-                .device_driver
-                .register_and_enable_irq_handler(irq_number)
-            {
-                panic!(
-                    "Error during driver interrupt handler registration: {}: {}",
-                    descriptor.device_driver.compatible(),
-                    x
-                );
-            }
-        }
-    });
+#[cfg(feature = "bsp_rpi4")]
+static mut INTERRUPT_CONTROLLER: MaybeUninit<device_driver::GICv2> = MaybeUninit::uninit();
+```
+
+Accordingly, new dedicated `instantiate_xyz()` functions have been added, which will be called by
+the corresponding `driver_xyz()` functions. Here is an example for the `UART`:
+
+```rust
+/// This must be called only after successful init of the memory subsystem.
+unsafe fn instantiate_uart() -> Result<(), &'static str> {
+    let mmio_descriptor = MMIODescriptor::new(mmio::PL011_UART_START, mmio::PL011_UART_SIZE);
+    let virt_addr =
+        memory::mmu::kernel_map_mmio(device_driver::PL011Uart::COMPATIBLE, &mmio_descriptor)?;
+
+    PL011_UART.write(device_driver::PL011Uart::new(virt_addr));
+
+    Ok(())
 }
 ```
 
-
-In `main.rs`, IRQs are unmasked right afterwards, after which point IRQ handling is live:
-
 ```rust
-// Initialize all device drivers.
-driver::driver_manager().init_drivers_and_irqs();
+/// Function needs to ensure that driver registration happens only after correct instantiation.
+unsafe fn driver_uart() -> Result<(), &'static str> {
+    instantiate_uart()?;
 
-// Unmask interrupts on the boot CPU core.
-exception::asynchronous::local_irq_unmask();
-```
+    let uart_descriptor = generic_driver::DeviceDriverDescriptor::new(
+        PL011_UART.assume_init_ref(),
+        Some(post_init_uart),
+        Some(exception::asynchronous::irq_map::PL011_UART),
+    );
+    generic_driver::driver_manager().register_driver(uart_descriptor);
 
-#### Handling Pending IRQs
-
-Now that interrupts can happen, the `kernel` needs a way of requesting the interrupt controller
-driver to handle pending interrupts. Therefore, implementors of the trait `IRQManager` must also
-supply the following function:
-
-```rust
-fn handle_pending_irqs<'irq_context>(
-    &'irq_context self,
-    ic: &super::IRQContext<'irq_context>,
-);
-```
-
-An important aspect of this function signature is that we want to ensure that IRQ handling is only
-possible from IRQ context. Part of the reason is that this invariant allows us to make some implicit
-assumptions (which might depend on the target architecture, though). For example, as we have learned
-in [tutorial 11], in `AArch64`, _"all kinds of exceptions are turned off upon taking an exception,
-so that by default, exception handlers can not get interrupted themselves"_ (note that an IRQ is an
-exception). This is a useful property that relieves us from explicitly protecting IRQ handling from
-being interrupted itself. Another reason would be that calling IRQ handling functions from arbitrary
-execution contexts just doesn't make a lot of sense.
-
-[tutorial 11]: ../11_exceptions_part1_groundwork/
-
-So in order to ensure that this function is only being called from IRQ context, we borrow a
-technique that I first saw in the [Rust embedded WG]'s [bare-metal crate]. It uses Rust's type
-system to create a "token" that is only valid for the duration of the IRQ context. We create it
-directly at the top of the IRQ vector function in `_arch/aarch64/exception.rs`, and pass it on to
-the the implementation of the trait's handling function:
-
-[Rust embedded WG]: https://github.com/rust-embedded/bare-metal
-[bare-metal crate]: https://github.com/rust-embedded/bare-metal/blob/master/src/lib.rs#L20
-
-```rust
-#[no_mangle]
-extern "C" fn current_elx_irq(_e: &mut ExceptionContext) {
-    let token = unsafe { &exception::asynchronous::IRQContext::new() };
-    exception::asynchronous::irq_manager().handle_pending_irqs(token);
+    Ok(())
 }
 ```
 
-By requiring the caller of the function `handle_pending_irqs()` to provide this `IRQContext` token,
-we can prevent that the same function is accidentally being called from somewhere else. It is
-evident, though, that for this to work, it is the _user's responsibility_ to only ever create this
-token from within an IRQ context. If you want to circumvent this on purpose, you can do it.
+The code shows that an `MMIODescriptor` is created first, and then used to remap the MMIO region
+using `memory::mmu::kernel_map_mmio()`. This function will be discussed in detail in the next
+chapter. What's important for now is that it returns the new `Virtual Address` of the remapped MMIO
+region. The constructor of the `UART` driver now also expects a virtual address.
 
-### Reentrancy: What to protect?
+Next, a new instance of the `PL011Uart` driver is created, and written into the `PL011_UART` global
+variable (remember, it is defined as `MaybeUninit<device_driver::PL011Uart> =
+MaybeUninit::uninit()`). Meaning, after this line of code, `PL011_UART` is properly initialized.
+Only then, the driver is registered with the kernel and thus becomes accessible for the first time.
+This ensures that nobody can use the UART before its memory has been initialized properly.
 
-Now that interrupt handling is live, we need to think about `reentrancy`. At [the beginning of this
-tutorial], we mused about the need to protect certain functions from being re-entered, and that it
-is not straight-forward to identify all the places that need protection.
+### MMIO Virtual Address Allocation
 
-[the beginning of this tutorial]: #new-challenges-reentrancy
-
-In this tutorial, we will keep this part short nonetheless by taking a better-safe-than-sorry
-approach. In the past, we already made efforts to prepare parts of `shared resources` (e.g. global
-device driver instances) to be protected against parallel access. We did so by wrapping them into
-`NullLocks`, which we will upgrade to real `Spinlocks` once we boot secondary CPU cores.
-
-We can hook on that previous work and reason that anything that we wanted protected against parallel
-access so far, we also want it protected against reentrancy now. Therefore, we upgrade all
-`NullLocks` to `IRQSafeNullocks`:
+Getting back to the remapping part, let's peek inside `memory::mmu::kernel_map_mmio()`. We can see
+that a `virtual address region` is obtained from an `allocator` before remapping:
 
 ```rust
-impl<T> interface::Mutex for IRQSafeNullLock<T> {
-    type Data = T;
+pub unsafe fn kernel_map_mmio(
+    name: &'static str,
+    mmio_descriptor: &MMIODescriptor,
+) -> Result<Address<Virtual>, &'static str> {
 
-    fn lock<R>(&self, f: impl FnOnce(&mut Self::Data) -> R) -> R {
-        // In a real lock, there would be code encapsulating this line that ensures that this
-        // mutable reference will ever only be given out once at a time.
-        let data = unsafe { &mut *self.data.get() };
+    // omitted
 
-        // Execute the closure while IRQs are masked.
-        exception::asynchronous::exec_with_irq_masked(|| f(data))
-    }
+        let virt_region =
+            page_alloc::kernel_mmio_va_allocator().lock(|allocator| allocator.alloc(num_pages))?;
+
+        kernel_map_at_unchecked(
+            name,
+            &virt_region,
+            &phys_region,
+            &AttributeFields {
+                mem_attributes: MemAttributes::Device,
+                acc_perms: AccessPermissions::ReadWrite,
+                execute_never: true,
+            },
+        )?;
+
+    // omitted
 }
 ```
 
-The new part is that the call to `f(data)` is executed as a closure in
-`exception::asynchronous::exec_with_irq_masked()`. Inside that function, IRQs on the executing CPU
-core are masked before the `f(data)` is being executed, and restored afterwards:
+This allocator is defined and implemented in the added file `src/memory/mmu/page_alloc.rs`. Like
+other parts of the mapping code, its implementation makes use of the newly introduced
+`PageAddress<ATYPE>` and `MemoryRegion<ATYPE>` types (in
+[`src/memory/mmu/types.rs`](kernel/src/memory/mmu/types.rs)), but apart from that is rather straight
+forward. Therefore, it won't be covered in details here.
+
+The more interesting question is: How does the allocator get to learn which VAs it can use?
+
+This is happening in the following function, which gets called as part of
+`memory::mmu::post_enable_init()`, which in turn gets called in `kernel_init()` after the MMU has
+been turned on.
 
 ```rust
-/// Executes the provided closure while IRQs are masked on the executing core.
-///
-/// While the function temporarily changes the HW state of the executing core, it restores it to the
-/// previous state before returning, so this is deemed safe.
-#[inline(always)]
-pub fn exec_with_irq_masked<T>(f: impl FnOnce() -> T) -> T {
-    let saved = local_irq_mask_save();
-    let ret = f();
-    local_irq_restore(saved);
+/// Query the BSP for the reserved virtual addresses for MMIO remapping and initialize the kernel's
+/// MMIO VA allocator with it.
+fn kernel_init_mmio_va_allocator() {
+    let region = bsp::memory::mmu::virt_mmio_remap_region();
 
-    ret
+    page_alloc::kernel_mmio_va_allocator().lock(|allocator| allocator.init(region));
 }
 ```
 
-The helper functions used here are defined in `src/_arch/aarch64/exception/asynchronous.rs`.
+Again, it is the `BSP` that provides the information. The `BSP` itself indirectly gets it from the
+linker script. In it, we have defined an `8 MiB` region right after the `.data` segment:
 
-### The Interrupt Controller Device Drivers
+```ld.s
+__data_end_exclusive = .;
 
-The previous sections explained how the `kernel` uses the `IRQManager` trait. Now, let's have a look
-at the driver-side of it in the Raspberry Pi `BSP`. We start with the Broadcom interrupt controller
-featured in the `Pi 3`.
+/***********************************************************************************************
+* MMIO Remap Reserved
+***********************************************************************************************/
+__mmio_remap_start = .;
+. += 8 * 1024 * 1024;
+__mmio_remap_end_exclusive = .;
 
-#### The BCM Driver (Pi 3)
-
-As mentioned earlier, the `BCM` driver consists of two subcomponents, a **local** and a
-**peripheral** controller. The local controller owns a bunch of configuration registers, among
-others, the `routing` configuration for peripheral IRQs such as those from the `UART`. Peripheral
-IRQs can be routed to _one core only_. In our case, we leave the default unchanged, which means
-everything is routed to the boot CPU core. The image below depicts the `struct diagram` of the
-driver implementation.
-
-![BCM Driver](../doc/14_BCM_driver.png)
-
-We have a top-level driver, which implements the `IRQManager` trait. _Only the top-level driver_ is
-exposed to the rest of the `kernel`. The top-level itself has two members, representing the local
-and the peripheral controller, respectively, which implement the `IRQManager` trait as well. This
-design allows for easy forwarding of function calls from the top-level driver to one of the
-subcontrollers.
-
-For this tutorial, we leave out implementation of the local controller, because we will only be
-concerned with the peripheral  `UART` IRQ.
-
-##### Peripheral Controller Register Access
-
-When writing a device driver for a kernel with exception handling and multi-core support, it is
-always important to analyze what parts of the driver will need protection against reentrancy (we
-talked about this earlier in this tutorial) and/or parallel execution of other driver parts. If a
-driver function needs to follow a vendor-defined sequence of multiple register operations that
-include `write operations`, this is usually a good hint that protection might be needed. But that is
-only one of many examples.
-
-For the driver implementation in this tutorial, we are following a simple rule: Register read access
-is deemed always safe. Write access is guarded by an `IRQSafeNullLock`, which means that we are safe
-against `reentrancy` issues, and also in the future when the kernel will be running on multiple
-cores, we can easily upgrade to a real spinlock, which serializes register write operations from
-different CPU cores.
-
-In fact, for this tutorial, we probably would not have needed any protection yet, because all the
-driver does is read from the `PENDING_*` registers for the `handle_pending_irqs()` implementation,
-and writing to the `ENABLE_*` registers for the `enable()` implementation. However, the chosen
-architecture will have us set up for future extensions, when more complex register manipulation
-sequences might be needed.
-
-Since nothing complex is happening in the implementation, it is not covered in detail here. Please
-refer to [the source of the **peripheral** controller] to check it out.
-
-[the source of the **peripheral** controller]: kernel/src/bsp/device_driver/bcm/bcm2xxx_interrupt_controller/peripheral_ic.rs
-
-##### The IRQ Handler Table
-
-Calls to `register_handler()` result in the driver inserting the provided handler reference in a
-specific table (the handler reference is a member of `IRQDescriptor`):
-
-```rust
-type HandlerTable = [Option<exception::asynchronous::IRQHandlerDescriptor<PeripheralIRQ>>;
-    PeripheralIRQ::MAX_INCLUSIVE + 1];
+ASSERT((. & PAGE_MASK) == 0, "MMIO remap reservation is not page aligned")
 ```
 
-One of the requirements for safe operation of the `kernel` is that those handlers are not
-registered, removed or exchanged in the middle of an IRQ handling situation. This, again, is a
-multi-core scenario where one core might look up a handler entry while another core is modifying the
-same in parallel.
+The two symbols `__mmio_remap_start` and `__mmio_remap_end_exclusive` are used by the `BSP` to learn
+the VA range.
 
-While we want to allow drivers to take the decision of registering or not registering a handler at
-runtime, there is no need to allow it for the _whole_ runtime of the kernel. It is fine to restrict
-this option to the kernel `init phase`, at which only a single boot core runs and IRQs are masked.
+### Supporting Changes
 
-We introduce the so called `InitStateLock` for cases like that. From an API-perspective, it is a
-special variant of a `Read/Write exclusion synchronization primitive`. RWLocks in the Rust standard
-library [are characterized] as allowing _"a number of readers or at most one writer at any point in
-time"_. For the `InitStateLock`, we only implement the `read()` and `write()` functions:
+There's a couple of changes more not covered in this tutorial text, but the reader should ideally
+skim through them:
 
-[are characterized]: https://doc.rust-lang.org/std/sync/struct.RwLock.html
-
-```rust
-impl<T> interface::ReadWriteEx for InitStateLock<T> {
-    type Data = T;
-
-    fn write<R>(&self, f: impl FnOnce(&mut Self::Data) -> R) -> R {
-        assert!(
-            state::state_manager().is_init(),
-            "InitStateLock::write called after kernel init phase"
-        );
-        assert!(
-            !exception::asynchronous::is_local_irq_masked(),
-            "InitStateLock::write called with IRQs unmasked"
-        );
-
-        let data = unsafe { &mut *self.data.get() };
-
-        f(data)
-    }
-
-    fn read<R>(&self, f: impl FnOnce(&Self::Data) -> R) -> R {
-        let data = unsafe { &*self.data.get() };
-
-        f(data)
-    }
-}
-```
-
-The `write()` function is guarded by two `assertions`. One ensures that IRQs are masked, the other
-checks the `state::state_manager()` if the kernel is still in the init phase. The `State Manager` is
-new since this tutorial, and implemented in `src/state.rs`. It provides atomic state transition and
-reporting functions that are called when the kernel enters a new phase. In the current kernel, the
-only call is happening before the transition from `kernel_init()` to `kernel_main()`:
-
-```rust
-// Announce conclusion of the kernel_init() phase.
-state::state_manager().transition_to_single_core_main();
-```
-
-P.S.: Since the use case for the `InitStateLock` also applies to a few other places in the kernel
-(for example, registering the system-wide console during early boot), `InitStateLock`s have been
-incorporated in those other places as well.
-
-#### The GICv2 Driver (Pi 4)
-
-As we learned earlier, the ARM `GICv2` in the `Raspberry Pi 4` features a continuous interrupt
-number range:
-- IRQ numbers `0..31` represent IRQs that are private (aka local) to the respective processor core.
-- IRQ numbers `32..1019` are for shared IRQs.
-
-The `GIC` has a so-called `Distributor`, the `GICD`, and a `CPU Interface`, the `GICC`. The `GICD`,
-among other things, is used to enable IRQs and route them to one or more CPU cores. The `GICC` is
-used by CPU cores to check which IRQs are pending, and to acknowledge them once they were handled.
-There is one dedicated `GICC` for _each CPU core_.
-
-One neat thing about the `GICv2` is that any MMIO registers that are associated to core-private IRQs
-are `banked`. That means that different CPU cores can assert the same MMIO address, but they will
-end up accessing a core-private copy of the referenced register. This makes it very comfortable to
-program the `GIC`, because this hardware design ensures that each core only ever gets access to its
-own resources. Preventing one core to accidentally or willfully fiddle with the IRQ state of another
-core must therefore not be enforced in software.
-
-In summary, this means that any registers in the `GICD` that deal with the core-private IRQ range
-are banked. Since there is one `GICC` per CPU core, the whole thing is banked. This allows us to
-design the following `struct diagram` for our driver implementation:
-
-![GICv2 Driver](../doc/14_GICv2_driver.png)
-
-The top-level struct is composed of a `GICD`, a `GICC` and a `HandlerTable`. The latter is
-implemented identically as in the `Pi 3`.
-
-##### GICC Details
-
-Since the `GICC` is banked wholly, the top-level driver can directly forward any requests to it,
-without worrying about concurrency issues for now. Note that this only works as long as the `GICC`
-implementation is only accessing the banked `GICC` registers, and does not save any state in member
-variables that are stored in `DRAM`. The two main duties of the `GICC` struct are to read the `IAR`
-(Interrupt Acknowledge) register, which returns the number of the highest-priority pending IRQ, and
-writing to the `EOIR` (End Of Interrupt) register, which tells the hardware that handling of an
-interrupt is now concluded.
-
-##### GICD Details
-
-The `GICD` hardware block differentiates between `shared` and `banked` registers. As with the
-`GICC`, we don't have to protect the banked registers against concurrent access. The shared
-registers are wrapped into an `IRQSafeNullLock` again. The important parts of the `GICD` for this
-tutorial are the `ITARGETSR[256]` and `ISENABLER[32]` register arrays.
-
-Each `ITARGETSR` is subdivided into four _bytes_. Each byte represents one IRQ, and stores a bitmask
-that encodes all the `GICCs` to which the respective IRQ is forwarded. For example,
-`ITARGETSR[0].byte0` would represent IRQ number 0, and `ITARGETSR[0].byte3` IRQ number 3. In the
-`ISENABLER`, each _bit_ represents an IRQ. For example, `ISENABLER[0].bit3` is IRQ number 3.
-
-In summary, this means that `ITARGETSR[0..7]` and `ISENABLER[0]` represent the first 32 IRQs (the
-banked ones), and as such, we split the register block into `shared` and `banked` parts accordingly
-in `gicd.rs`:
-
-```rust
-register_structs! {
-    #[allow(non_snake_case)]
-    SharedRegisterBlock {
-        (0x000 => CTLR: ReadWrite<u32, CTLR::Register>),
-        (0x004 => TYPER: ReadOnly<u32, TYPER::Register>),
-        (0x008 => _reserved1),
-        (0x104 => ISENABLER: [ReadWrite<u32>; 31]),
-        (0x180 => _reserved2),
-        (0x820 => ITARGETSR: [ReadWrite<u32, ITARGETSR::Register>; 248]),
-        (0xC00 => @END),
-    }
-}
-
-register_structs! {
-    #[allow(non_snake_case)]
-    BankedRegisterBlock {
-        (0x000 => _reserved1),
-        (0x100 => ISENABLER: ReadWrite<u32>),
-        (0x104 => _reserved2),
-        (0x800 => ITARGETSR: [ReadOnly<u32, ITARGETSR::Register>; 8]),
-        (0x820 => @END),
-    }
-}
-```
-
-As with the implementation of the BCM interrupt controller driver, we won't cover the remaining
-parts in exhaustive detail. For that, please refer to [this folder] folder which contains all the
-sources.
-
-[this folder]: kernel/src/bsp/device_driver/arm
+- [`src/memory.rs`](kernel/src/memory.rs) and
+  [`src/memory/mmu/types.rs`](kernel/src/memory/mmu/types.rs) introduce supporting types,
+  like`Address<ATYPE>`, `PageAddress<ATYPE>` and `MemoryRegion<ATYPE>`. It is worth reading their
+  implementations.
+- [`src/memory/mmu/mapping_record.rs`](kernel/src/memory/mmu/mapping_record.rs) provides the generic
+  kernel code's way of tracking previous memory mappings for use cases such as reusing existing
+  mappings (in case of drivers that have their MMIO ranges in the same `64 KiB` page) or printing
+  mappings statistics.
 
 ## Test it
 
-When you load the kernel, any keystroke results in echoing back the character by way of IRQ
-handling. There is no more polling done at the end of `kernel_main()`, just waiting for events such
-as IRQs:
-
-```rust
-fn kernel_main() -> ! {
-
-    // omitted for brevity
-
-    info!("Echoing input now");
-    cpu::wait_forever();
-}
-```
+When you load the kernel, you can now see that the driver's MMIO virtual addresses start right after
+the `.data` section:
 
 Raspberry Pi 3:
 
@@ -703,29 +412,22 @@ Minipush 1.0
            Raspberry Pi 3
 
 [ML] Requesting binary
-[MP] ⏩ Pushing 66 KiB =========================================🦀 100% 0 KiB/s Time: 00:00:00
+[MP] ⏩ Pushing 65 KiB =========================================🦀 100% 0 KiB/s Time: 00:00:00
 [ML] Loaded! Executing the payload now
 
-[    0.822492] mingo version 0.13.0
-[    0.822700] Booting on: Raspberry Pi 3
-[    0.823155] MMU online. Special regions:
-[    0.823632]       0x00080000 - 0x0008ffff |  64 KiB | C   RO PX  | Kernel code and RO data
-[    0.824650]       0x3f000000 - 0x4000ffff |  17 MiB | Dev RW PXN | Device MMIO
-[    0.825539] Current privilege level: EL1
-[    0.826015] Exception handling state:
-[    0.826459]       Debug:  Masked
-[    0.826849]       SError: Masked
-[    0.827239]       IRQ:    Unmasked
-[    0.827651]       FIQ:    Masked
-[    0.828041] Architectural timer resolution: 52 ns
-[    0.828615] Drivers loaded:
-[    0.828951]       1. BCM PL011 UART
-[    0.829373]       2. BCM GPIO
-[    0.829731]       3. BCM Interrupt Controller
-[    0.830262] Registered IRQ handlers:
-[    0.830695]       Peripheral handler:
-[    0.831141]              57. BCM PL011 UART
-[    0.831649] Echoing input now
+[    0.740694] mingo version 0.14.0
+[    0.740902] Booting on: Raspberry Pi 3
+[    0.741357] MMU online:
+[    0.741649]       -------------------------------------------------------------------------------------------------------------------------------------------
+[    0.743393]                         Virtual                                   Physical               Size       Attr                    Entity
+[    0.745138]       -------------------------------------------------------------------------------------------------------------------------------------------
+[    0.746883]       0x0000_0000_0000_0000..0x0000_0000_0007_ffff --> 0x00_0000_0000..0x00_0007_ffff | 512 KiB | C   RW XN | Kernel boot-core stack
+[    0.748486]       0x0000_0000_0008_0000..0x0000_0000_0008_ffff --> 0x00_0008_0000..0x00_0008_ffff |  64 KiB | C   RO X  | Kernel code and RO data
+[    0.750099]       0x0000_0000_0009_0000..0x0000_0000_000e_ffff --> 0x00_0009_0000..0x00_000e_ffff | 384 KiB | C   RW XN | Kernel data and bss
+[    0.751670]       0x0000_0000_000f_0000..0x0000_0000_000f_ffff --> 0x00_3f20_0000..0x00_3f20_ffff |  64 KiB | Dev RW XN | BCM PL011 UART
+[    0.753187]                                                                                                             | BCM GPIO
+[    0.754638]       0x0000_0000_0010_0000..0x0000_0000_0010_ffff --> 0x00_3f00_0000..0x00_3f00_ffff |  64 KiB | Dev RW XN | BCM Interrupt Controller
+[    0.756264]       -------------------------------------------------------------------------------------------------------------------------------------------
 ```
 
 Raspberry Pi 4:
@@ -747,28 +449,22 @@ Minipush 1.0
            Raspberry Pi 4
 
 [ML] Requesting binary
-[MP] ⏩ Pushing 73 KiB =========================================🦀 100% 0 KiB/s Time: 00:00:00
+[MP] ⏩ Pushing 65 KiB =========================================🦀 100% 0 KiB/s Time: 00:00:00
 [ML] Loaded! Executing the payload now
 
-[    0.886853] mingo version 0.13.0
-[    0.886886] Booting on: Raspberry Pi 4
-[    0.887341] MMU online. Special regions:
-[    0.887818]       0x00080000 - 0x0008ffff |  64 KiB | C   RO PX  | Kernel code and RO data
-[    0.888836]       0xfe000000 - 0xff84ffff |  25 MiB | Dev RW PXN | Device MMIO
-[    0.889725] Current privilege level: EL1
-[    0.890201] Exception handling state:
-[    0.890645]       Debug:  Masked
-[    0.891035]       SError: Masked
-[    0.891425]       IRQ:    Unmasked
-[    0.891837]       FIQ:    Masked
-[    0.892227] Architectural timer resolution: 18 ns
-[    0.892801] Drivers loaded:
-[    0.893137]       1. BCM PL011 UART
-[    0.893560]       2. BCM GPIO
-[    0.893917]       3. GICv2 (ARM Generic Interrupt Controller v2)
-[    0.894654] Registered IRQ handlers:
-[    0.895087]       Peripheral handler:
-[    0.895534]             153. BCM PL011 UART
-[    0.896042] Echoing input now
+[    0.736136] mingo version 0.14.0
+[    0.736170] Booting on: Raspberry Pi 4
+[    0.736625] MMU online:
+[    0.736918]       -------------------------------------------------------------------------------------------------------------------------------------------
+[    0.738662]                         Virtual                                   Physical               Size       Attr                    Entity
+[    0.740406]       -------------------------------------------------------------------------------------------------------------------------------------------
+[    0.742151]       0x0000_0000_0000_0000..0x0000_0000_0007_ffff --> 0x00_0000_0000..0x00_0007_ffff | 512 KiB | C   RW XN | Kernel boot-core stack
+[    0.743754]       0x0000_0000_0008_0000..0x0000_0000_0008_ffff --> 0x00_0008_0000..0x00_0008_ffff |  64 KiB | C   RO X  | Kernel code and RO data
+[    0.745368]       0x0000_0000_0009_0000..0x0000_0000_000d_ffff --> 0x00_0009_0000..0x00_000d_ffff | 320 KiB | C   RW XN | Kernel data and bss
+[    0.746938]       0x0000_0000_000e_0000..0x0000_0000_000e_ffff --> 0x00_fe20_0000..0x00_fe20_ffff |  64 KiB | Dev RW XN | BCM PL011 UART
+[    0.748455]                                                                                                             | BCM GPIO
+[    0.749907]       0x0000_0000_000f_0000..0x0000_0000_000f_ffff --> 0x00_ff84_0000..0x00_ff84_ffff |  64 KiB | Dev RW XN | GICv2 GICD
+[    0.751380]                                                                                                             | GICV2 GICC
+[    0.752853]       -------------------------------------------------------------------------------------------------------------------------------------------
 ```
 

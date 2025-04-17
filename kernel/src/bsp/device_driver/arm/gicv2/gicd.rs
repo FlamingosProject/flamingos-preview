@@ -8,7 +8,9 @@
 //!   - SPI - Shared Peripheral Interrupt.
 
 use crate::{
-    bsp::device_driver::common::MMIODerefWrapper, state, synchronization,
+    bsp::device_driver::common::MMIODerefWrapper,
+    memory::{Address, Virtual},
+    state, synchronization,
     synchronization::IRQSafeNullLock,
 };
 use tock_registers::{
@@ -128,7 +130,7 @@ impl GICD {
     /// # Safety
     ///
     /// - The user must ensure to provide a correct MMIO start address.
-    pub const unsafe fn new(mmio_start_addr: usize) -> Self {
+    pub const unsafe fn new(mmio_start_addr: Address<Virtual>) -> Self {
         Self {
             shared_registers: IRQSafeNullLock::new(SharedRegisters::new(mmio_start_addr)),
             banked_registers: BankedRegisters::new(mmio_start_addr),
