@@ -14,7 +14,7 @@
 //! crate::memory::mmu::translation_table::arch_translation_table
 
 use crate::{
-    bsp,
+    bsp::{self, memory::mmu::KernelVirtAddrSpace},
     memory::{
         self,
         mmu::{
@@ -256,11 +256,16 @@ impl PageDescriptor {
 // Public Code
 //--------------------------------------------------------------------------------------------------
 
-impl<const AS_SIZE: usize> memory::mmu::AssociatedTranslationTable
-    for memory::mmu::AddressSpace<AS_SIZE>
-where
-    [u8; Self::SIZE >> Granule512MiB::SHIFT]: Sized,
-{
+// TODO: uncomment once it works on stable Rust
+// impl<const AS_SIZE: usize> memory::mmu::AssociatedTranslationTable
+//     for memory::mmu::AddressSpace<AS_SIZE>
+// where
+//     [u8; Self::SIZE >> Granule512MiB::SHIFT]: Sized,
+// {
+//     type TableStartFromBottom = FixedSizeTranslationTable<{ Self::SIZE >> Granule512MiB::SHIFT }>;
+// }
+
+impl memory::mmu::AssociatedTranslationTable for KernelVirtAddrSpace {
     type TableStartFromBottom = FixedSizeTranslationTable<{ Self::SIZE >> Granule512MiB::SHIFT }>;
 }
 

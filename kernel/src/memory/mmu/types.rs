@@ -8,7 +8,7 @@ use crate::{
     bsp, common,
     memory::{Address, AddressType, Physical},
 };
-use core::{convert::From, iter::Step, num::NonZeroUsize, ops::Range};
+use core::{convert::From, num::NonZeroUsize};
 
 //--------------------------------------------------------------------------------------------------
 // Public Definitions
@@ -153,10 +153,6 @@ impl<ATYPE: AddressType> MemoryRegion<ATYPE> {
         }
     }
 
-    fn as_range(&self) -> Range<PageAddress<ATYPE>> {
-        self.into_iter()
-    }
-
     /// Returns the start page address.
     pub fn start_page_addr(&self) -> PageAddress<ATYPE> {
         self.start
@@ -180,15 +176,16 @@ impl<ATYPE: AddressType> MemoryRegion<ATYPE> {
     /// Checks if self contains an address.
     pub fn contains(&self, addr: Address<ATYPE>) -> bool {
         let page_addr = PageAddress::from(addr.align_down_page());
-        self.as_range().contains(&page_addr)
+        // replacement for unstable `self.as_range().contains(&page_addr)`
+        page_addr >= self.start && page_addr < self.end_exclusive
     }
 
     /// Checks if there is an overlap with another memory region.
     pub fn overlaps(&self, other_region: &Self) -> bool {
-        let self_range = self.as_range();
+        // let self_range = self.as_range();
 
-        self_range.contains(&other_region.start_page_addr())
-            || self_range.contains(&other_region.end_inclusive_page_addr())
+        self.contains(other_region.start_page_addr().inner)
+            || self.contains(other_region.end_inclusive_page_addr().inner)
     }
 
     /// Returns the number of pages contained in this region.
@@ -244,12 +241,41 @@ impl<ATYPE: AddressType> MemoryRegion<ATYPE> {
 
 impl<ATYPE: AddressType> IntoIterator for MemoryRegion<ATYPE> {
     type Item = PageAddress<ATYPE>;
-    type IntoIter = Range<Self::Item>;
+    type IntoIter = PageAddressIterator<ATYPE>;
 
     fn into_iter(self) -> Self::IntoIter {
-        Range {
+        PageAddressIterator {
             start: self.start,
             end: self.end_exclusive,
+        }
+    }
+}
+
+/// Iterator over a range of PageAddresses.
+///
+/// This type is a workaround until the standard library's `Step` trait is stable. Then we can use
+/// the `Range` type instead.
+pub struct PageAddressIterator<T>
+where
+    T: AddressType,
+{
+    start: PageAddress<T>,
+    end: PageAddress<T>,
+}
+
+impl<T> Iterator for PageAddressIterator<T>
+where
+    T: AddressType,
+{
+    type Item = PageAddress<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.start < self.end {
+            let old = self.start;
+            self.start = Step::forward(old, 1);
+            Some(old)
+        } else {
+            None
         }
     }
 }
@@ -290,6 +316,22 @@ impl MMIODescriptor {
     /// Return the exclusive end address.
     pub fn end_addr_exclusive(&self) -> Address<Physical> {
         self.end_addr_exclusive
+    }
+}
+
+/// Copy of unstable `core::iter::Step` trait
+///
+/// From Rust 1.83. There were breaking changes in 1.84.
+#[allow(missing_docs)] // see standard library
+pub trait Step: Clone + PartialOrd + Sized {
+    fn steps_between(start: &Self, end: &Self) -> Option<usize>;
+    fn forward_checked(start: Self, count: usize) -> Option<Self>;
+    fn forward(start: Self, count: usize) -> Self {
+        Step::forward_checked(start, count).expect("overflow in `Step::forward`")
+    }
+    fn backward_checked(start: Self, count: usize) -> Option<Self>;
+    fn backward(start: Self, count: usize) -> Self {
+        Step::backward_checked(start, count).expect("overflow in `Step::backward`")
     }
 }
 
