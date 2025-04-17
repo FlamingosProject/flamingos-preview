@@ -12,9 +12,6 @@ use core::panic::PanicInfo;
 //--------------------------------------------------------------------------------------------------
 
 /// The point of exit for `libkernel`.
-///
-/// It is linked weakly, so that the integration tests can overload its standard behavior.
-#[linkage = "weak"]
 #[no_mangle]
 fn _panic_exit() -> ! {
     #[cfg(not(feature = "test_build"))]

@@ -113,9 +113,6 @@
 #![no_std]
 // Testing
 #![cfg_attr(test, no_main)]
-#![feature(custom_test_frameworks)]
-#![reexport_test_harness_main = "test_main"]
-#![test_runner(crate::test_runner)]
 
 mod panic_wait;
 mod synchronization;
@@ -166,16 +163,4 @@ pub fn test_runner(tests: &[&test_types::UnitTest]) {
         // Failed tests call panic!(). Execution reaches here only if the test has passed.
         println!("[ok]")
     }
-}
-
-/// The `kernel_init()` for unit tests.
-#[cfg(test)]
-#[no_mangle]
-unsafe fn kernel_init() -> ! {
-    exception::handling_init();
-    bsp::driver::qemu_bring_up_console();
-
-    test_main();
-
-    cpu::qemu_exit_success()
 }
