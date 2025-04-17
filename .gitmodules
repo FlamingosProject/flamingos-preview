@@ -42,3 +42,7 @@
 	path = 11-exceptions-part1
 	url = https://github.com/RustOS2/flamingos.git
 	branch = 11-exceptions-part1
+[submodule "12-integrated-testing"]
+	path = 12-integrated-testing
+	url = https://github.com/RustOS2/flamingos.git
+	branch = 12-integrated-testing
