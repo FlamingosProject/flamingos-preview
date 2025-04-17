@@ -54,3 +54,7 @@
 	path = 14-virtual-mem-part2
 	url = https://github.com/RustOS2/flamingos.git
 	branch = 14-virtual-mem-part2
+[submodule "15-virtual-mem-part3"]
+	path = 15-virtual-mem-part3
+	url = https://github.com/RustOS2/flamingos.git
+	branch = 15-virtual-mem-part3
