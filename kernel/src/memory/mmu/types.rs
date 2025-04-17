@@ -8,7 +8,7 @@ use crate::{
     bsp, common,
     memory::{Address, AddressType, Physical},
 };
-use core::{convert::From, num::NonZeroUsize};
+use core::{convert::From, num::NonZeroUsize, ops::Range};
 
 //--------------------------------------------------------------------------------------------------
 // Public Definitions

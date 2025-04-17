@@ -7,8 +7,8 @@
 use crate::{
     memory::{
         mmu::{
-            self as generic_mmu, AccessPermissions, AddressSpace, AssociatedTranslationTable,
-            AttributeFields, MemAttributes, MemoryRegion, PageAddress, TranslationGranule,
+            self as generic_mmu, AddressSpace, AssociatedTranslationTable, AttributeFields,
+            MemoryRegion, PageAddress, TranslationGranule,
         },
         Physical, Virtual,
     },
@@ -31,7 +31,7 @@ type KernelTranslationTable =
 pub type KernelGranule = TranslationGranule<{ 64 * 1024 }>;
 
 /// The kernel's virtual address space defined by this BSP.
-pub type KernelVirtAddrSpace = AddressSpace<{ 1024 * 1024 * 1024 }>;
+pub type KernelVirtAddrSpace = AddressSpace<{ kernel_virt_addr_space_size() }>;
 
 //--------------------------------------------------------------------------------------------------
 // Global instances
@@ -43,12 +43,34 @@ pub type KernelVirtAddrSpace = AddressSpace<{ 1024 * 1024 * 1024 }>;
 ///
 /// That is, `size_of(InitStateLock<KernelTranslationTable>) == size_of(KernelTranslationTable)`.
 /// There is a unit tests that checks this porperty.
+#[link_section = ".data"]
+#[no_mangle]
 static KERNEL_TABLES: InitStateLock<KernelTranslationTable> =
-    InitStateLock::new(KernelTranslationTable::new());
+    InitStateLock::new(KernelTranslationTable::new_for_precompute());
+
+/// This value is needed during early boot for MMU setup.
+///
+/// This will be patched to the correct value by the "translation table tool" after linking. This
+/// given value here is just a dummy.
+#[link_section = ".text._start_arguments"]
+#[no_mangle]
+static PHYS_KERNEL_TABLES_BASE_ADDR: u64 = 0xCCCCAAAAFFFFEEEE;
 
 //--------------------------------------------------------------------------------------------------
 // Private Code
 //--------------------------------------------------------------------------------------------------
+
+/// This is a hack for retrieving the value for the kernel's virtual address space size as a
+/// constant from a common place, since it is needed as a compile-time/link-time constant in both,
+/// the linker script and the Rust sources.
+#[allow(clippy::needless_late_init)]
+const fn kernel_virt_addr_space_size() -> usize {
+    let __kernel_virt_addr_space_size;
+
+    include!("../kernel_virt_addr_space_size.ld");
+
+    __kernel_virt_addr_space_size
+}
 
 /// Helper function for calculating the number of pages the given parameter spans.
 const fn size_to_num_pages(size: usize) -> usize {
@@ -88,18 +110,22 @@ fn virt_boot_core_stack_region() -> MemoryRegion<Virtual> {
     MemoryRegion::new(start_page_addr, end_exclusive_page_addr)
 }
 
-// The binary is still identity mapped, so use this trivial conversion function for mapping below.
-
+// There is no reason to expect the following conversions to fail, since they were generated offline
+// by the `translation table tool`. If it doesn't work, a panic due to the unwraps is justified.
 fn kernel_virt_to_phys_region(virt_region: MemoryRegion<Virtual>) -> MemoryRegion<Physical> {
-    MemoryRegion::new(
-        PageAddress::from(virt_region.start_page_addr().into_inner().as_usize()),
-        PageAddress::from(
-            virt_region
-                .end_exclusive_page_addr()
-                .into_inner()
-                .as_usize(),
-        ),
-    )
+    let phys_start_page_addr =
+        generic_mmu::try_kernel_virt_page_addr_to_phys_page_addr(virt_region.start_page_addr())
+            .unwrap();
+
+    let phys_end_exclusive_page_addr = phys_start_page_addr
+        .checked_offset(virt_region.num_pages() as isize)
+        .unwrap();
+
+    MemoryRegion::new(phys_start_page_addr, phys_end_exclusive_page_addr)
+}
+
+fn kernel_page_attributes(virt_page_addr: PageAddress<Virtual>) -> AttributeFields {
+    generic_mmu::try_kernel_page_attributes(virt_page_addr).unwrap()
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -121,109 +147,33 @@ pub fn virt_mmio_remap_region() -> MemoryRegion<Virtual> {
     MemoryRegion::new(start_page_addr, end_exclusive_page_addr)
 }
 
-/// Map the kernel binary.
+/// Add mapping records for the kernel binary.
 ///
-/// # Safety
-///
-/// - Any miscalculation or attribute error will likely be fatal. Needs careful manual checking.
-pub unsafe fn kernel_map_binary() -> Result<(), &'static str> {
-    generic_mmu::kernel_map_at(
+/// The actual translation table entries for the kernel binary are generated using the offline
+/// `translation table tool` and patched into the kernel binary. This function just adds the mapping
+/// record entries.
+pub fn kernel_add_mapping_records_for_precomputed() {
+    let virt_boot_core_stack_region = virt_boot_core_stack_region();
+    generic_mmu::kernel_add_mapping_record(
         "Kernel boot-core stack",
-        &virt_boot_core_stack_region(),
-        &kernel_virt_to_phys_region(virt_boot_core_stack_region()),
-        &AttributeFields {
-            mem_attributes: MemAttributes::CacheableDRAM,
-            acc_perms: AccessPermissions::ReadWrite,
-            execute_never: true,
-        },
-    )?;
+        &virt_boot_core_stack_region,
+        &kernel_virt_to_phys_region(virt_boot_core_stack_region),
+        &kernel_page_attributes(virt_boot_core_stack_region.start_page_addr()),
+    );
 
-    generic_mmu::kernel_map_at(
+    let virt_code_region = virt_code_region();
+    generic_mmu::kernel_add_mapping_record(
         "Kernel code and RO data",
-        &virt_code_region(),
-        &kernel_virt_to_phys_region(virt_code_region()),
-        &AttributeFields {
-            mem_attributes: MemAttributes::CacheableDRAM,
-            acc_perms: AccessPermissions::ReadOnly,
-            execute_never: false,
-        },
-    )?;
+        &virt_code_region,
+        &kernel_virt_to_phys_region(virt_code_region),
+        &kernel_page_attributes(virt_code_region.start_page_addr()),
+    );
 
-    generic_mmu::kernel_map_at(
+    let virt_data_region = virt_data_region();
+    generic_mmu::kernel_add_mapping_record(
         "Kernel data and bss",
-        &virt_data_region(),
-        &kernel_virt_to_phys_region(virt_data_region()),
-        &AttributeFields {
-            mem_attributes: MemAttributes::CacheableDRAM,
-            acc_perms: AccessPermissions::ReadWrite,
-            execute_never: true,
-        },
-    )?;
-
-    Ok(())
-}
-
-//--------------------------------------------------------------------------------------------------
-// Testing
-//--------------------------------------------------------------------------------------------------
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use core::{cell::UnsafeCell, ops::Range};
-    use test_macros::kernel_test;
-
-    /// Check alignment of the kernel's virtual memory layout sections.
-    #[kernel_test]
-    fn virt_mem_layout_sections_are_64KiB_aligned() {
-        for i in [
-            virt_boot_core_stack_region,
-            virt_code_region,
-            virt_data_region,
-        ]
-        .iter()
-        {
-            let start = i().start_page_addr().into_inner();
-            let end_exclusive = i().end_exclusive_page_addr().into_inner();
-
-            assert!(start.is_page_aligned());
-            assert!(end_exclusive.is_page_aligned());
-            assert!(end_exclusive >= start);
-        }
-    }
-
-    /// Ensure the kernel's virtual memory layout is free of overlaps.
-    #[kernel_test]
-    fn virt_mem_layout_has_no_overlaps() {
-        let layout = [
-            virt_boot_core_stack_region(),
-            virt_code_region(),
-            virt_data_region(),
-        ];
-
-        for (i, first_range) in layout.iter().enumerate() {
-            for second_range in layout.iter().skip(i + 1) {
-                assert!(!first_range.overlaps(second_range))
-            }
-        }
-    }
-
-    /// Check if KERNEL_TABLES is in .bss.
-    #[kernel_test]
-    fn kernel_tables_in_bss() {
-        extern "Rust" {
-            static __bss_start: UnsafeCell<u64>;
-            static __bss_end_exclusive: UnsafeCell<u64>;
-        }
-
-        let bss_range = unsafe {
-            Range {
-                start: __bss_start.get(),
-                end: __bss_end_exclusive.get(),
-            }
-        };
-        let kernel_tables_addr = &KERNEL_TABLES as *const _ as usize as *mut u64;
-
-        assert!(bss_range.contains(&kernel_tables_addr));
-    }
+        &virt_data_region,
+        &kernel_virt_to_phys_region(virt_data_region),
+        &kernel_page_attributes(virt_data_region.start_page_addr()),
+    );
 }

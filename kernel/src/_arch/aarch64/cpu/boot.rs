@@ -11,6 +11,7 @@
 //!
 //! crate::cpu::boot::arch_boot
 
+use crate::{memory, memory::Address};
 use aarch64_cpu::{asm, registers::*};
 use core::arch::global_asm;
 use tock_registers::interfaces::Writeable;
@@ -75,8 +76,15 @@ unsafe fn prepare_el2_to_el1_transition(phys_boot_core_stack_end_exclusive_addr:
 ///
 /// - Exception return from EL2 must must continue execution in EL1 with `kernel_init()`.
 #[no_mangle]
-pub unsafe extern "C" fn _start_rust(phys_boot_core_stack_end_exclusive_addr: u64) -> ! {
+pub unsafe extern "C" fn _start_rust(
+    phys_kernel_tables_base_addr: u64,
+    phys_boot_core_stack_end_exclusive_addr: u64,
+) -> ! {
     prepare_el2_to_el1_transition(phys_boot_core_stack_end_exclusive_addr);
+
+    // Turn on the MMU for EL1.
+    let addr = Address::new(phys_kernel_tables_base_addr as usize);
+    memory::mmu::enable_mmu_and_caching(addr).unwrap();
 
     // Use `eret` to "return" to EL1. This results in execution of kernel_init() in EL1.
     asm::eret()

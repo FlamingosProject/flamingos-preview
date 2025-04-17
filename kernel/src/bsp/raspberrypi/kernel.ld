@@ -3,6 +3,8 @@
  * Copyright (c) 2018-2023 Andre Richter <andre.o.richter@gmail.com>
  */
 
+INCLUDE kernel_virt_addr_space_size.ld;
+
 PAGE_SIZE = 64K;
 PAGE_MASK = PAGE_SIZE - 1;
 
@@ -89,7 +91,7 @@ SECTIONS
     . += 8 * 1024 * 1024;
     __mmio_remap_end_exclusive = .;
 
-    ASSERT((. & PAGE_MASK) == 0, "MMIO remap reservation is not page aligned")
+    ASSERT((. & PAGE_MASK) == 0, "End of boot core stack is not page aligned")
 
     /***********************************************************************************************
     * Misc

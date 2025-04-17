@@ -23,6 +23,8 @@ pub use arch_translation_table::FixedSizeTranslationTable;
 
 /// Translation table interfaces.
 pub mod interface {
+    use crate::memory::mmu::PageAddress;
+
     use super::*;
 
     /// Translation table operations.
@@ -33,10 +35,7 @@ pub mod interface {
         ///
         /// - Implementor must ensure that this function can run only once or is harmless if invoked
         ///   multiple times.
-        fn init(&mut self);
-
-        /// The translation table's base address to be used for programming the MMU.
-        fn phys_base_address(&self) -> Address<Physical>;
+        fn init(&mut self) -> Result<(), &'static str>;
 
         /// Map the given virtual memory region to the given physical memory region.
         ///
@@ -53,6 +52,30 @@ pub mod interface {
             phys_region: &MemoryRegion<Physical>,
             attr: &AttributeFields,
         ) -> Result<(), &'static str>;
+
+        /// Try to translate a virtual page address to a physical page address.
+        ///
+        /// Will only succeed if there exists a valid mapping for the input page.
+        fn try_virt_page_addr_to_phys_page_addr(
+            &self,
+            virt_page_addr: PageAddress<Virtual>,
+        ) -> Result<PageAddress<Physical>, &'static str>;
+
+        /// Try to get the attributes of a page.
+        ///
+        /// Will only succeed if there exists a valid mapping for the input page.
+        fn try_page_attributes(
+            &self,
+            virt_page_addr: PageAddress<Virtual>,
+        ) -> Result<AttributeFields, &'static str>;
+
+        /// Try to translate a virtual address to a physical address.
+        ///
+        /// Will only succeed if there exists a valid mapping for the input address.
+        fn try_virt_addr_to_phys_addr(
+            &self,
+            virt_addr: Address<Virtual>,
+        ) -> Result<Address<Physical>, &'static str>;
     }
 }
 
@@ -72,9 +95,9 @@ mod tests {
     #[kernel_test]
     fn translationtable_implementation_sanity() {
         // This will occupy a lot of space on the stack.
-        let mut tables = MinSizeTranslationTable::new();
+        let mut tables = MinSizeTranslationTable::new_for_runtime();
 
-        tables.init();
+        assert_eq!(tables.init(), Ok(()));
 
         let virt_start_page_addr: PageAddress<Virtual> = PageAddress::from(0);
         let virt_end_exclusive_page_addr: PageAddress<Virtual> =
@@ -94,5 +117,21 @@ mod tests {
         };
 
         unsafe { assert_eq!(tables.map_at(&virt_region, &phys_region, &attr), Ok(())) };
+
+        assert_eq!(
+            tables.try_virt_page_addr_to_phys_page_addr(virt_start_page_addr),
+            Ok(phys_start_page_addr)
+        );
+
+        assert_eq!(
+            tables.try_page_attributes(virt_start_page_addr.checked_offset(6).unwrap()),
+            Err("Page marked invalid")
+        );
+
+        assert_eq!(tables.try_page_attributes(virt_start_page_addr), Ok(attr));
+
+        let virt_addr = virt_start_page_addr.into_inner() + 0x100;
+        let phys_addr = phys_start_page_addr.into_inner() + 0x100;
+        assert_eq!(tables.try_virt_addr_to_phys_addr(virt_addr), Ok(phys_addr));
     }
 }

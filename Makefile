@@ -61,10 +61,20 @@ KERNEL_MANIFEST      = kernel/Cargo.toml
 KERNEL_LINKER_SCRIPT = kernel.ld
 LAST_BUILD_CONFIG    = target/$(BSP).build_config
 
-KERNEL_ELF      = target/$(TARGET)/release/kernel
+KERNEL_ELF_RAW      = target/$(TARGET)/release/kernel
 # This parses cargo's dep-info file.
 # https://doc.rust-lang.org/cargo/guide/build-cache.html#dep-info-files
-KERNEL_ELF_DEPS = $(filter-out %: ,$(file < $(KERNEL_ELF).d)) $(KERNEL_MANIFEST) $(LAST_BUILD_CONFIG)
+KERNEL_ELF_RAW_DEPS = $(filter-out %: ,$(file < $(KERNEL_ELF_RAW).d)) $(KERNEL_MANIFEST) $(LAST_BUILD_CONFIG)
+
+##------------------------------------------------------------------------------
+## Translation tables
+##------------------------------------------------------------------------------
+TT_TOOL_PATH = tools/translation_table_tool
+
+KERNEL_ELF_TTABLES      = target/$(TARGET)/release/kernel+ttables
+KERNEL_ELF_TTABLES_DEPS = $(KERNEL_ELF_RAW) $(wildcard $(TT_TOOL_PATH)/*)
+
+KERNEL_ELF = $(KERNEL_ELF_TTABLES)
 
 
 
@@ -92,7 +102,7 @@ OBJCOPY_CMD = rust-objcopy \
     -O binary
 
 EXEC_QEMU = $(QEMU_BINARY) -M $(QEMU_MACHINE_TYPE)
-
+EXEC_TT_TOOL       = ruby $(TT_TOOL_PATH)/main.rb
 
 
 
@@ -114,16 +124,24 @@ $(LAST_BUILD_CONFIG):
 ##------------------------------------------------------------------------------
 ## Compile the kernel ELF
 ##------------------------------------------------------------------------------
-$(KERNEL_ELF): $(KERNEL_ELF_DEPS)
+$(KERNEL_ELF_RAW): $(KERNEL_ELF_RAW_DEPS)
 	$(call color_header, "Compiling kernel ELF - $(BSP)")
 	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(RUSTC_CMD)
 
 ##------------------------------------------------------------------------------
+## Precompute the kernel translation tables and patch them into the kernel ELF
+##------------------------------------------------------------------------------
+$(KERNEL_ELF_TTABLES): $(KERNEL_ELF_TTABLES_DEPS)
+	$(call color_header, "Precomputing kernel translation tables and patching kernel ELF")
+	@cp $(KERNEL_ELF_RAW) $(KERNEL_ELF_TTABLES)
+	$(EXEC_TT_TOOL) $(BSP) $(KERNEL_ELF_TTABLES)
+
+##------------------------------------------------------------------------------
 ## Generate the stripped kernel binary
 ##------------------------------------------------------------------------------
-$(KERNEL_BIN): $(KERNEL_ELF)
+$(KERNEL_BIN): $(KERNEL_ELF_TTABLES)
 	$(call color_header, "Generating stripped binary")
-	@$(OBJCOPY_CMD) $(KERNEL_ELF) $(KERNEL_BIN)
+	@$(OBJCOPY_CMD) $(KERNEL_ELF_TTABLES) $(KERNEL_BIN)
 	$(call color_progress_prefix, "Name")
 	@echo $(KERNEL_BIN)
 	$(call color_progress_prefix, "Size")

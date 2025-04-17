@@ -165,3 +165,16 @@ pub fn test_runner(tests: &[&test_types::UnitTest]) {
         println!("[ok]")
     }
 }
+
+/// The `kernel_init()` for unit tests.
+#[cfg(test)]
+#[no_mangle]
+unsafe fn kernel_init() -> ! {
+    exception::handling_init();
+    memory::init();
+    bsp::driver::qemu_bring_up_console();
+
+    test_main();
+
+    cpu::qemu_exit_success()
+}
