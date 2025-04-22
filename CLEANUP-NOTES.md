@@ -15,3 +15,12 @@
 * Replace the Ruby terminal with Rust `scip` plus a Rust
   chainloader host replacement
 * Add a crc32 to the chainloader to validate the kernel
+* 07: `ARCH_TIMER_COUNTER_FREQUENCY` is currently a static
+  variable initialized by boot assembly. This is almost
+  surely unsound. Best fix would be to get rid of the boot
+  assembly and handle this variable in Rust: it wants
+  special treatment because it is checked for zero; we
+  should understand why this check is necessary.
+* 07: Explain barrier and why needed in blog post or readme.
+* 07: Fix stringly `Err()` return.
+* 07: Potential overflow and also spin-wait in `spin_for()`.
