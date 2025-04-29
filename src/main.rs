@@ -110,6 +110,9 @@
 #![no_main]
 #![no_std]
 
+#[cfg(not(any(feature = "bsp_rpi3", feature = "bsp_rpi4")))]
+compile_error!("Either feature \"bsp_rpi3\" or \"bsp_rpi4\" must be enabled for this crate.",);
+
 mod bsp;
 mod common;
 mod console;
