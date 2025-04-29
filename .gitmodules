@@ -1,38 +1,38 @@
 [submodule "01-wait-forever"]
 	path = 01-wait-forever
-	url = https://github.com/RustOS2/flamingos.git
+	url = https://github.com/FlamingosProject/flamingos.git
 	branch = 01-wait-forever
 [submodule "02-runtime-init"]
 	path = 02-runtime-init
-	url = https://github.com/RustOS2/flamingos.git
+	url = https://github.com/FlamingosProject/flamingos.git
 	branch = 02-runtime-init
 [submodule "03-hacky-hello-world"]
 	path = 03-hacky-hello-world
-	url = https://github.com/RustOS2/flamingos.git
+	url = https://github.com/FlamingosProject/flamingos.git
 	branch = 03-hacky-hello-world
 [submodule "04-safe-globals"]
 	path = 04-safe-globals
-	url = https://github.com/RustOS2/flamingos.git
+	url = https://github.com/FlamingosProject/flamingos.git
 	branch = 04-safe-globals
 [submodule "05-drivers-gpio-uart"]
 	path = 05-drivers-gpio-uart
-	url = https://github.com/RustOS2/flamingos.git
+	url = https://github.com/FlamingosProject/flamingos.git
 	branch = 05-drivers-gpio-uart
 [submodule "06-uart-chainloader"]
 	path = 06-uart-chainloader
-	url = https://github.com/RustOS2/flamingos.git
+	url = https://github.com/FlamingosProject/flamingos.git
 	branch = 06-uart-chainloader
 [submodule "07-timestamps"]
 	path = 07-timestamps
-	url = https://github.com/RustOS2/flamingos.git
+	url = https://github.com/FlamingosProject/flamingos.git
 	branch = 07-timestamps
 [submodule "08-hw-debug-jtag"]
 	path = 08-hw-debug-jtag
-	url = https://github.com/RustOS2/flamingos.git
+	url = https://github.com/FlamingosProject/flamingos.git
 	branch = 08-hw-debug-jtag
 [submodule "09-privilege-level"]
 	path = 09-privilege-level
-	url = https://github.com/RustOS2/flamingos.git
+	url = https://github.com/FlamingosProject/flamingos.git
 	branch = 09-privilege-level
 [submodule "10-virtual-mem-part1"]
 	path = 10-virtual-mem-part1
