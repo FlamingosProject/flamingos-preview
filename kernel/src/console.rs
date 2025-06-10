@@ -19,6 +19,7 @@ pub mod interface {
     /// Console write functions.
     pub trait Write {
         /// Write a single byte.
+        #[allow(unused)]
         fn write_byte(&self, c: u8);
 
         /// Write a string slice.
@@ -26,6 +27,7 @@ pub mod interface {
         fn write_str(&self, s: &str);
 
         /// Write Rust formatted output.
+        #[allow(unused)]
         fn write_fmt(&self, args: fmt::Arguments) -> fmt::Result;
 
         /// Block until the last buffered byte has been physically put on the TX wire.
@@ -36,9 +38,11 @@ pub mod interface {
     /// Console read functions.
     pub trait Read {
         /// Read a single byte.
+        #[allow(unused)]
         fn read_byte(&self) -> u8;
 
         /// Clear RX buffers, if any.
+        #[allow(unused)]
         fn clear_rx(&self);
     }
 
