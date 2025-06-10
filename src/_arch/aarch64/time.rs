@@ -33,22 +33,16 @@ struct GenericTimerCounterValue(u64);
 // Global instances
 //--------------------------------------------------------------------------------------------------
 
-/// Boot assembly code overwrites this value with the value of CNTFRQ_EL0 before any Rust code is
-/// executed. This given value here is just a (safe) dummy.
-#[no_mangle]
-static ARCH_TIMER_COUNTER_FREQUENCY: NonZeroU32 = NonZeroU32::MIN;
-
 //--------------------------------------------------------------------------------------------------
 // Private Code
 //--------------------------------------------------------------------------------------------------
 
 fn arch_timer_counter_frequency() -> NonZeroU32 {
-    // Read volatile is needed here to prevent the compiler from optimizing
-    // ARCH_TIMER_COUNTER_FREQUENCY away.
-    //
-    // This is safe, because all the safety requirements as stated in read_volatile()'s
-    // documentation are fulfilled.
-    unsafe { core::ptr::read_volatile(&ARCH_TIMER_COUNTER_FREQUENCY) }
+    // Reading this processor register should always be safe.
+    // It is fine if the compiler caches this result, as it
+    // should never change.
+    let atcf = aarch64_cpu::registers::CNTFRQ_EL0.get();
+    u32::try_from(atcf).unwrap().try_into().unwrap()
 }
 
 impl GenericTimerCounterValue {
