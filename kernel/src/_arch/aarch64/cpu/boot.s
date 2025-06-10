@@ -56,19 +56,10 @@ _start:
 	// Set the stack pointer. This ensures that any code in EL2 that needs the stack will work.
 	ADR_REL	x0, __boot_core_stack_end_exclusive
 	mov	sp, x0
-
-	// Read the CPU's timer counter frequency and store it in ARCH_TIMER_COUNTER_FREQUENCY.
-	// Abort if the frequency read back as 0.
-	ADR_REL	x1, ARCH_TIMER_COUNTER_FREQUENCY // provided by aarch64/time.rs
-	mrs	x2, CNTFRQ_EL0
-	cmp	x2, xzr
-	b.eq	.L_parking_loop
-	str	w2, [x1]
-
 	// Jump to Rust code. x0 holds the function argument provided to _start_rust().
 	b	_start_rust
 
-	// Infinitely wait for events (aka "park the core").
+        // This is effectively a panic.
 .L_parking_loop:
 	wfe
 	b	.L_parking_loop
