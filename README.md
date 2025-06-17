@@ -2,8 +2,8 @@
 
 ## tl;dr
 
-- In early boot code, we transition from the `Hypervisor` privilege level (`EL2` in AArch64) to the
-  `Kernel` (`EL1`) privilege level.
+- In early boot code, we transition from the `Hypervisor` privilege level (`EL2` in AArch64)
+  to the `Kernel` (`EL1`) privilege level.
 
 ## Table of Contents
 
@@ -28,26 +28,30 @@ Application-grade CPUs have so-called `privilege levels`, which have different p
 | Hypervisor             | EL2     | HS     | Ring -1 |
 | Low-Level Firmware     | EL3     | M      |         |
 
-`EL` in AArch64 stands for `Exception Level`. If you want more information regarding the other
-architectures, please have a look at the following links:
-- [x86 privilege rings](https://en.wikipedia.org/wiki/Protection_ring).
-- [RISC-V privilege modes](https://content.riscv.org/wp-content/uploads/2017/12/Tue0942-riscv-hypervisor-waterman.pdf).
+`EL` in AArch64 stands for `Exception Level`. If you want more information regarding the
+other architectures, please have a look at the following links:
+- [x86 privilege rings].
+- [RISC-V privilege modes].
 
-At this point, I strongly recommend that you glimpse over `Chapter 3` of the [Programmer’s Guide for
-ARMv8-A] before you continue. It gives a concise overview about the topic.
+At this point, I strongly recommend that you take a look at the [AArch64 Exception Model]
+before you continue. You might also want to take a look at the (massive) [Programmer's Guide
+for ARMv8-A].
 
-[Programmer’s Guide for ARMv8-A]: http://infocenter.arm.com/help/topic/com.arm.doc.den0024a/DEN0024A_v8_architecture_PG.pdf
+[x86 privilege rings]: https://en.wikipedia.org/wiki/Protection_ring
+[RISC-V privilege modes]: https://five-embeddev.com/riscv-priv-isa-manual/Priv-v1.12/priv-intro.html#privilege-levels
+[AArch64 Exception Model]: https://developer.arm.com/documentation/102412/0103/Privilege-and-Exception-levels/Types-of-privilege
+[Programmer’s Guide for ARMv8-A]: https://developer.arm.com/documentation/ddi0487/lb
 
 ## Scope of this tutorial
 
-By default, the Raspberry will always start executing in `EL2`. Since we are writing a traditional
-`Kernel`, we have to transition into the more appropriate `EL1`.
+The Raspberry Pi pre-boot firmware will start in `EL3` and give us control at `EL2`. It is
+more normal to run OS kernel code at `EL1`, so we will transition there.
 
 ## Checking for EL2 in the entrypoint
 
-First of all, we need to ensure that we actually execute in `EL2` before we can call respective code
-to transition to `EL1`. Therefore, we add a new checkt to the top of `boot.s`, which parks the CPU
-core should it not be in `EL2`.
+First of all, we need to ensure that we are actually executing in `EL2` before we can call
+respective code to transition to `EL1`. Therefore, we add a new check to the top of
+`boot.s`, which parks the CPU core should it not be in `EL2`.
 
 ```
 // Only proceed if the core executes in EL2. Park it otherwise.
@@ -75,7 +79,11 @@ Since `EL2` is more privileged than `EL1`, it has control over various processor
 allow or disallow `EL1` code to use them. One such example is access to timer and counter registers.
 We are already using them since [tutorial 07](../07_timestamps/), so of course we want to keep them.
 Therefore we set the respective flags in the [Counter-timer Hypervisor Control register] and
-additionally set the virtual offset to zero so that we get the real physical value everytime:
+additionally set the virtual offset to zero so that we get the real physical value everytime.
+(Note that `tock_register::fields::FieldValues` currently must be combined with `+` rather than `|`:
+see the [`BitOr` issue].)
+
+[`BitOr`issue]: https://github.com/tock/tock/issues/4469
 
 [Counter-timer Hypervisor Control register]:  https://docs.rs/aarch64-cpu/9.0.0/src/aarch64_cpu/registers/cnthctl_el2.rs.html
 
