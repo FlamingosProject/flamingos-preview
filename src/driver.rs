@@ -5,7 +5,6 @@
 //! Driver support.
 
 use crate::{
-    println,
     synchronization::{interface::Mutex, NullLock},
 };
 
