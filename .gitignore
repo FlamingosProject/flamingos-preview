@@ -1,6 +1,7 @@
 **/target/*
 **/.gdb_history
 **/kernel8.img
+**/*.bak?
 
 node_modules
 .bundle
