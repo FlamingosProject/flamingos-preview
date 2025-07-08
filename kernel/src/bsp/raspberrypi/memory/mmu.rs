@@ -67,7 +67,10 @@ static PHYS_KERNEL_TABLES_BASE_ADDR: u64 = 0xCCCCAAAAFFFFEEEE;
 const fn kernel_virt_addr_space_size() -> usize {
     let __kernel_virt_addr_space_size;
 
-    include!("../kernel_virt_addr_space_size.ld");
+    include!(concat!(
+            env!("LD_SCRIPT_PATH"),
+            "/kernel_virt_addr_space_size.ld",
+    ));
 
     __kernel_virt_addr_space_size
 }
