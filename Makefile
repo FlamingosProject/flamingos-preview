@@ -45,13 +45,8 @@ else ifeq ($(BSP),rpi4)
     READELF_BINARY    = aarch64-none-elf-readelf
     OPENOCD_ARG       = -f /openocd/tcl/interface/ftdi/olimex-arm-usb-tiny-h.cfg -f /openocd/rpi4.cfg
     JTAG_BOOT_IMAGE   = ../X1_JTAG_boot/jtag_boot_rpi4.img
-    LD_SCRIPT_PATH    = $(shell pwd)/kernel/src/bsp/raspberrypi
     RUSTC_MISC_ARGS   = -C target-cpu=cortex-a72
 endif
-
-# Export for build.rs.
-export LD_SCRIPT_PATH
-
 
 
 ##--------------------------------------------------------------------------------------------------
@@ -81,10 +76,6 @@ KERNEL_ELF = $(KERNEL_ELF_TTABLES)
 ##--------------------------------------------------------------------------------------------------
 ## Command building blocks
 ##--------------------------------------------------------------------------------------------------
-RUSTFLAGS = $(RUSTC_MISC_ARGS)                   \
-    -C link-arg=--library-path=$(LD_SCRIPT_PATH) \
-    -C link-arg=--script=$(KERNEL_LINKER_SCRIPT)
-
 RUSTFLAGS_PEDANTIC = $(RUSTFLAGS) \
     -D missing_docs
 
