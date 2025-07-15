@@ -141,13 +141,21 @@ impl memory::mmu::interface::MMU for MemoryManagementUnit {
         // Prepare the memory attribute indirection register.
         self.set_up_mair();
 
+        // Get a mutable reference to the kernel tables.
+        // # Safety
+        // This function is called only once, during
+        // kernel init.
+        let kt = unsafe {
+            &mut *core::ptr::addr_of_mut!(KERNEL_TABLES)
+        };
+
         // Populate translation tables.
-        KERNEL_TABLES
+        kt
             .populate_tt_entries()
             .map_err(MMUEnableError::Other)?;
 
         // Set the "Translation Table Base Register".
-        TTBR0_EL1.set_baddr(KERNEL_TABLES.phys_base_address());
+        TTBR0_EL1.set_baddr(kt.phys_base_address());
 
         self.configure_translation_control();
 
