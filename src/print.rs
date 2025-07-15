@@ -34,7 +34,7 @@ macro_rules! println {
     () => ($crate::print!("\r\n"));
     ($($arg:tt)*) => {{
         $crate::print::_print(format_args!($($arg)*));
-        println!();
+        $crate::println!();
     }};
 }
 
@@ -44,21 +44,21 @@ macro_rules! info {
     ($string:expr) => ({
         let timestamp = $crate::time::time_manager().uptime();
 
-        $crate::print::_print(format_args!(
-            concat!("[  {:>3}.{:06}] \n", $string),
+        $crate::println!(
+            concat!("[  {:>3}.{:06}] \r\n", $string),
             timestamp.as_secs(),
             timestamp.subsec_micros(),
-        ));
+        );
     });
     ($format_string:expr, $($arg:tt)*) => ({
         let timestamp = $crate::time::time_manager().uptime();
 
-        $crate::print::_print(format_args!(
-            concat!("[  {:>3}.{:06}] \n", $format_string),
+        $crate::println!(
+            concat!("[  {:>3}.{:06}] \r\n", $format_string),
             timestamp.as_secs(),
             timestamp.subsec_micros(),
             $($arg)*
-        ));
+        );
     })
 }
 
@@ -68,20 +68,20 @@ macro_rules! warn {
     ($string:expr) => ({
         let timestamp = $crate::time::time_manager().uptime();
 
-        $crate::print::_print(format_args!(
-            concat!("[W {:>3}.{:06}] \n", $string),
+        $crate::println!(
+            concat!("[W {:>3}.{:06}] \r\n", $string),
             timestamp.as_secs(),
             timestamp.subsec_micros(),
-        ));
+        );
     });
     ($format_string:expr, $($arg:tt)*) => ({
         let timestamp = $crate::time::time_manager().uptime();
 
-        $crate::print::_print(format_args!(
-            concat!("[W {:>3}.{:06}] \n", $format_string),
+        $crate::println!(
+            concat!("[W {:>3}.{:06}] \r\n", $format_string),
             timestamp.as_secs(),
             timestamp.subsec_micros(),
             $($arg)*
-        ));
+        );
     })
 }
