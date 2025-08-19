@@ -42,7 +42,7 @@ you continue. This will set you up with all the `AArch64`-specific knowledge nee
 
 Back from reading `Chapter 12` already? Good job :+1:!
 
-[ARM Cortex-A Series Programmer's Guide for ARMv8-A]: http://infocenter.arm.com/help/topic/com.arm.doc.den0024a/DEN0024A_v8_architecture_PG.pdf
+[ARM Cortex-A Series Programmer's Guide for ARMv8-A]: https://developer.arm.com/documentation/den0013/0400/The-Memory-Management-Unit
 
 ## Approach
 
@@ -220,9 +220,9 @@ self.configure_translation_control();
 Finally, the `MMU` is turned on through the [System Control Register - EL1]. The last step also
 enables caching for data and instructions.
 
-[Translation Table Base Register 0 - EL1]: https://docs.rs/aarch64-cpu/9.0.0/src/aarch64_cpu/registers/ttbr0_el1.rs.html
-[Translation Control Register - EL1]: https://docs.rs/aarch64-cpu/9.0.0/src/aarch64_cpu/registers/tcr_el1.rs.html
-[System Control Register - EL1]: https://docs.rs/aarch64-cpu/9.0.0/src/aarch64_cpu/registers/sctlr_el1.rs.html
+[Translation Table Base Register 0 - EL1]: https://docs.rs/aarch64-cpu/latest/src/aarch64_cpu/registers/ttbr0_el1.rs.html
+[Translation Control Register - EL1]: https://docs.rs/aarch64-cpu/latest/src/aarch64_cpu/registers/tcr_el1.rs.html
+[System Control Register - EL1]: https://docs.rs/aarch64-cpu/latest/src/aarch64_cpu/registers/sctlr_el1.rs.html
 
 ### `kernel.ld`
 
@@ -241,7 +241,7 @@ of static paging entries significantly, when compared to the classical `4 KiB` g
 
 For educational purposes, a layout is defined which allows to access the `UART` via two different
 virtual addresses:
-- Since we identity map the whole `Device MMIO` region, it is accessible by asserting its physical
+- Since we identity map the whole `Device MMIO` region, it is accessible by accessing its physical
   base address (`0x3F20_1000` or `0xFA20_1000` depending on which RPi you use) after the `MMU` is
   turned on.
 - Additionally, it is also mapped into the last `64 KiB` slot in the first `512 MiB`, making it
