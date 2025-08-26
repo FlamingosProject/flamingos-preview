@@ -64,8 +64,8 @@ fn panic(info: &PanicInfo) -> ! {
     };
 
     println!(
-        "[  {:>3}.{:06}] Kernel panic!\n\n\
-        Panic location:\n      File '{}', line {}, column {}\n\n\
+        "[  {:>3}.{:06}] Kernel panic!\r\n\r\n\
+        Panic location:\r\n      File '{}', line {}, column {}\r\n\r\n\
         {}",
         timestamp.as_secs(),
         timestamp.subsec_micros(),
