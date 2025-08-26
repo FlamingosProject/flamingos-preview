@@ -159,27 +159,27 @@ extern "C" fn lower_aarch32_serror(e: &mut ExceptionContext) {
 impl fmt::Display for SpsrEL1 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // Raw value.
-        writeln!(f, "SPSR_EL1: {:#010x}", self.0.get())?;
+        writeln!(f, "SPSR_EL1: {:#010x}\r", self.0.get())?;
 
         let to_flag_str = |x| -> _ {
             if x { "Set" } else { "Not set" }
          };
 
-        writeln!(f, "      Flags:")?;
-        writeln!(f, "            Negative (N): {}", to_flag_str(self.0.is_set(SPSR_EL1::N)))?;
-        writeln!(f, "            Zero     (Z): {}", to_flag_str(self.0.is_set(SPSR_EL1::Z)))?;
-        writeln!(f, "            Carry    (C): {}", to_flag_str(self.0.is_set(SPSR_EL1::C)))?;
-        writeln!(f, "            Overflow (V): {}", to_flag_str(self.0.is_set(SPSR_EL1::V)))?;
+        writeln!(f, "      Flags:\r")?;
+        writeln!(f, "            Negative (N): {}\r", to_flag_str(self.0.is_set(SPSR_EL1::N)))?;
+        writeln!(f, "            Zero     (Z): {}\r", to_flag_str(self.0.is_set(SPSR_EL1::Z)))?;
+        writeln!(f, "            Carry    (C): {}\r", to_flag_str(self.0.is_set(SPSR_EL1::C)))?;
+        writeln!(f, "            Overflow (V): {}\r", to_flag_str(self.0.is_set(SPSR_EL1::V)))?;
 
         let to_mask_str = |x| -> _ {
             if x { "Masked" } else { "Unmasked" }
         };
 
-        writeln!(f, "      Exception handling state:")?;
-        writeln!(f, "            Debug  (D): {}", to_mask_str(self.0.is_set(SPSR_EL1::D)))?;
-        writeln!(f, "            SError (A): {}", to_mask_str(self.0.is_set(SPSR_EL1::A)))?;
-        writeln!(f, "            IRQ    (I): {}", to_mask_str(self.0.is_set(SPSR_EL1::I)))?;
-        writeln!(f, "            FIQ    (F): {}", to_mask_str(self.0.is_set(SPSR_EL1::F)))?;
+        writeln!(f, "      Exception handling state:\r")?;
+        writeln!(f, "            Debug  (D): {}\r", to_mask_str(self.0.is_set(SPSR_EL1::D)))?;
+        writeln!(f, "            SError (A): {}\r", to_mask_str(self.0.is_set(SPSR_EL1::A)))?;
+        writeln!(f, "            IRQ    (I): {}\r", to_mask_str(self.0.is_set(SPSR_EL1::I)))?;
+        writeln!(f, "            FIQ    (F): {}\r", to_mask_str(self.0.is_set(SPSR_EL1::F)))?;
 
         write!(f, "      Illegal Execution State (IL): {}",
             to_flag_str(self.0.is_set(SPSR_EL1::IL))
@@ -199,7 +199,7 @@ impl EsrEL1 {
 impl fmt::Display for EsrEL1 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // Raw print of whole register.
-        writeln!(f, "ESR_EL1: {:#010x}", self.0.get())?;
+        writeln!(f, "ESR_EL1: {:#010x}\r", self.0.get())?;
 
         // Raw print of exception class.
         write!(f, "      Exception Class         (EC) : {:#x}", self.0.read(ESR_EL1::EC))?;
@@ -209,7 +209,7 @@ impl fmt::Display for EsrEL1 {
             Some(ESR_EL1::EC::Value::DataAbortCurrentEL) => "Data Abort, current EL",
             _ => "N/A",
         };
-        writeln!(f, " - {}", ec_translation)?;
+        writeln!(f, " - {}\r", ec_translation)?;
 
         // Raw print of instruction specific syndrome.
         write!(f, "      Instr Specific Syndrome (ISS): {:#x}", self.0.read(ESR_EL1::ISS))
@@ -245,20 +245,20 @@ impl ExceptionContext {
 /// Human readable print of the exception context.
 impl fmt::Display for ExceptionContext {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "{}", self.esr_el1)?;
+        writeln!(f, "{}\r", self.esr_el1)?;
 
         if self.fault_address_valid() {
-            writeln!(f, "FAR_EL1: {:#018x}", FAR_EL1.get() as usize)?;
+            writeln!(f, "FAR_EL1: {:#018x}\r", FAR_EL1.get() as usize)?;
         }
 
-        writeln!(f, "{}", self.spsr_el1)?;
-        writeln!(f, "ELR_EL1: {:#018x}", self.elr_el1)?;
-        writeln!(f)?;
-        writeln!(f, "General purpose register:")?;
+        writeln!(f, "{}\r", self.spsr_el1)?;
+        writeln!(f, "ELR_EL1: {:#018x}\r", self.elr_el1)?;
+        writeln!(f, "\r")?;
+        writeln!(f, "General purpose register:\r")?;
 
         #[rustfmt::skip]
         let alternating = |x| -> _ {
-            if x % 2 == 0 { "   " } else { "\n" }
+            if x % 2 == 0 { "   " } else { "\r\n" }
         };
 
         // Print two registers per line.
