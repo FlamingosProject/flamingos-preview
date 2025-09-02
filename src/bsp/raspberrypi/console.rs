@@ -27,10 +27,17 @@ struct QEMUOutput;
 /// [`src/print.rs`]: ../../print/index.html
 impl fmt::Write for QEMUOutput {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        for c in s.chars() {
+        fn console_write_byte(b: u8) {
             unsafe {
-                core::ptr::write_volatile(0x3F20_1000 as *mut u8, c as u8);
+                core::ptr::write_volatile(0x3F20_1000 as *mut u8, b);
             }
+        }
+
+        for b in s.bytes() {
+            if b == b'\n' {
+                console_write_byte(b'\r');
+            }
+            console_write_byte(b);
         }
 
         Ok(())

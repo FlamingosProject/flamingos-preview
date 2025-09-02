@@ -4,36 +4,24 @@
 
 //! Printing.
 
-use crate::console;
-use core::fmt;
-
 //--------------------------------------------------------------------------------------------------
 // Public Code
 //--------------------------------------------------------------------------------------------------
 
-#[doc(hidden)]
-pub fn _print(args: fmt::Arguments) {
-    use console::interface::Write;
-
-    console::console().write_fmt(args).unwrap();
-}
-
-/// Prints without a newline.
-///
-/// Carbon copy from <https://doc.rust-lang.org/src/std/macros.rs.html>
+/// Prints to console without a newline.
 #[macro_export]
 macro_rules! print {
-    ($($arg:tt)*) => ($crate::print::_print(format_args!($($arg)*)));
+    ($($arg:tt)*) => {{
+        use core::fmt::Write;
+        core::write!($crate::console::console(), $($arg)*).unwrap()
+    }};
 }
 
-/// Prints with a newline.
-///
-/// Carbon copy from <https://doc.rust-lang.org/src/std/macros.rs.html>
+/// Prints to console with a newline.
 #[macro_export]
 macro_rules! println {
-    () => ($crate::print!("\n"));
-    ($($arg:tt)*) => ({
-        $crate::print::_print(format_args!($($arg)*));
-        $crate::println!();
-    })
+    ($($arg:tt)*) => {{
+        use core::fmt::Write;
+        core::writeln!($crate::console::console(), $($arg)*).unwrap()
+    }};
 }
