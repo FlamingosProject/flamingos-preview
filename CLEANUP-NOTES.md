@@ -24,3 +24,17 @@
 * 07: Explain barrier and why needed in blog post or readme.
 * 07: Fix stringly `Err()` return.
 * 07: Potential overflow and also spin-wait in `spin_for()`.
+----
+2025-09-23 TODO
+
+* Finish propagating stupid UART newline fixes forward from
+  05-drivers-gpio-uart
+
+* Fix 12-integrated-testing to make `kernel_test` do
+  something useful for both on-board testing and CI testing
+  with QEMU
+
+  * https://lib.rs/crates/linkme
+  * https://lib.rs/crates/embedded-test
+
+* Don't forget to eventually add missing sections 16-20
