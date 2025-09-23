@@ -12,6 +12,6 @@ rustflags = [
 # Raspberry Pi 4
 # "-C", "target-cpu=cortex-a72",
   "-C", "linker=rust-lld",
-  "-C", "link-arg=--library-path=src/bsp/raspberrypi/",
+  "-C", "link-arg=--library-path=kernel/src/bsp/raspberrypi/",
   "-C", "link-arg=--script=kernel.ld",
 ]
