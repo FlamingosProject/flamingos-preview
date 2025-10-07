@@ -2,6 +2,11 @@
 //
 // Copyright (c) 2018-2023 Andre Richter <andre.o.richter@gmail.com>
 
+// XXX This code uses unsafe initialization to set up a
+// bunch of mutable globals. We have checked this and
+// believe it's OK.
+#![allow(static_mut_refs)]
+
 //! BSP driver support.
 
 use super::{exception, memory::map::mmio};
