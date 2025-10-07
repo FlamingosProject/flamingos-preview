@@ -29,6 +29,7 @@ pub mod interface {
         ///
         /// - Implementor must ensure that this function can run only once or is harmless if invoked
         ///   multiple times.
+        #[allow(dead_code)]
         fn init(&mut self) -> Result<(), &'static str>;
 
         /// Map the given virtual memory region to the given physical memory region.

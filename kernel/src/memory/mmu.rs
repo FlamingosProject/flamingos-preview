@@ -102,7 +102,7 @@ unsafe fn kernel_map_at_unchecked(
 /// Try to translate a kernel virtual address to a physical address.
 ///
 /// Will only succeed if there exists a valid mapping for the input address.
-fn try_kernel_virt_addr_to_phys_addr(
+pub fn try_kernel_virt_addr_to_phys_addr(
     virt_addr: Address<Virtual>,
 ) -> Result<Address<Physical>, &'static str> {
     bsp::memory::mmu::kernel_translation_tables()

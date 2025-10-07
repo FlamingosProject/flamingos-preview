@@ -4,10 +4,8 @@ resolver="2"
 members = [
         "libraries/*",
         "kernel",
-]
-
-exclude = [
-        "tools/*",
+        "tools/translation_table_tool",
+        "xtask",
 ]
 
 [profile.release]

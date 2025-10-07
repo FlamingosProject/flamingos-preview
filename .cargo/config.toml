@@ -1,7 +1,4 @@
-[build]
-target = "aarch64-unknown-none-softfloat"
-
-[target.'cfg(target_arch="aarch64")']
+[target.'cfg(target="aarch64-unknown-none-softfloat")']
 rustflags = [
 # Choosing the right target-cpu can produce slightly
 # better code, maybe.
@@ -15,3 +12,6 @@ rustflags = [
   "-C", "link-arg=--library-path=kernel/src/bsp/raspberrypi/",
   "-C", "link-arg=--script=kernel.ld",
 ]
+
+[alias]
+xtask = "run -p xtask --"

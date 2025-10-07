@@ -8,3 +8,5 @@ node_modules
 
 Gemfile.lock
 package*.json
+
+/tools/bin/translation_table_tool

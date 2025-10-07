@@ -93,7 +93,7 @@ OBJCOPY_CMD = rust-objcopy \
     -O binary
 
 EXEC_QEMU = $(QEMU_BINARY) -M $(QEMU_MACHINE_TYPE)
-EXEC_TT_TOOL       = ruby $(TT_TOOL_PATH)/main.rb
+EXEC_TT_TOOL       = $(TT_TOOL_PATH)/translation_table_tool
 
 
 

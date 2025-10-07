@@ -124,6 +124,7 @@ struct PageDescriptor {
     value: u64,
 }
 
+#[allow(dead_code)]
 trait StartAddr {
     fn virt_start_addr(&self) -> Address<Virtual>;
 }
@@ -166,6 +167,7 @@ impl TableDescriptor {
     }
 
     /// Create an instance pointing to the supplied address.
+    #[allow(dead_code)]
     pub fn from_next_lvl_table_addr(phys_next_lvl_table_addr: Address<Physical>) -> Self {
         let val = InMemoryRegister::<u64, STAGE1_TABLE_DESCRIPTOR::Register>::new(0);
 
