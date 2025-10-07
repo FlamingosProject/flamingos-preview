@@ -3,7 +3,11 @@ resolver="2"
 
 members = [
         "libraries/*",
-        "kernel"
+        "kernel",
+]
+
+exclude = [
+        "tools/*",
 ]
 
 [profile.release]
