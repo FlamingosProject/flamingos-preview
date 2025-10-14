@@ -64,7 +64,7 @@ KERNEL_ELF_RAW_DEPS = $(filter-out %: ,$(file < $(KERNEL_ELF_RAW).d)) $(KERNEL_M
 ##------------------------------------------------------------------------------
 ## Translation tables
 ##------------------------------------------------------------------------------
-TT_TOOL_PATH = tools/translation_table_tool
+TT_TOOL_PATH = tools/bin
 
 KERNEL_ELF_TTABLES      = target/$(TARGET)/release/kernel+ttables
 KERNEL_ELF_TTABLES_DEPS = $(KERNEL_ELF_RAW) $(wildcard $(TT_TOOL_PATH)/*)
