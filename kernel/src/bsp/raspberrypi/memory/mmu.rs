@@ -20,7 +20,7 @@ use crate::{
 //--------------------------------------------------------------------------------------------------
 
 type KernelTranslationTable =
-    <KernelVirtAddrSpace as AssociatedTranslationTable>::TableStartFromBottom;
+    <KernelVirtAddrSpace as AssociatedTranslationTable>::TableStartFromTop;
 
 //--------------------------------------------------------------------------------------------------
 // Public Definitions
@@ -156,14 +156,6 @@ pub fn virt_mmio_remap_region() -> MemoryRegion<Virtual> {
 /// `translation table tool` and patched into the kernel binary. This function just adds the mapping
 /// record entries.
 pub fn kernel_add_mapping_records_for_precomputed() {
-    let virt_boot_core_stack_region = virt_boot_core_stack_region();
-    generic_mmu::kernel_add_mapping_record(
-        "Kernel boot-core stack",
-        &virt_boot_core_stack_region,
-        &kernel_virt_to_phys_region(virt_boot_core_stack_region),
-        &kernel_page_attributes(virt_boot_core_stack_region.start_page_addr()),
-    );
-
     let virt_code_region = virt_code_region();
     generic_mmu::kernel_add_mapping_record(
         "Kernel code and RO data",
@@ -178,5 +170,13 @@ pub fn kernel_add_mapping_records_for_precomputed() {
         &virt_data_region,
         &kernel_virt_to_phys_region(virt_data_region),
         &kernel_page_attributes(virt_data_region.start_page_addr()),
+    );
+
+    let virt_boot_core_stack_region = virt_boot_core_stack_region();
+    generic_mmu::kernel_add_mapping_record(
+        "Kernel boot-core stack",
+        &virt_boot_core_stack_region,
+        &kernel_virt_to_phys_region(virt_boot_core_stack_region),
+        &kernel_page_attributes(virt_boot_core_stack_region.start_page_addr()),
     );
 }

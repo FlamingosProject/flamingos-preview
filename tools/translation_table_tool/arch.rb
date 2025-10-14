@@ -255,6 +255,8 @@ class TranslationTable
     end
 
     def lvl2_lvl3_index_from(addr)
+        addr -= BSP.kernel_virt_start_addr
+
         lvl2_index = addr >> Granule512MiB::SHIFT
         lvl3_index = (addr & Granule512MiB::MASK) >> Granule64KiB::SHIFT
 

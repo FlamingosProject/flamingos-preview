@@ -94,9 +94,9 @@ mod tests {
 
         assert_eq!(tables.init(), Ok(()));
 
-        let virt_start_page_addr: PageAddress<Virtual> = PageAddress::from(0);
-        let virt_end_exclusive_page_addr: PageAddress<Virtual> =
-            virt_start_page_addr.checked_offset(5).unwrap();
+        let virt_end_exclusive_page_addr: PageAddress<Virtual> = PageAddress::MAX;
+        let virt_start_page_addr: PageAddress<Virtual> =
+            virt_end_exclusive_page_addr.checked_offset(-5).unwrap();
 
         let phys_start_page_addr: PageAddress<Physical> = PageAddress::from(0);
         let phys_end_exclusive_page_addr: PageAddress<Physical> =
@@ -119,7 +119,7 @@ mod tests {
         );
 
         assert_eq!(
-            tables.try_page_attributes(virt_start_page_addr.checked_offset(6).unwrap()),
+            tables.try_page_attributes(virt_start_page_addr.checked_offset(-1).unwrap()),
             Err("Page marked invalid")
         );
 
