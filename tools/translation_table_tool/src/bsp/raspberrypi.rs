@@ -24,6 +24,7 @@ impl BspType {
 pub struct RaspberryPi {
     bsp_type: BspType,
     kernel_virt_addr_space_size: usize,
+    kernel_virt_start_addr: u64,
     virt_addr_of_kernel_tables: u64,
     virt_addr_of_phys_kernel_tables_base_addr: u64,
 }
@@ -31,12 +32,14 @@ pub struct RaspberryPi {
 impl RaspberryPi {
     pub fn new(bsp_type: BspType, kernel_elf: &KernelELF) -> Result<Self> {
         let kernel_virt_addr_space_size = kernel_elf.symbol_value("__kernel_virt_addr_space_size")? as usize;
+        let kernel_virt_start_addr = kernel_elf.symbol_value("__kernel_virt_start_addr")?;
         let virt_addr_of_kernel_tables = kernel_elf.symbol_value("KERNEL_TABLES")?;
         let virt_addr_of_phys_kernel_tables_base_addr = kernel_elf.symbol_value("PHYS_KERNEL_TABLES_BASE_ADDR")?;
 
         Ok(Self {
             bsp_type,
             kernel_virt_addr_space_size,
+            kernel_virt_start_addr,
             virt_addr_of_kernel_tables,
             virt_addr_of_phys_kernel_tables_base_addr,
         })
@@ -48,6 +51,10 @@ impl RaspberryPi {
 
     pub fn kernel_virt_addr_space_size(&self) -> usize {
         self.kernel_virt_addr_space_size
+    }
+
+    pub fn kernel_virt_start_addr(&self) -> u64 {
+        self.kernel_virt_start_addr
     }
 
     pub fn phys_addr_of_kernel_tables(&self, kernel_elf: &KernelELF) -> Result<u64> {
