@@ -124,8 +124,11 @@ $(KERNEL_ELF_RAW): $(KERNEL_ELF_RAW_DEPS)
 ##------------------------------------------------------------------------------
 $(KERNEL_ELF_TTABLES): $(KERNEL_ELF_TTABLES_DEPS)
 	$(call color_header, "Precomputing kernel translation tables and patching kernel ELF")
-	@cp $(KERNEL_ELF_RAW) $(KERNEL_ELF_TTABLES)
-	$(EXEC_TT_TOOL) $(BSP) $(KERNEL_ELF_TTABLES)
+	TMP=/tmp/kernel-elf-raw.$$$$ && \
+	cp $(KERNEL_ELF_RAW) $$TMP && \
+	$(EXEC_TT_TOOL) $(BSP) $$TMP && \
+	cp $$TMP $(KERNEL_ELF_TTABLES) && \
+	rm $$TMP
 
 ##------------------------------------------------------------------------------
 ## Generate the stripped kernel binary
