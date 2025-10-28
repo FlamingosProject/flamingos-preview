@@ -80,7 +80,7 @@ KERNEL_ELF_TTABLES_SYMS = target/$(TARGET)/release/kernel+ttables+symbols
 # name of the generated symbols file varies between runs, which can cause confusion.
 KERNEL_ELF_TTABLES_SYMS_DEPS = $(KERNEL_ELF_TTABLES) \
     $(wildcard kernel_symbols/*)                     \
-    $(wildcard $(KERNEL_SYMBOLS_TOOL_PATH)/*)
+    $(EXEC_KERNEL_SYMBOLS_TOOL)
 
 # This overrides the two ENV variables. The other ENV variables that are required as input for
 # the .mk file are set already because they are exported by this Makefile and this script is
@@ -117,8 +117,9 @@ OBJCOPY_CMD = rust-objcopy \
     --strip-all            \
     -O binary
 
-EXEC_QEMU = $(QEMU_BINARY) -M $(QEMU_MACHINE_TYPE)
-EXEC_TT_TOOL       = $(TT_TOOL_PATH)/translation_table_tool
+EXEC_QEMU              = $(QEMU_BINARY) -M $(QEMU_MACHINE_TYPE)
+EXEC_TT_TOOL           = $(TT_TOOL_PATH)/translation_table_tool
+EXEC_KERNEL_SYMBOLS_TOOL = target/release/kernel-elf-symbol
 
 
 
@@ -154,6 +155,13 @@ $(KERNEL_ELF_TTABLES): $(KERNEL_ELF_TTABLES_DEPS)
 	$(EXEC_TT_TOOL) $(BSP) $$TMP && \
 	cp $$TMP $(KERNEL_ELF_TTABLES) && \
 	rm $$TMP
+
+##------------------------------------------------------------------------------
+## Build kernel symbols tool
+##------------------------------------------------------------------------------
+$(EXEC_KERNEL_SYMBOLS_TOOL): $(wildcard $(KERNEL_SYMBOLS_TOOL_PATH)/src/*.rs) $(KERNEL_SYMBOLS_TOOL_PATH)/Cargo.toml
+	$(call color_header, "Building kernel symbols tool")
+	@cargo build --package kernel_symbols_tool --release --quiet
 
 ##------------------------------------------------------------------------------
 ## Generate kernel symbols and patch them into the kernel ELF

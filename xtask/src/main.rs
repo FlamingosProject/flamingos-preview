@@ -54,7 +54,15 @@ fn build(args: Vec<String>) {
             "--", "tools/bin/translation_table_tool",
         ])
         .status()
-        .expect("ERROR: Failed to build tools ('tools/*' crates)");
+        .expect("ERROR: Failed to build translation_table_tool");
+
+    Command::new("cargo")
+        .args([
+            "build", "-p", "kernel_symbols_tool", "--release",
+            "--bin", "kernel-elf-symbol",
+        ])
+        .status()
+        .expect("ERROR: Failed to build kernel_symbols_tool");
 
     println!("--- copy kernel");
     Command::new("cargo")

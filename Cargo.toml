@@ -6,6 +6,7 @@ members = [
         "kernel",
         "kernel_symbols",
         "tools/translation_table_tool",
+        "tools/kernel_symbols_tool",
         "xtask",
 ]
 
