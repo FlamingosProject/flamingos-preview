@@ -11,7 +11,7 @@
 //!
 //! crate::exception::arch_exception
 
-use crate::exception;
+use crate::{exception, memory, symbols};
 use aarch64_cpu::{asm::barrier, registers::*};
 use core::{arch::global_asm, cell::UnsafeCell, fmt};
 use tock_registers::{
@@ -260,6 +260,14 @@ impl fmt::Display for ExceptionContext {
 
         writeln!(f, "{}\r", self.spsr_el1)?;
         writeln!(f, "ELR_EL1: {:#018x}\r", self.elr_el1)?;
+        writeln!(
+            f,
+            "      Symbol: {}\r",
+            match symbols::lookup_symbol(memory::Address::new(self.elr_el1 as usize)) {
+                Some(sym) => sym.name(),
+                _ => "Symbol not found",
+            }
+        )?;
         writeln!(f, "\r")?;
         writeln!(f, "General purpose register:\r")?;
 

@@ -4,6 +4,7 @@ resolver="2"
 members = [
         "libraries/*",
         "kernel",
+        "kernel_symbols",
         "tools/translation_table_tool",
         "xtask",
 ]

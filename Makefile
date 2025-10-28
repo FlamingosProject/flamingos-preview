@@ -69,7 +69,32 @@ TT_TOOL_PATH = tools/bin
 KERNEL_ELF_TTABLES      = target/$(TARGET)/release/kernel+ttables
 KERNEL_ELF_TTABLES_DEPS = $(KERNEL_ELF_RAW) $(wildcard $(TT_TOOL_PATH)/*)
 
-KERNEL_ELF = $(KERNEL_ELF_TTABLES)
+##------------------------------------------------------------------------------
+## Kernel symbols
+##------------------------------------------------------------------------------
+export KERNEL_SYMBOLS_TOOL_PATH = tools/kernel_symbols_tool
+
+KERNEL_ELF_TTABLES_SYMS = target/$(TARGET)/release/kernel+ttables+symbols
+
+# Unlike with KERNEL_ELF_RAW, we are not relying on dep-info here. One of the reasons being that the
+# name of the generated symbols file varies between runs, which can cause confusion.
+KERNEL_ELF_TTABLES_SYMS_DEPS = $(KERNEL_ELF_TTABLES) \
+    $(wildcard kernel_symbols/*)                     \
+    $(wildcard $(KERNEL_SYMBOLS_TOOL_PATH)/*)
+
+# This overrides the two ENV variables. The other ENV variables that are required as input for
+# the .mk file are set already because they are exported by this Makefile and this script is
+# started by the same.
+KERNEL_SYMBOLS_INPUT_ELF=$$TEST_ELF           \
+    KERNEL_SYMBOLS_OUTPUT_ELF=$$TEST_ELF_SYMS \
+    $(MAKE) --no-print-directory -f kernel_symbols.mk > /dev/null 2>&1
+
+
+export TARGET
+export KERNEL_SYMBOLS_INPUT_ELF  = $(KERNEL_ELF_TTABLES)
+export KERNEL_SYMBOLS_OUTPUT_ELF = $(KERNEL_ELF_TTABLES_SYMS)
+
+KERNEL_ELF = $(KERNEL_ELF_TTABLES_SYMS)
 
 
 
@@ -131,11 +156,18 @@ $(KERNEL_ELF_TTABLES): $(KERNEL_ELF_TTABLES_DEPS)
 	rm $$TMP
 
 ##------------------------------------------------------------------------------
+## Generate kernel symbols and patch them into the kernel ELF
+##------------------------------------------------------------------------------
+$(KERNEL_ELF_TTABLES_SYMS): $(KERNEL_ELF_TTABLES_SYMS_DEPS)
+	$(call color_header, "Generating kernel symbols and patching kernel ELF")
+	@$(MAKE) --no-print-directory -f kernel_symbols.mk
+
+##------------------------------------------------------------------------------
 ## Generate the stripped kernel binary
 ##------------------------------------------------------------------------------
-$(KERNEL_BIN): $(KERNEL_ELF_TTABLES)
+$(KERNEL_BIN): $(KERNEL_ELF_TTABLES_SYMS)
 	$(call color_header, "Generating stripped binary")
-	@$(OBJCOPY_CMD) $(KERNEL_ELF_TTABLES) $(KERNEL_BIN)
+	@$(OBJCOPY_CMD) $(KERNEL_ELF_TTABLES_SYMS) $(KERNEL_BIN)
 	$(call color_progress_prefix, "Name")
 	@echo $(KERNEL_BIN)
 	$(call color_progress_prefix, "Size")
@@ -144,7 +176,7 @@ $(KERNEL_BIN): $(KERNEL_ELF_TTABLES)
 ##------------------------------------------------------------------------------
 ## Generate the documentation
 ##------------------------------------------------------------------------------
-doc:
+doc: clean
 	$(call color_header, "Generating docs")
 	@$(DOC_CMD) --document-private-items --open
 

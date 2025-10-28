@@ -1,6 +1,6 @@
 [package]
 name = "mingo"
-version = "0.16.0"
+version = "0.17.0"
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
 edition = "2021"
 
@@ -16,6 +16,7 @@ test_build = ["qemu-exit"]
 
 [dependencies]
 test-types = { path = "../libraries/test-types" }
+debug-symbol-types = { path = "../libraries/debug-symbol-types" }
 
 # Optional dependencies
 tock-registers = { version = "0.9", default-features = false, features = [
