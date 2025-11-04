@@ -45,7 +45,7 @@ macro_rules! info {
         let timestamp = $crate::time::time_manager().uptime();
 
         $crate::println!(
-            concat!("[  {:>3}.{:06}] \r\n", $string),
+            concat!("[  {:>3}.{:06}] ", $string),
             timestamp.as_secs(),
             timestamp.subsec_micros(),
         );
@@ -54,7 +54,7 @@ macro_rules! info {
         let timestamp = $crate::time::time_manager().uptime();
 
         $crate::println!(
-            concat!("[  {:>3}.{:06}] \r\n", $format_string),
+            concat!("[  {:>3}.{:06}] ", $format_string),
             timestamp.as_secs(),
             timestamp.subsec_micros(),
             $($arg)*
@@ -69,7 +69,7 @@ macro_rules! warn {
         let timestamp = $crate::time::time_manager().uptime();
 
         $crate::println!(
-            concat!("[W {:>3}.{:06}] \r\n", $string),
+            concat!("[W {:>3}.{:06}] ", $string),
             timestamp.as_secs(),
             timestamp.subsec_micros(),
         );
@@ -78,7 +78,7 @@ macro_rules! warn {
         let timestamp = $crate::time::time_manager().uptime();
 
         $crate::println!(
-            concat!("[W {:>3}.{:06}] \r\n", $format_string),
+            concat!("[W {:>3}.{:06}]", $format_string),
             timestamp.as_secs(),
             timestamp.subsec_micros(),
             $($arg)*
@@ -93,23 +93,23 @@ macro_rules! debug {
         if cfg!(feature = "debug_prints") {
             let timestamp = $crate::time::time_manager().uptime();
 
-            $crate::print::_print(format_args_nl!(
-                concat!("<[>D {:>3}.{:06}> ", $string),
+            $crate::println!(
+                concat!("[D {:>3}.{:06}] ", $string),
                 timestamp.as_secs(),
                 timestamp.subsec_micros(),
-            ));
+            );
         }
     });
     ($format_string:expr, $($arg:tt)*) => ({
         if cfg!(feature = "debug_prints") {
             let timestamp = $crate::time::time_manager().uptime();
 
-            $crate::print::_print(format_args_nl!(
-                concat!("<D {:>3}.{:06}> ", $format_string),
+            $crate::println!(
+                concat!("[D {:>3}.{:06}] ", $format_string),
                 timestamp.as_secs(),
                 timestamp.subsec_micros(),
                 $($arg)*
-            ));
+            );
         }
     })
 }

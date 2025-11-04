@@ -83,31 +83,11 @@ const fn size_to_num_pages(size: usize) -> usize {
     size >> KernelGranule::SHIFT
 }
 
-/// The code pages of the kernel binary.
-pub fn virt_code_region() -> MemoryRegion<Virtual> {
-    let num_pages = size_to_num_pages(super::code_size());
-
-    let start_page_addr = super::virt_code_start();
-    let end_exclusive_page_addr = start_page_addr.checked_offset(num_pages as isize).unwrap();
-
-    MemoryRegion::new(start_page_addr, end_exclusive_page_addr)
-}
-
 /// The data pages of the kernel binary.
 fn virt_data_region() -> MemoryRegion<Virtual> {
     let num_pages = size_to_num_pages(super::data_size());
 
     let start_page_addr = super::virt_data_start();
-    let end_exclusive_page_addr = start_page_addr.checked_offset(num_pages as isize).unwrap();
-
-    MemoryRegion::new(start_page_addr, end_exclusive_page_addr)
-}
-
-/// The boot core stack pages.
-pub fn virt_boot_core_stack_region() -> MemoryRegion<Virtual> {
-    let num_pages = size_to_num_pages(super::boot_core_stack_size());
-
-    let start_page_addr = super::virt_boot_core_stack_start();
     let end_exclusive_page_addr = start_page_addr.checked_offset(num_pages as isize).unwrap();
 
     MemoryRegion::new(start_page_addr, end_exclusive_page_addr)
