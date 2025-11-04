@@ -11,6 +11,8 @@
 #![no_main]
 #![no_std]
 
+extern crate alloc;
+
 use libkernel::{bsp, cpu, driver, exception, info, memory, state, time};
 
 /// Early init code.
@@ -70,6 +72,9 @@ fn kernel_main() -> ! {
 
     info!("Registered IRQ handlers:");
     exception::asynchronous::irq_manager().print_handler();
+
+    info!("Kernel heap:");
+    memory::heap_alloc::kernel_heap_allocator().print_usage();
 
     info!("Echoing input now");
     cpu::wait_forever();

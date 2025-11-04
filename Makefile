@@ -54,7 +54,7 @@ endif
 ##--------------------------------------------------------------------------------------------------
 KERNEL_MANIFEST      = kernel/Cargo.toml
 KERNEL_LINKER_SCRIPT = kernel.ld
-LAST_BUILD_CONFIG    = target/$(BSP).build_config
+LAST_BUILD_CONFIG    = target/$(BSP)_$(DEBUG_PRINTS).build_config
 
 KERNEL_ELF_RAW      = target/$(TARGET)/release/kernel
 # This parses cargo's dep-info file.
@@ -104,11 +104,17 @@ KERNEL_ELF = $(KERNEL_ELF_TTABLES_SYMS)
 RUSTFLAGS_PEDANTIC = $(RUSTFLAGS) \
     -D missing_docs
 
-FEATURES      = --features bsp_$(BSP)
+# Optional debug prints.
+ifdef DEBUG_PRINTS
+    FEATURES = --features debug_prints
+endif
+FEATURES     += --features bsp_$(BSP)
 COMPILER_ARGS = --target=$(TARGET) \
     $(FEATURES)                    \
     --release
 
+# build-std can be skipped for helper commands that do not rely on correct stack frames and other
+# custom compiler options. This results in a huge speedup.
 RUSTC_CMD   = cargo rustc $(COMPILER_ARGS) --manifest-path $(KERNEL_MANIFEST)
 DOC_CMD     = cargo doc $(COMPILER_ARGS)
 CLIPPY_CMD  = cargo clippy $(COMPILER_ARGS)

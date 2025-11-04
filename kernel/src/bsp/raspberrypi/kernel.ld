@@ -35,6 +35,7 @@ PHDRS
 {
     segment_code            PT_LOAD FLAGS(5);
     segment_data            PT_LOAD FLAGS(6);
+    segment_heap            PT_LOAD FLAGS(6);
     segment_boot_core_stack PT_LOAD FLAGS(6);
 }
 
@@ -82,6 +83,18 @@ SECTIONS
 
     . = ALIGN(PAGE_SIZE);
     __data_end_exclusive = .;
+
+    /***********************************************************************************************
+    * Heap
+    ***********************************************************************************************/
+    __heap_start = .;
+    .heap (NOLOAD) :
+    {
+        . += 16 * 1024 * 1024;
+    } :segment_heap
+    __heap_end_exclusive = .;
+
+    ASSERT((. & PAGE_MASK) == 0, "Heap is not page aligned")
 
     /***********************************************************************************************
     * MMIO Remap Reserved

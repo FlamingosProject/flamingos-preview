@@ -117,6 +117,8 @@
 #[cfg(not(any(feature = "bsp_rpi3", feature = "bsp_rpi4")))]
 compile_error!("Either feature \"bsp_rpi3\" or \"bsp_rpi4\" must be enabled for this crate.",);
 
+extern crate alloc;
+
 mod panic_wait;
 mod synchronization;
 
