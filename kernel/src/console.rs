@@ -27,7 +27,7 @@ pub mod interface {
         fn write_str(&self, s: &str);
 
         /// Write a slice of characters.
-        fn write_array(&self, a: &[char]);
+        fn write_array(&self, a: &[u8]);
 
         /// Write Rust formatted output.
         #[allow(unused)]

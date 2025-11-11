@@ -328,9 +328,9 @@ impl PL011UartInner {
     }
 
     /// Send a slice of characters.
-    fn write_array(&mut self, a: &[char]) {
-        for c in a {
-            self.write_char(*c);
+    fn write_array(&mut self, a: &[u8]) {
+        for &c in a {
+            self.write_byte(c);
         }
     }
 
@@ -450,7 +450,7 @@ impl console::interface::Write for PL011Uart {
         self.inner.lock(|inner| inner.write_str(s).unwrap())
     }
 
-    fn write_array(&self, a: &[char]) {
+    fn write_array(&self, a: &[u8]) {
         self.inner.lock(|inner| inner.write_array(a));
     }
 

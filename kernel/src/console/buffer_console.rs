@@ -15,7 +15,7 @@ use core::fmt;
 const BUF_SIZE: usize = 1024 * 64;
 
 pub struct BufferConsoleInner {
-    buf: [char; BUF_SIZE],
+    buf: [u8; BUF_SIZE],
     write_ptr: usize,
 }
 
@@ -34,7 +34,7 @@ pub struct BufferConsole {
 pub static BUFFER_CONSOLE: BufferConsole = BufferConsole {
     inner: InitStateLock::new(BufferConsoleInner {
         // Use the null character, so this lands in .bss and does not waste space in the binary.
-        buf: ['\0'; BUF_SIZE],
+        buf: [0; BUF_SIZE],
         write_ptr: 0,
     }),
 };
@@ -44,9 +44,9 @@ pub static BUFFER_CONSOLE: BufferConsole = BufferConsole {
 //--------------------------------------------------------------------------------------------------
 
 impl BufferConsoleInner {
-    fn write_char(&mut self, c: char) {
+    fn write_byte(&mut self, b: u8) {
         if self.write_ptr < (BUF_SIZE - 1) {
-            self.buf[self.write_ptr] = c;
+            self.buf[self.write_ptr] = b;
             self.write_ptr += 1;
         }
     }
@@ -54,8 +54,8 @@ impl BufferConsoleInner {
 
 impl fmt::Write for BufferConsoleInner {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        for c in s.chars() {
-            self.write_char(c);
+        for b in s.bytes() {
+            self.write_byte(b);
         }
 
         Ok(())
@@ -87,11 +87,21 @@ impl BufferConsole {
 }
 
 impl interface::Write for BufferConsole {
-    fn write_char(&self, c: char) {
-        self.inner.write(|inner| inner.write_char(c));
+    fn write_byte(&self, b: u8) {
+        self.inner.write(|inner| inner.write_byte(b));
     }
 
-    fn write_array(&self, _a: &[char]) {}
+    fn write_array(&self, a: &[u8]) {
+        for &b in a {
+            self.write_byte(b);
+        }
+    }
+
+    fn write_str(&self, s: &str) {
+        for b in s.bytes() {
+            self.write_byte(b);
+        }
+    }
 
     fn write_fmt(&self, args: fmt::Arguments) -> fmt::Result {
         self.inner.write(|inner| fmt::Write::write_fmt(inner, args))
@@ -102,7 +112,19 @@ impl interface::Write for BufferConsole {
 
 impl interface::Read for BufferConsole {
     fn clear_rx(&self) {}
+
+    fn read_byte(&self) -> u8 {
+        b' '
+    }
 }
 
-impl interface::Statistics for BufferConsole {}
+impl interface::Statistics for BufferConsole {
+    fn bytes_read(&self) -> usize {
+        0
+    }
+
+    fn bytes_written(&self) -> usize {
+        0
+    }
+}
 impl interface::Console for BufferConsole {}
