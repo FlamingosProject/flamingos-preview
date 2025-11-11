@@ -66,3 +66,7 @@
 	path = 17-kernel-symbols
 	url = https://github.com/FlamingosProject/flamingos-preview.git
 	branch = 17-kernel-symbols
+[submodule "18-kernel-heap"]
+	path = 18-kernel-heap
+	url = https://github.com/FlamingosProject/flamingos-preview.git
+	branch = 18-kernel-heap
