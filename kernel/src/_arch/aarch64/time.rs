@@ -11,14 +11,17 @@
 //!
 //! crate::time::arch_time
 
-use crate::warn;
+use crate::{
+    bsp::{self, exception},
+    warn,
+};
 use aarch64_cpu::{asm::barrier, registers::*};
 use core::{
     num::{NonZeroU128, NonZeroU32, NonZeroU64},
     ops::{Add, Div},
     time::Duration,
 };
-use tock_registers::interfaces::Readable;
+use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
 
 //--------------------------------------------------------------------------------------------------
 // Private Definitions
@@ -153,4 +156,32 @@ pub fn spin_for(duration: Duration) {
     //
     // Read CNTPCT_EL0 directly to avoid the ISB that is part of [`read_cntpct`].
     while GenericTimerCounterValue(CNTPCT_EL0.get()) < counter_value_target {}
+}
+
+/// The associated IRQ number.
+pub const fn timeout_irq() -> exception::asynchronous::IRQNumber {
+    bsp::exception::asynchronous::irq_map::ARM_NS_PHYSICAL_TIMER
+}
+
+/// Program a timer IRQ to be fired after `delay` has passed.
+pub fn set_timeout_irq(due_time: Duration) {
+    let counter_value_target: GenericTimerCounterValue = match due_time.try_into() {
+        Err(msg) => {
+            warn!("set_timeout: {}. Skipping", msg);
+            return;
+        }
+        Ok(val) => val,
+    };
+
+    // Set the compare value register.
+    CNTP_CVAL_EL0.set(counter_value_target.0);
+
+    // Kick off the timer.
+    CNTP_CTL_EL0.modify(CNTP_CTL_EL0::ENABLE::SET + CNTP_CTL_EL0::IMASK::CLEAR);
+}
+
+/// Conclude a pending timeout IRQ.
+pub fn conclude_timeout_irq() {
+    // Disable counting. De-asserts the IRQ.
+    CNTP_CTL_EL0.modify(CNTP_CTL_EL0::ENABLE::CLEAR);
 }
