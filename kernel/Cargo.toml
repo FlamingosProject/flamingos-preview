@@ -10,6 +10,7 @@ debug_prints = []
 bsp_rpi3 = ["tock-registers"]
 bsp_rpi4 = ["tock-registers"]
 test_build = ["qemu-exit"]
+boot_trace = []
 
 ##--------------------------------------------------------------------------------------------------
 ## Dependencies
@@ -25,6 +26,7 @@ tock-registers = { version = "0.9", default-features = false, features = [
     "register_types",
 ], optional = true }
 qemu-exit = { version = "3.x.x", optional = true }
+fdt = "0.1.5"
 
 # Platform specific dependencies
 [target.'cfg(target_arch = "aarch64")'.dependencies]

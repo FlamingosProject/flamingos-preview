@@ -11,16 +11,25 @@
 //!
 //! crate::cpu::boot::arch_boot
 
+mod led_debug;
+
 use crate::{memory, memory::Address};
 use aarch64_cpu::{asm, registers::*};
+use fdt::Fdt;
 use core::arch::global_asm;
 use tock_registers::interfaces::Writeable;
+
+#[cfg(feature = "boot_trace")]
+const BOOT_TRACE: u64 = 1;
+#[cfg(not(feature = "boot_trace"))]
+const BOOT_TRACE: u64 = 0;
 
 // Assembly counterpart to this file.
 global_asm!(
     include_str!("boot.s"),
     CONST_CURRENTEL_EL2 = const 0x8,
-    CONST_CORE_ID_MASK = const 0b11
+    CONST_CORE_ID_MASK = const 0b11,
+    CONST_BOOT_TRACE = const BOOT_TRACE,
 );
 
 //--------------------------------------------------------------------------------------------------
@@ -71,6 +80,42 @@ unsafe fn prepare_el2_to_el1_transition(
 // Public Code
 //--------------------------------------------------------------------------------------------------
 
+pub const MAX_CORES: usize = 64;
+
+pub struct CoresInfo {
+    num_cores: usize,
+    core_ids: [usize; MAX_CORES],
+}
+
+pub static mut CORES_INFO: CoresInfo = CoresInfo {
+    num_cores: 0,
+    core_ids: [0; MAX_CORES],
+};
+
+unsafe fn process_device_tree(device_tree: *const u8) {
+    let fdt = Fdt::from_ptr(device_tree).unwrap();
+    let num_cores = fdt.cpus().count();
+    // if num_cores > MAX_CORES {
+    //     panic!();
+    // }
+    let cores_info = core::ptr::addr_of_mut!(CORES_INFO);
+    for (cid, cpu) in (*cores_info).core_ids.iter_mut().zip(fdt.cpus()) {
+        // if cpu.ids().all().count() != 1 {
+        //     panic!();
+        // }
+        *cid = cpu.ids().first();
+    }
+    CORES_INFO.num_cores = num_cores;
+}
+
+#[inline(never)]
+#[no_mangle]
+pub unsafe extern "C" fn _panic_code(n: usize) -> ! {
+    loop {
+        led_debug::_blink_code(n, true);
+    }
+}
+
 /// The Rust entry of the `kernel` binary.
 ///
 /// The function is called from the assembly `_start` function.
@@ -78,12 +123,19 @@ unsafe fn prepare_el2_to_el1_transition(
 /// # Safety
 ///
 /// - Exception return from EL2 must must continue execution in EL1 with `kernel_init()`.
+#[inline(never)]
 #[no_mangle]
 pub unsafe extern "C" fn _start_rust(
     phys_kernel_tables_base_addr: u64,
     virt_boot_core_stack_end_exclusive_addr: u64,
     virt_kernel_init_addr: u64,
+    device_tree: *const u8,
 ) -> ! {
+    process_device_tree(device_tree);
+
+    #[cfg(feature = "boot_trace")]
+    led_debug::_blink_code(8, true);
+
     prepare_el2_to_el1_transition(
         virt_boot_core_stack_end_exclusive_addr,
         virt_kernel_init_addr,

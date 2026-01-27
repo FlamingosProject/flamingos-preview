@@ -19,7 +19,7 @@ fn main() {
 }
 
 fn build(args: Vec<String>) {
-    if args.len() != 3 {
+    if args.len() < 3 {
         println!("usage: cargo xtask build <board>");
         exit(1);
     }
@@ -43,7 +43,8 @@ fn build(args: Vec<String>) {
             "build", "-p", "mingo", "--release",
             "--target", "aarch64-unknown-none-softfloat",
             &features,
-        ]) 
+        ])
+        .args(&args[3..])
         .status()
         .expect("ERROR: Failed to build kernel ('mingo' crate)");
 
