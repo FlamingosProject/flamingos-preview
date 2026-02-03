@@ -139,7 +139,12 @@ impl fmt::Display for Address<Virtual> {
 
 /// Initialize the memory subsystem.
 pub fn init() {
+    // "Allocator" used to map a fresh virtual page to
+    // a specified physical page. Used by device drivers
+    // for device registers.
     mmu::kernel_init_mmio_va_allocator();
+
+    // "Normal" kernel memory allocator.
     heap_alloc::kernel_init_heap_allocator();
 }
 

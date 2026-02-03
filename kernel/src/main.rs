@@ -25,7 +25,11 @@ use libkernel::{bsp, cpu, driver, exception, info, memory, state, time};
 /// - Printing will not work until the respective driver's MMIO is remapped.
 #[no_mangle]
 unsafe fn kernel_init() -> ! {
+    // Set up exception handlers.
     exception::handling_init();
+
+    // Initialize memory subsystem, in particular memory
+    // allocators.
     memory::init();
 
     // Initialize the timer subsystem.
@@ -41,6 +45,9 @@ unsafe fn kernel_init() -> ! {
     // Initialize all device drivers.
     driver::driver_manager().init_drivers_and_irqs();
 
+    // Add records of how we mapped the kernel for later
+    // logging once everything is up. Not currently used
+    // otherwise.
     bsp::memory::mmu::kernel_add_mapping_records_for_precomputed();
 
     // Unmask interrupts on the boot CPU core.
