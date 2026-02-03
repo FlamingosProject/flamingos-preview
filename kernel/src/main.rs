@@ -15,6 +15,10 @@ extern crate alloc;
 
 use libkernel::{bsp, cpu, driver, exception, info, memory, state, time};
 
+#[cfg(target_arch = "aarch64")]
+#[path = "_arch/aarch64/cpu/boot.rs"]
+mod arch_boot;
+
 /// Early init code.
 ///
 /// When this code runs, virtual memory is already enabled.
