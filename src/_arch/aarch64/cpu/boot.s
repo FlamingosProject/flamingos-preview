@@ -38,6 +38,24 @@
 // fn _start()
 //------------------------------------------------------------------------------
 _start:
+	// Save the device tree pointer passed to the kernel.
+	// x0 initially points to it
+
+	// Set up copy.
+
+	// Device tree length (from Claude)
+	ldr w1, [x0, #4]	// load big-endian totalsize
+	rev w2, w1		// byte-swap to little-endian
+	ADR_ABS	x1, __device_tree_start         // Where the device tree goes
+	add	x2, x2, x1	// Where it will end.
+
+	// Do copy.
+.L_device_tree_copy_loop:
+	ldr	x3, [x0], #8
+	str	x3, [x1], #8
+	cmp	x1, x2
+	b.lo	.L_device_tree_copy_loop
+
 	// Only proceed on the boot core. Park it otherwise.
 	mrs	x0, MPIDR_EL1
 	and	x0, x0, {CONST_CORE_ID_MASK}
@@ -63,11 +81,11 @@ _start:
 	ADR_ABS	x1, __binary_nonzero_start         // The address the binary was linked to.
 	ADR_ABS	x2, __binary_nonzero_end_exclusive
 
-.L_copy_loop:
+.L_binary_relocate_copy_loop:
 	ldr	x3, [x0], #8
 	str	x3, [x1], #8
 	cmp	x1, x2
-	b.lo	.L_copy_loop
+	b.lo	.L_binary_relocate_copy_loop
 
 	// Prepare the jump to Rust code.
 	// Set the stack pointer.

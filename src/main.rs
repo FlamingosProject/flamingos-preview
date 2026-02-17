@@ -200,8 +200,14 @@ fn kernel_main() -> ! {
     console().flush();
 
     // Use black magic to create a function pointer.
-    let kernel: fn() -> ! = unsafe { core::mem::transmute(kernel_addr) };
+    let kernel: fn(*const u32) -> ! = unsafe { core::mem::transmute(kernel_addr) };
 
     // Jump to loaded kernel!
-    kernel()
+    extern "C" {
+        static __device_tree_start: u32;
+    }
+    unsafe {
+        assert_eq!(__device_tree_start, 0xedfe0dd0);
+        kernel(core::ptr::addr_of!(__device_tree_start))
+    }
 }
