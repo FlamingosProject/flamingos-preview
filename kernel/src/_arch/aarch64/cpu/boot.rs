@@ -82,9 +82,10 @@ unsafe fn prepare_el2_to_el1_transition(
 
 pub const MAX_CORES: usize = 64;
 
+#[derive(Debug)]
 pub struct CoresInfo {
-    num_cores: usize,
-    core_ids: [usize; MAX_CORES],
+    pub num_cores: usize,
+    pub core_ids: [usize; MAX_CORES],
 }
 
 pub static mut CORES_INFO: CoresInfo = CoresInfo {
@@ -95,14 +96,14 @@ pub static mut CORES_INFO: CoresInfo = CoresInfo {
 unsafe fn process_device_tree(device_tree: *const u8) {
     let fdt = Fdt::from_ptr(device_tree).unwrap();
     let num_cores = fdt.cpus().count();
-    // if num_cores > MAX_CORES {
-    //     panic!();
-    // }
+    if num_cores > MAX_CORES {
+        panic!();
+    }
     let cores_info = core::ptr::addr_of_mut!(CORES_INFO);
     for (cid, cpu) in (*cores_info).core_ids.iter_mut().zip(fdt.cpus()) {
-        // if cpu.ids().all().count() != 1 {
-        //     panic!();
-        // }
+        if cpu.ids().all().count() != 1 {
+            panic!();
+        }
         *cid = cpu.ids().first();
     }
     CORES_INFO.num_cores = num_cores;

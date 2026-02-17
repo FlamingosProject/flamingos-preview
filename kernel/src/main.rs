@@ -68,6 +68,15 @@ fn kernel_main() -> ! {
     info!("{}", libkernel::version());
     info!("Booting on: {}", bsp::board_name());
 
+    unsafe {
+        let cores_info = core::ptr::addr_of!(cpu::boot::arch_boot::CORES_INFO);
+        let num_cores = (*cores_info).num_cores;
+        info!("Cores:");
+        for c in 0..num_cores {
+            info!("    {}", (*cores_info).core_ids[c]);
+        }
+    }
+
     info!("MMU online:");
     memory::mmu::kernel_print_mappings();
 
