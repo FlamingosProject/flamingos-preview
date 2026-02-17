@@ -17,12 +17,16 @@ use crate::{memory, memory::Address};
 use aarch64_cpu::{asm, registers::*};
 use fdt::Fdt;
 use core::arch::global_asm;
+use core::mem::MaybeUninit;
 use tock_registers::interfaces::Writeable;
 
 #[cfg(feature = "boot_trace")]
 const BOOT_TRACE: u64 = 1;
 #[cfg(not(feature = "boot_trace"))]
 const BOOT_TRACE: u64 = 0;
+
+pub const FDT_SIZE: usize = const std::mem::size_of::<Fdt>();
+
 
 // Assembly counterpart to this file.
 global_asm!(
@@ -80,33 +84,29 @@ unsafe fn prepare_el2_to_el1_transition(
 // Public Code
 //--------------------------------------------------------------------------------------------------
 
-pub const MAX_CORES: usize = 64;
+pub static mut DEVICE_TREE: MaybeUninit<Fdt> = MaybeUninit::uninit();
 
-#[derive(Debug)]
-pub struct CoresInfo {
-    pub num_cores: usize,
-    pub core_ids: [usize; MAX_CORES],
-}
-
-pub static mut CORES_INFO: CoresInfo = CoresInfo {
-    num_cores: 0,
-    core_ids: [0; MAX_CORES],
-};
-
+// Safety: `device_tree` points at a valid dtb.
 unsafe fn process_device_tree(device_tree: *const u8) {
     let fdt = Fdt::from_ptr(device_tree).unwrap();
-    let num_cores = fdt.cpus().count();
-    if num_cores > MAX_CORES {
-        panic!();
-    }
-    let cores_info = core::ptr::addr_of_mut!(CORES_INFO);
-    for (cid, cpu) in (*cores_info).core_ids.iter_mut().zip(fdt.cpus()) {
-        if cpu.ids().all().count() != 1 {
-            panic!();
-        }
+    #[allow(static_mut_refs)]
+    DEVICE_TREE.write(fdt);
+}
+
+// Safety: `DEVICE_TREE` must be initialized.
+pub unsafe fn get_core_ids(core_ids: &mut [usize]) -> &[usize] {
+    #[allow(static_mut_refs)]
+    let dt = DEVICE_TREE.assume_init_ref();
+
+    let num_cores = dt.cpus().count();
+    assert!(num_cores <= core_ids.len());
+
+    for (cid, cpu) in core_ids.iter_mut().zip(dt.cpus()) {
+        assert!(cpu.ids().all().count() == 1);
         *cid = cpu.ids().first();
     }
-    CORES_INFO.num_cores = num_cores;
+
+    &core_ids[..num_cores]
 }
 
 #[inline(never)]
