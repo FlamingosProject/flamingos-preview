@@ -83,7 +83,7 @@ $(KERNEL_SYMBOLS_OUTPUT_ELF): $(KERNEL_SYMBOLS_INPUT_ELF) $(KERNEL_SYMBOLS_TOOL)
 
 	$(call color_progress_prefix, "Compiling")
 	@echo " Symbols ELF"
-	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(RUSTC_CMD) --quiet
+	@RUSTFLAGS="$(RUSTFLAGS)" $(RUSTC_CMD) --quiet
 
 	$(call color_progress_prefix, "Stripping")
 	@echo " Symbols ELF file"

@@ -149,7 +149,7 @@ $(LAST_BUILD_CONFIG):
 ##------------------------------------------------------------------------------
 $(KERNEL_ELF_RAW): $(KERNEL_ELF_RAW_DEPS)
 	$(call color_header, "Compiling kernel ELF - $(BSP)")
-	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(RUSTC_CMD)
+	@RUSTFLAGS="$(RUSTFLAGS)" $(RUSTC_CMD)
 
 ##------------------------------------------------------------------------------
 ## Precompute the kernel translation tables and patch them into the kernel ELF
