@@ -82,16 +82,12 @@ unsafe fn prepare_el2_to_el1_transition(
 
 pub const MAX_CORES: usize = 64;
 
-#[derive(Debug)]
-pub struct CoresInfo {
-    pub num_cores: usize,
-    pub core_ids: [usize; MAX_CORES],
-}
+pub static mut DEVICE_TREE: Option<Fdt> = None;
 
-pub static mut CORES_INFO: CoresInfo = CoresInfo {
-    num_cores: 0,
-    core_ids: [0; MAX_CORES],
-};
+pub fn device_tree() -> &'static Fdt<'static> {
+    let dt = core::ptr::addr_of!(DEVICE_TREE);
+    unsafe { (&*dt).as_ref().unwrap() }
+}
 
 unsafe fn process_device_tree(device_tree: *const u8) {
     let fdt = Fdt::from_ptr(device_tree).unwrap();
@@ -99,6 +95,9 @@ unsafe fn process_device_tree(device_tree: *const u8) {
     if num_cores > MAX_CORES {
         panic!();
     }
+    DEVICE_TREE = Some(fdt);
+
+    /*
     let cores_info = core::ptr::addr_of_mut!(CORES_INFO);
     for (cid, cpu) in (*cores_info).core_ids.iter_mut().zip(fdt.cpus()) {
         if cpu.ids().all().count() != 1 {
@@ -106,7 +105,7 @@ unsafe fn process_device_tree(device_tree: *const u8) {
         }
         *cid = cpu.ids().first();
     }
-    CORES_INFO.num_cores = num_cores;
+    */
 }
 
 #[inline(never)]
@@ -133,6 +132,9 @@ pub unsafe extern "C" fn _start_rust(
     device_tree: *const u8,
 ) -> ! {
     process_device_tree(device_tree);
+
+    let num_cores = crate::cpu::boot::arch_boot::device_tree().cpus().count();
+    assert!(num_cores == 4);
 
     #[cfg(feature = "boot_trace")]
     led_debug::_blink_code(8, true);
