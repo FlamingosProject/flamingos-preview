@@ -78,3 +78,7 @@
 	path = 20-boot-improvements
 	url = https://github.com/FlamingosProject/flamingos-preview.git
 	branch = 20-boot-improvements
+[submodule "21-second-core"]
+	path = 21-second-core
+	url = https://github.com/FlamingosProject/flamingos-preview.git
+	branch = 21-second-core
