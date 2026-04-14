@@ -14,5 +14,4 @@ rustflags = [
   "-C", "linker=rust-lld",
   "-C", "link-arg=--library-path=src/bsp/raspberrypi/",
   "-C", "link-arg=--script=kernel.ld",
-  "-C", "force-unwind-tables",
 ]
