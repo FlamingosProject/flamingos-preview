@@ -139,7 +139,6 @@ unsafe fn kernel_init() -> ! {
     use memory::mmu::interface::MMU;
 
     exception::handling_init();
-    backtrace::init();
 
     if let Err(string) = memory::mmu::mmu().enable_mmu_and_caching() {
         panic!("MMU: {}", string);

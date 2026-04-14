@@ -11,10 +11,10 @@ __rpi_phys_dram_start_addr = 0;
 /* The physical address at which the the kernel binary will be loaded by the Raspberry's firmware */
 __rpi_phys_binary_load_addr = 0x80000;
 
-__eh_frame_hdr_start = ADDR(.eh_frame_hdr);
-__eh_frame_hdr_end = ADDR(.eh_frame_hdr) + SIZEOF(.eh_frame_hdr);
-__eh_frame_start = ADDR(.eh_frame);
-__eh_frame_end = ADDR(.eh_frame) + SIZEOF(.eh_frame);
+/* Symbols expected by the unwinding crate's fde-static finder */
+__executable_start = ADDR(.text);
+__etext = ADDR(.eh_frame) + SIZEOF(.eh_frame);
+__eh_frame = ADDR(.eh_frame);
 
 ENTRY(__rpi_phys_binary_load_addr)
 

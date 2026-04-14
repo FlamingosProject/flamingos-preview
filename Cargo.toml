@@ -23,7 +23,7 @@ bench = false
 ##--------------------------------------------------------------------------------------------------
 
 [dependencies]
-unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-custom", "hide-trace"] }
+unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "hide-trace"] }
 
 # Optional dependencies
 [dependencies.tock-registers]

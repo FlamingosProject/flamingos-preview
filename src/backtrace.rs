@@ -6,42 +6,6 @@
 
 use crate::println;
 use core::ffi::c_void;
-use unwinding::custom_eh_frame_finder::{
-    set_custom_eh_frame_finder, EhFrameFinder, FrameInfo, FrameInfoKind,
-};
-
-//--------------------------------------------------------------------------------------------------
-// Private Definitions
-//--------------------------------------------------------------------------------------------------
-
-/// Provides the `.eh_frame_hdr` location to the unwinder via linker-exported symbols.
-struct KernelEhFrameFinder;
-
-unsafe impl EhFrameFinder for KernelEhFrameFinder {
-    fn find(&self, _pc: usize) -> Option<FrameInfo> {
-        unsafe extern "C" {
-            static __eh_frame_hdr_start: u8;
-        }
-
-        Some(FrameInfo {
-            text_base: None,
-            kind: FrameInfoKind::EhFrameHdr(unsafe { &__eh_frame_hdr_start } as *const u8 as usize),
-        })
-    }
-}
-
-static FINDER: KernelEhFrameFinder = KernelEhFrameFinder;
-
-//--------------------------------------------------------------------------------------------------
-// Public Code
-//--------------------------------------------------------------------------------------------------
-
-/// Register the kernel's EH frame data with the unwinder.
-///
-/// Must be called early in boot, before anything that might panic.
-pub fn init() {
-    set_custom_eh_frame_finder(&FINDER).expect("EH frame finder already set");
-}
 
 pub fn print_backtrace() {
     use unwinding::abi::{
