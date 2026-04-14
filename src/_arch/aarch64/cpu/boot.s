@@ -56,6 +56,10 @@ _start:
 	// Set the stack pointer. This ensures that any code in EL2 that needs the stack will work.
 	ADR_REL	x0, __boot_core_stack_end_exclusive
 	mov	sp, x0
+	// Zero the frame pointer and link register so that the unwinder knows this is the
+	// bottom of the call stack.
+	mov	x29, xzr
+	mov	x30, xzr
 	// Jump to Rust code. x0 holds the function argument provided to _start_rust().
 	b	_start_rust
 
