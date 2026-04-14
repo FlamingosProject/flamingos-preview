@@ -61,5 +61,7 @@ fn panic(info: &PanicInfo) -> ! {
         info.message(),
     );
 
+    crate::backtrace::print_backtrace();
+
     cpu::wait_forever()
 }

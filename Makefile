@@ -71,7 +71,8 @@ KERNEL_ELF_DEPS = $(filter-out %: ,$(file < $(KERNEL_ELF).d)) $(KERNEL_MANIFEST)
 ##--------------------------------------------------------------------------------------------------
 RUSTFLAGS = $(RUSTC_MISC_ARGS)                   \
     -C link-arg=--library-path=$(LD_SCRIPT_PATH) \
-    -C link-arg=--script=$(KERNEL_LINKER_SCRIPT)
+    -C link-arg=--script=$(KERNEL_LINKER_SCRIPT) \
+    -C force-unwind-tables
 
 RUSTFLAGS_PEDANTIC = $(RUSTFLAGS) \
     -D missing_docs

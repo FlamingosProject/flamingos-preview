@@ -65,7 +65,7 @@ SECTIONS
 
     .rodata : ALIGN(8) { *(.rodata*) } :segment_code
 
-    /* Unwind tables for mini-backtrace — must be in a mapped, readable segment */
+    /* Unwind tables — must be in a mapped, readable segment */
     .eh_frame_hdr : ALIGN(8) { *(.eh_frame_hdr*) } :segment_code
     .eh_frame     : ALIGN(8) { *(.eh_frame*) } :segment_code
 

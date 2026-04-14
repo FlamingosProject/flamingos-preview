@@ -113,6 +113,7 @@
 #[cfg(not(any(feature = "bsp_rpi3", feature = "bsp_rpi4")))]
 compile_error!("Either feature \"bsp_rpi3\" or \"bsp_rpi4\" must be enabled for this crate.",);
 
+mod backtrace;
 mod bsp;
 mod common;
 mod console;
@@ -138,6 +139,7 @@ unsafe fn kernel_init() -> ! {
     use memory::mmu::interface::MMU;
 
     exception::handling_init();
+    backtrace::init();
 
     if let Err(string) = memory::mmu::mmu().enable_mmu_and_caching() {
         panic!("MMU: {}", string);
