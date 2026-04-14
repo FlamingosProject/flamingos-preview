@@ -43,7 +43,6 @@ pub fn init() {
     set_custom_eh_frame_finder(&FINDER).expect("EH frame finder already set");
 }
 
-/// Walk the call stack and print each frame's instruction pointer.
 pub fn print_backtrace() {
     use unwinding::abi::{
         UnwindContext, UnwindReasonCode, UnwindTraceFn, _Unwind_Backtrace, _Unwind_GetIP,
@@ -52,13 +51,13 @@ pub fn print_backtrace() {
     extern "C" fn trace_fn(ctx: &UnwindContext<'_>, arg: *mut c_void) -> UnwindReasonCode {
         let frame_num = unsafe { &mut *(arg as *mut u32) };
         let ip = _Unwind_GetIP(ctx);
-        // Use \r for raw UART output.
-        println!("  #{}: {:#018x}\r", frame_num, ip);
+        println!("  #{}: {:#018x}", frame_num, ip);
         *frame_num += 1;
         UnwindReasonCode::NO_REASON
     }
 
-    println!("\r\nBacktrace:\r");
+    println!();
+    println!("Backtrace:");
     let mut frame_num: u32 = 0;
     _Unwind_Backtrace(
         trace_fn as UnwindTraceFn,
