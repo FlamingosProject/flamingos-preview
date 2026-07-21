@@ -47,9 +47,9 @@ numbered submodule sequence.
 - Introduces CPU/BSP helpers and a panic path that halts execution.
 - Adds the `aarch64-cpu` dependency for architecture register access.
 
-### 03-hacky-hello-world
+### 03-hello-world
 
-- Branch: `03-hacky-hello-world`
+- Branch: `03-hello-world`
 - Checked-out commit: `7bdfadfd`
 - Adds early global `print!`/`println!` support for printf-style debugging.
 - Introduces a console abstraction and Raspberry Pi console implementation.

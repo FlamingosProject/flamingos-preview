@@ -1,6 +1,6 @@
 cat <<'EOF' | 
 02-runtime-init
-03-hacky-hello-world
+03-hello-world
 04-safe-globals
 05-drivers-gpio-uart
 06-uart-chainloader
