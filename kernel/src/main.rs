@@ -28,6 +28,11 @@ unsafe fn kernel_init() -> ! {
     exception::handling_init();
     memory::init();
 
+    // Initialize the timer subsystem.
+    if let Err(x) = time::init() {
+        panic!("Error initializing timer subsystem: {}", x);
+    }
+
     // Initialize the BSP driver subsystem.
     if let Err(x) = bsp::driver::init() {
         panic!("Error initializing BSP driver subsystem: {}", x);
@@ -50,6 +55,9 @@ unsafe fn kernel_init() -> ! {
 
 /// The main function running after the early init.
 fn kernel_main() -> ! {
+    use alloc::boxed::Box;
+    use core::time::Duration;
+
     info!("{}", libkernel::version());
     info!("Booting on: {}", bsp::board_name());
 
@@ -75,6 +83,11 @@ fn kernel_main() -> ! {
 
     info!("Kernel heap:");
     memory::heap_alloc::kernel_heap_allocator().print_usage();
+
+    time::time_manager().set_timeout_once(Duration::from_secs(5), Box::new(|| info!("Once 5")));
+    time::time_manager().set_timeout_once(Duration::from_secs(2), Box::new(|| info!("Once 2")));
+    time::time_manager()
+        .set_timeout_periodic(Duration::from_secs(1), Box::new(|| info!("Periodic 1 sec")));
 
     info!("UART RX IRQs enabled");
 
