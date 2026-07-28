@@ -106,6 +106,7 @@
 //!     - It is implemented in `src/_arch/__arch_name__/cpu/boot.s`.
 //! 2. Once finished with architectural setup, the arch code calls `kernel_init()`.
 
+#![allow(clippy::upper_case_acronyms)]
 #![no_main]
 #![no_std]
 
@@ -117,6 +118,7 @@ compile_error!(
 mod bsp;
 mod console;
 mod cpu;
+mod driver;
 mod panic_wait;
 mod print;
 mod synchronization;
@@ -126,18 +128,49 @@ mod synchronization;
 /// # Safety
 ///
 /// - Only a single core must be active and running this function.
+/// - The init calls in this function must appear in the correct order.
 unsafe fn kernel_init() -> ! {
-    use console::console;
+    // Initialize the BSP driver subsystem.
+    if let Err(x) = bsp::driver::init() {
+        panic!("Error initializing BSP driver subsystem: {}", x);
+    }
 
-    println!("[0] Hello from Rust!");
+    // Initialize all device drivers.
+    driver::driver_manager().init_drivers();
+    // The UART console is active and early buffered output has been replayed.
 
-    println!("[1] Chars written: {}", console().chars_written());
+    // Transition from unsafe to safe.
+    kernel_main()
+}
 
-    println!("[2] Stopping here.");
+/// The main function running after the early init.
+fn kernel_main() -> ! {
+    use console::{console, set_input_policy, EchoPolicy, InputPolicy};
+
+    println!(
+        "[0] {} version {}",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION")
+    );
+    println!("[1] Booting on: {}", bsp::board_name());
+
+    println!("[2] Drivers loaded:");
+    driver::driver_manager().enumerate();
+
+    println!("[3] Bytes written: {}", console().bytes_written());
+    println!("[4] Echoing input now");
 
     #[cfg(feature = "test_build")]
     cpu::qemu_exit_success();
 
-    #[cfg(not(feature = "test_build"))]
-    cpu::wait_forever()
+    set_input_policy(InputPolicy {
+        map_cr_to_lf: true,
+        echo: EchoPolicy::Cooked,
+    });
+
+    // Discard any spurious received characters before enabling terminal echo.
+    console().clear_rx();
+    loop {
+        let _ = console().read_byte();
+    }
 }

@@ -9,8 +9,8 @@ lto = true
 
 [features]
 default = []
-bsp_rpi3 = []
-bsp_rpi4 = []
+bsp_rpi3 = ["tock-registers"]
+bsp_rpi4 = ["tock-registers"]
 boot_trace = []
 test_build = ["qemu-exit"]
 
@@ -27,6 +27,13 @@ bench = false
 [dependencies]
 qemu-exit = { version = "3.x.x", optional = true }
 
+# Optional dependencies
+[dependencies.tock-registers]
+version = "0.9"
+default-features = false
+features = ["register_types"]
+optional = true
+
 # Platform specific dependencies
 [target.'cfg(target_arch = "aarch64")'.dependencies]
-aarch64-cpu = "10.x.x"
+aarch64-cpu = "10"
