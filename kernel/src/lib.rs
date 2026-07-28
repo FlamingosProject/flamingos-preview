@@ -137,6 +137,7 @@ pub mod memory;
 pub mod print;
 #[cfg(feature = "test_build")]
 pub mod test;
+pub mod state;
 pub mod time;
 
 //--------------------------------------------------------------------------------------------------
