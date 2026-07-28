@@ -1,0 +1,51 @@
+[package]
+name = "mingo"
+version = "0.12.0"
+authors = ["Andre Richter <andre.o.richter@gmail.com>"]
+edition = "2021"
+
+[features]
+default = []
+bsp_rpi3 = ["tock-registers"]
+bsp_rpi4 = ["tock-registers"]
+test_build = ["qemu-exit"]
+boot_trace = []
+chainloader = []
+
+##--------------------------------------------------------------------------------------------------
+## Dependencies
+##--------------------------------------------------------------------------------------------------
+
+[dependencies]
+test-types = { path = "../libraries/test-types" }
+unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "hide-trace"] }
+
+# Optional dependencies
+tock-registers = { version = "0.9", default-features = false, features = [
+    "register_types",
+], optional = true }
+qemu-exit = { version = "3.x.x", optional = true }
+
+# Platform specific dependencies
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+aarch64-cpu = { version = "10" }
+
+##--------------------------------------------------------------------------------------------------
+## Testing
+##--------------------------------------------------------------------------------------------------
+
+[dev-dependencies]
+test-macros = { path = "../libraries/test-macros" }
+
+# Unit tests are done in the library part of the kernel.
+[lib]
+name = "libkernel"
+test = false
+bench = false
+
+# Disable unit tests for the kernel binary.
+[[bin]]
+name = "kernel"
+path = "src/main.rs"
+test = false
+bench = false

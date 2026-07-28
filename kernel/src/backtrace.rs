@@ -9,7 +9,7 @@ use core::ffi::c_void;
 
 pub fn print_backtrace() {
     use unwinding::abi::{
-        UnwindContext, UnwindReasonCode, UnwindTraceFn, _Unwind_Backtrace, _Unwind_GetIP,
+        _Unwind_Backtrace, _Unwind_GetIP, UnwindContext, UnwindReasonCode, UnwindTraceFn,
     };
 
     extern "C" fn trace_fn(ctx: &UnwindContext<'_>, arg: *mut c_void) -> UnwindReasonCode {

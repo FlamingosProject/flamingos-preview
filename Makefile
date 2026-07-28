@@ -44,6 +44,7 @@ else ifeq ($(BSP),rpi4)
     QEMU_BINARY       = qemu-system-aarch64
     QEMU_MACHINE_TYPE =
     QEMU_RELEASE_ARGS = -serial stdio -display none
+    QEMU_TEST_ARGS    = $(QEMU_RELEASE_ARGS) -semihosting
     OBJDUMP_BINARY    = rust-objdump
     NM_BINARY         = rust-nm
     READELF_BINARY    = aarch64-none-elf-readelf
@@ -55,7 +56,7 @@ endif
 ##--------------------------------------------------------------------------------------------------
 ## Targets and Prerequisites
 ##--------------------------------------------------------------------------------------------------
-KERNEL_MANIFEST      = Cargo.toml
+KERNEL_MANIFEST      = kernel/Cargo.toml
 CHAINLOADER_BIN      = chainloader8.img
 KERNEL_BIN           = $(if $(CHAINLOADER),$(CHAINLOADER_BIN),$(NORMAL_KERNEL_BIN))
 BUILD_MODE           = $(if $(CHAINLOADER),chainloader,kernel)
@@ -94,14 +95,16 @@ COMPILER_ARGS = --target=$(TARGET) \
     $(FEATURES)                    \
     --release
 
-RUSTC_CMD   = cargo rustc $(COMPILER_ARGS)
-TEST_RUSTC_CMD = cargo rustc                     \
+RUSTC_CMD   = cargo rustc $(COMPILER_ARGS) --manifest-path $(KERNEL_MANIFEST)
+TEST_BOOT_RUSTC_CMD = cargo rustc                \
     --target=$(TARGET)                           \
     $(TEST_FEATURES)                             \
     --release                                    \
-    --target-dir=$(TEST_BUILD_DIR)
+    --target-dir=$(TEST_BUILD_DIR)               \
+    --manifest-path $(KERNEL_MANIFEST)
 DOC_CMD     = cargo doc $(COMPILER_ARGS)
 CLIPPY_CMD  = cargo clippy $(COMPILER_ARGS)
+TEST_CMD    = cargo test $(COMPILER_ARGS) --manifest-path $(KERNEL_MANIFEST)
 OBJCOPY_CMD = rust-objcopy \
     --strip-all            \
     -O binary
@@ -145,6 +148,7 @@ define build_jtag_elf
 		--features bsp_$(BSP)                       \
 		--release                                    \
 		--target-dir=$(1)                            \
+		--manifest-path $(KERNEL_MANIFEST)            \
 		-- -C debuginfo=2 $(2)
 endef
 
@@ -216,7 +220,7 @@ else # QEMU is supported.
 
 test_boot:
 	$(call color_header, "Building QEMU boot test")
-	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(TEST_RUSTC_CMD)
+	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(TEST_BOOT_RUSTC_CMD)
 	@$(OBJCOPY_CMD) $(TEST_KERNEL_ELF) $(TEST_KERNEL_BIN)
 	$(call color_header, "Running QEMU boot test")
 	$(EXEC_QEMU) $(QEMU_TEST_ARGS) -kernel $(TEST_KERNEL_BIN)

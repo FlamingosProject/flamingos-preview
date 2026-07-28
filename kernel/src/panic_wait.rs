@@ -11,8 +11,9 @@ use core::panic::PanicInfo;
 // Private Code
 //--------------------------------------------------------------------------------------------------
 
-/// Stop the kernel or report a failed test build.
-fn panic_exit() -> ! {
+/// The point of exit for `libkernel`.
+#[no_mangle]
+fn _panic_exit() -> ! {
     #[cfg(not(feature = "test_build"))]
     {
         cpu::wait_forever()
@@ -48,7 +49,7 @@ fn panic_prevent_reenter() {
         return;
     }
 
-    panic_exit()
+    _panic_exit()
 }
 
 #[panic_handler]
@@ -76,5 +77,5 @@ fn panic(info: &PanicInfo) -> ! {
 
     crate::backtrace::print_backtrace();
 
-    panic_exit()
+    _panic_exit()
 }
