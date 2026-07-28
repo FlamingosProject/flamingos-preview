@@ -32,6 +32,18 @@ fn patched_elf_path(elf: &Path) -> PathBuf {
     patched.into()
 }
 
+fn symbolized_elf_path(elf: &Path) -> PathBuf {
+    let mut symbolized = elf.as_os_str().to_owned();
+    symbolized.push(".symbols");
+    symbolized.into()
+}
+
+fn generated_symbols_path(elf: &Path) -> PathBuf {
+    let mut generated = elf.as_os_str().to_owned();
+    generated.push("_symbols.rs");
+    generated.into()
+}
+
 fn patch_translation_tables(elf: &Path) -> Result<PathBuf, String> {
     let Some(tool) = env::var_os("KERNEL_TEST_TT_TOOL") else {
         return Ok(elf.to_owned());
@@ -53,8 +65,37 @@ fn patch_translation_tables(elf: &Path) -> Result<PathBuf, String> {
     }
 }
 
-fn make_image(elf: &Path, image: &Path) -> Result<PathBuf, String> {
-    let prepared_elf = patch_translation_tables(elf)?;
+fn patch_kernel_symbols(elf: &Path) -> Result<PathBuf, String> {
+    let Some(tool) = env::var_os("KERNEL_TEST_SYMBOLS_TOOL") else {
+        return Ok(elf.to_owned());
+    };
+    let repo_root = required_env("KERNEL_TEST_REPO_ROOT")?;
+    let target = required_env("KERNEL_TEST_TARGET")?;
+    let symbolized = symbolized_elf_path(elf);
+
+    let status = Command::new("make")
+        .args(["--no-print-directory", "-f", "kernel_symbols.mk"])
+        .current_dir(repo_root)
+        .env("KERNEL_SYMBOLS_TOOL_PATH", "tools/kernel_symbols_tool")
+        .env("KERNEL_SYMBOLS_TOOL", &tool)
+        .env("TARGET", target)
+        .env("KERNEL_SYMBOLS_INPUT_ELF", elf)
+        .env("KERNEL_SYMBOLS_OUTPUT_ELF", &symbolized)
+        .status()
+        .map_err(|err| format!("failed to execute kernel-symbol build: {err}"))?;
+    let _ = fs::remove_file(generated_symbols_path(elf));
+
+    if status.success() {
+        Ok(symbolized)
+    } else {
+        let _ = fs::remove_file(&symbolized);
+        Err(format!("kernel-symbol build failed with {status}"))
+    }
+}
+
+fn make_image(elf: &Path, image: &Path) -> Result<Vec<PathBuf>, String> {
+    let translated_elf = patch_translation_tables(elf)?;
+    let prepared_elf = patch_kernel_symbols(&translated_elf)?;
     let objcopy =
         env::var_os("KERNEL_TEST_OBJCOPY").unwrap_or_else(|| OsString::from("rust-objcopy"));
     let status = Command::new(&objcopy)
@@ -65,7 +106,10 @@ fn make_image(elf: &Path, image: &Path) -> Result<PathBuf, String> {
         .map_err(|err| format!("failed to execute {objcopy:?}: {err}"))?;
 
     if status.success() {
-        Ok(prepared_elf)
+        Ok([translated_elf, prepared_elf]
+            .into_iter()
+            .filter(|path| path != elf)
+            .collect())
     } else {
         Err(format!("{objcopy:?} failed with {status}"))
     }
@@ -102,7 +146,7 @@ fn run() -> Result<(), String> {
         .ok_or_else(|| "usage: kernel_test_runner <test-elf>".to_owned())?;
     let image = image_path(&elf);
 
-    let prepared_elf = make_image(&elf, &image)?;
+    let prepared_elfs = make_image(&elf, &image)?;
 
     let qemu = required_env("KERNEL_TEST_QEMU")?;
     let qemu_args = env::var("KERNEL_TEST_QEMU_ARGS").unwrap_or_default();
@@ -128,7 +172,7 @@ fn run() -> Result<(), String> {
             .ok_or_else(|| format!("QEMU failed with {status}"))
     });
     let _ = fs::remove_file(image);
-    if prepared_elf != elf {
+    for prepared_elf in prepared_elfs {
         let _ = fs::remove_file(prepared_elf);
     }
     result

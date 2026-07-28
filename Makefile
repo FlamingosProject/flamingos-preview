@@ -82,7 +82,32 @@ TT_TOOL_PATH = tools/bin
 KERNEL_ELF_TTABLES      = target/$(TARGET)/release/kernel+ttables
 KERNEL_ELF_TTABLES_DEPS = $(KERNEL_ELF_RAW) $(EXEC_TT_TOOL)
 
-KERNEL_ELF = $(KERNEL_ELF_TTABLES)
+##------------------------------------------------------------------------------
+## Kernel symbols
+##------------------------------------------------------------------------------
+export KERNEL_SYMBOLS_TOOL_PATH = tools/kernel_symbols_tool
+
+KERNEL_ELF_TTABLES_SYMS = target/$(TARGET)/release/kernel+ttables+symbols
+
+# Unlike with KERNEL_ELF_RAW, we are not relying on dep-info here. One of the reasons being that the
+# name of the generated symbols file varies between runs, which can cause confusion.
+KERNEL_ELF_TTABLES_SYMS_DEPS = $(KERNEL_ELF_TTABLES) \
+    $(wildcard kernel_symbols/*)                     \
+    $(EXEC_KERNEL_SYMBOLS_TOOL)
+
+# This overrides the two ENV variables. The other ENV variables that are required as input for
+# the .mk file are set already because they are exported by this Makefile and this script is
+# started by the same.
+KERNEL_SYMBOLS_INPUT_ELF=$$TEST_ELF           \
+    KERNEL_SYMBOLS_OUTPUT_ELF=$$TEST_ELF_SYMS \
+    $(MAKE) --no-print-directory -f kernel_symbols.mk > /dev/null 2>&1
+
+
+export TARGET
+export KERNEL_SYMBOLS_INPUT_ELF  = $(KERNEL_ELF_TTABLES)
+export KERNEL_SYMBOLS_OUTPUT_ELF = $(KERNEL_ELF_TTABLES_SYMS)
+
+KERNEL_ELF = $(KERNEL_ELF_TTABLES_SYMS)
 ifdef CHAINLOADER
 KERNEL_ELF = $(KERNEL_ELF_RAW)
 endif
@@ -91,6 +116,7 @@ TEST_KERNEL_BIN = $(TEST_BUILD_DIR)/kernel8.img
 HOST_TARGET = $(shell rustc -vV | sed -n 's/^host: //p')
 TEST_RUNNER = $(shell pwd)/target/$(HOST_TARGET)/release/kernel_test_runner
 TEST_TT_TOOL = $(shell pwd)/target/$(HOST_TARGET)/release/translation_table_tool
+TEST_SYMBOLS_TOOL = $(shell pwd)/target/$(HOST_TARGET)/release/kernel-elf-symbol
 
 
 
@@ -125,8 +151,9 @@ OBJCOPY_CMD = rust-objcopy \
     --strip-all            \
     -O binary
 
-EXEC_QEMU = $(QEMU_BINARY) -M $(QEMU_MACHINE_TYPE)
-EXEC_TT_TOOL       = $(TT_TOOL_PATH)/translation_table_tool
+EXEC_QEMU              = $(QEMU_BINARY) -M $(QEMU_MACHINE_TYPE)
+EXEC_TT_TOOL           = $(TT_TOOL_PATH)/translation_table_tool
+EXEC_KERNEL_SYMBOLS_TOOL = target/release/kernel-elf-symbol
 
 
 
@@ -159,6 +186,7 @@ openocd:
 
 define build_jtag_elf
 	@cargo build --package translation_table_tool --release
+	@cargo build --package kernel_symbols_tool --release --bin kernel-elf-symbol
 	@CARGO_PROFILE_RELEASE_STRIP=none RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" cargo rustc \
 		--target=$(TARGET)                           \
 		--no-default-features                       \
@@ -169,6 +197,12 @@ define build_jtag_elf
 		--bin kernel                                  \
 		-- -C debuginfo=2 $(2)
 	@target/release/translation_table_tool $(BSP) $(if $(filter $(1),$(JTAG_TARGET_DIR)),$(JTAG_ELF),$(JTAG_OPT0_ELF))
+	@KERNEL_SYMBOLS_INPUT_ELF=$(if $(filter $(1),$(JTAG_TARGET_DIR)),$(JTAG_ELF),$(JTAG_OPT0_ELF)) \
+	KERNEL_SYMBOLS_OUTPUT_ELF=$(if $(filter $(1),$(JTAG_TARGET_DIR)),$(JTAG_ELF),$(JTAG_OPT0_ELF)).symbols \
+	$(MAKE) --no-print-directory -f kernel_symbols.mk
+	@mv $(if $(filter $(1),$(JTAG_TARGET_DIR)),$(JTAG_ELF),$(JTAG_OPT0_ELF)).symbols \
+		$(if $(filter $(1),$(JTAG_TARGET_DIR)),$(JTAG_ELF),$(JTAG_OPT0_ELF))
+	@rm -f $(if $(filter $(1),$(JTAG_TARGET_DIR)),$(JTAG_ELF),$(JTAG_OPT0_ELF))_symbols.rs
 endef
 
 gdb:
@@ -212,6 +246,20 @@ $(KERNEL_ELF_TTABLES): $(KERNEL_ELF_TTABLES_DEPS)
 	rm $$TMP
 
 ##------------------------------------------------------------------------------
+## Build kernel symbols tool
+##------------------------------------------------------------------------------
+$(EXEC_KERNEL_SYMBOLS_TOOL): $(wildcard $(KERNEL_SYMBOLS_TOOL_PATH)/src/*.rs) $(KERNEL_SYMBOLS_TOOL_PATH)/Cargo.toml
+	$(call color_header, "Building kernel symbols tool")
+	@cargo build --package kernel_symbols_tool --release --quiet
+
+##------------------------------------------------------------------------------
+## Generate kernel symbols and patch them into the kernel ELF
+##------------------------------------------------------------------------------
+$(KERNEL_ELF_TTABLES_SYMS): $(KERNEL_ELF_TTABLES_SYMS_DEPS)
+	$(call color_header, "Generating kernel symbols and patching kernel ELF")
+	@$(MAKE) --no-print-directory -f kernel_symbols.mk
+
+##------------------------------------------------------------------------------
 ## Generate the stripped kernel binary
 ##------------------------------------------------------------------------------
 $(KERNEL_BIN): $(KERNEL_ELF)
@@ -225,7 +273,7 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 ##------------------------------------------------------------------------------
 ## Generate the documentation
 ##------------------------------------------------------------------------------
-doc:
+doc: clean
 	$(call color_header, "Generating docs")
 	@$(DOC_CMD) --document-private-items --open
 
@@ -277,6 +325,7 @@ test_integration:
 	$(call color_header, "Building kernel test tools")
 	@cargo build --package kernel_test_runner --release --target $(HOST_TARGET)
 	@cargo build --package translation_table_tool --release --target $(HOST_TARGET)
+	@cargo build --package kernel_symbols_tool --release --target $(HOST_TARGET)
 	$(call color_header, "Running QEMU integration tests")
 	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)"                                             \
 	CARGO_TARGET_AARCH64_UNKNOWN_NONE_SOFTFLOAT_RUNNER="$(TEST_RUNNER)"            \
@@ -284,6 +333,9 @@ test_integration:
 	KERNEL_TEST_QEMU_ARGS="-M $(QEMU_MACHINE_TYPE) $(QEMU_TEST_ARGS)"               \
 	KERNEL_TEST_OBJCOPY="rust-objcopy"                                              \
 	KERNEL_TEST_TT_TOOL="$(TEST_TT_TOOL)"                                           \
+	KERNEL_TEST_SYMBOLS_TOOL="$(TEST_SYMBOLS_TOOL)"                                 \
+	KERNEL_TEST_TARGET="$(TARGET)"                                                  \
+	KERNEL_TEST_REPO_ROOT="$(shell pwd)"                                             \
 	KERNEL_TEST_BSP="$(BSP)"                                                        \
 	$(TEST_CMD)
 
