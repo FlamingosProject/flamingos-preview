@@ -12,9 +12,7 @@ use libkernel::{bsp, cpu, exception, info, memory, test};
 #[no_mangle]
 unsafe fn kernel_init() -> ! {
     exception::handling_init();
-    let tables = memory::mmu::kernel_map_binary().expect("Kernel mapping failed");
-    memory::mmu::enable_mmu_and_caching(tables).expect("MMU initialization failed");
-    memory::mmu::post_enable_init();
+    memory::init();
     bsp::driver::qemu_bring_up_console();
 
     info!("Causing a page fault by reading address 9 GiB");
