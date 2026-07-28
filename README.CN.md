@@ -52,7 +52,7 @@ _带上我最诚挚的问候,<br>Andre ([@andre-richter])_
 3. 准备Rust工具链。其中大部分将在首次使用时通过[rust-toolchain.toml](rust-toolchain.toml)文件进行处理。我们要做的是：
    1. 如果你已经安装了一个版本的Rust:
       ```bash
-      cargo install cargo-binutils rustfilt
+      cargo install cargo-binutils
       ```
 
    1. 如果你想要全新安装:
@@ -60,7 +60,7 @@ _带上我最诚挚的问候,<br>Andre ([@andre-richter])_
       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
       source $HOME/.cargo/env
-      cargo install cargo-binutils rustfilt
+      cargo install cargo-binutils
       ```
 
 4. 如果你使用 `Visual Studio Code`，我强烈推荐你安装[Rust Analyzer 扩展]。

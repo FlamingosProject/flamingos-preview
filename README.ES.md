@@ -70,7 +70,7 @@ Muchas de las cosas vistas aquí también funcionan en **macOS**, pero esto solo
    i. Si ya tienes una versión de Rust instalada:
    
    ```bash
-   cargo install cargo-binutils rustfilt
+   cargo install cargo-binutils
    ```
    
    ii. Si necesitas instalar Rust desde cero:
@@ -79,7 +79,7 @@ Muchas de las cosas vistas aquí también funcionan en **macOS**, pero esto solo
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
    
    source $HOME/.cargo/env
-   cargo install cargo-binutils rustfilt
+   cargo install cargo-binutils
    ```
 
 4. En caso de que uses `Visual Studio Code`, recomiendo que instales la extensión [Rust Analyzer extension].

@@ -67,7 +67,7 @@ The tutorials are primarily targeted at **Linux**-based distributions. Most stuf
    [rust-toolchain.toml](rust-toolchain.toml) file. What's left for us to do is:
    1. If you already have a version of Rust installed:
       ```bash
-      cargo install cargo-binutils rustfilt
+      cargo install cargo-binutils
       ```
 
    1. If you need to install Rust from scratch:
@@ -75,7 +75,7 @@ The tutorials are primarily targeted at **Linux**-based distributions. Most stuf
       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
       source $HOME/.cargo/env
-      cargo install cargo-binutils rustfilt
+      cargo install cargo-binutils
       ```
 
 1. In case you use `Visual Studio Code`, I strongly recommend installing the [Rust Analyzer extension].
