@@ -25,8 +25,8 @@ ifeq ($(BSP),rpi3)
     QEMU_BINARY       = qemu-system-aarch64
     QEMU_MACHINE_TYPE = raspi3b
     QEMU_RELEASE_ARGS = -d in_asm -display none
-    OBJDUMP_BINARY    = aarch64-none-elf-objdump
-    NM_BINARY         = aarch64-none-elf-nm
+    OBJDUMP_BINARY    = rust-objdump
+    NM_BINARY         = rust-nm
     READELF_BINARY    = aarch64-none-elf-readelf
     LD_SCRIPT_PATH    = $(shell pwd)/src/bsp/raspberrypi
     RUSTC_MISC_ARGS   = -C target-cpu=cortex-a53
@@ -36,8 +36,8 @@ else ifeq ($(BSP),rpi4)
     QEMU_BINARY       = qemu-system-aarch64
     QEMU_MACHINE_TYPE =
     QEMU_RELEASE_ARGS = -d in_asm -display none
-    OBJDUMP_BINARY    = aarch64-none-elf-objdump
-    NM_BINARY         = aarch64-none-elf-nm
+    OBJDUMP_BINARY    = rust-objdump
+    NM_BINARY         = rust-nm
     READELF_BINARY    = aarch64-none-elf-readelf
     LD_SCRIPT_PATH    = $(shell pwd)/src/bsp/raspberrypi
     RUSTC_MISC_ARGS   = -C target-cpu=cortex-a72
@@ -170,12 +170,12 @@ objdump: $(KERNEL_ELF)
 	$(call color_header, "Launching objdump")
 	$(OBJDUMP_BINARY) --disassemble --demangle \
                 --section .text   \
-                $(KERNEL_ELF) | rustfilt
+                $(KERNEL_ELF)
 
 ##------------------------------------------------------------------------------
 ## Run nm
 ##------------------------------------------------------------------------------
 nm: $(KERNEL_ELF)
 	$(call color_header, "Launching nm")
-	$(NM_BINARY) --demangle --print-size $(KERNEL_ELF) | sort | rustfilt
+	$(NM_BINARY) --demangle --print-size $(KERNEL_ELF) | sort
 

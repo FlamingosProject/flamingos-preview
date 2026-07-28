@@ -15,6 +15,6 @@ jobs:
             - uses: actions/checkout@v3
             - name: Set up Rust tools
               run: |
-                  cargo install cargo-binutils rustfilt
+                  cargo install cargo-binutils
             - name: Run
               run: BSP=rpi4 make
