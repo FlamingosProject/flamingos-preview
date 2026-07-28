@@ -126,11 +126,13 @@ pub struct TranslationTable {
     lvl3_tables: Vec<Vec<Stage1PageDescriptor>>,
     lvl2_tables: Vec<Stage1TableDescriptor>,
     lvl2_phys_start_addr: u64,
+    kernel_virt_start_addr: u64,
 }
 
 impl TranslationTable {
     pub fn new(
         kernel_virt_addr_space_size: usize,
+        kernel_virt_start_addr: u64,
         phys_addr_of_kernel_tables: u64,
     ) -> Result<Self> {
         // Sanity checks
@@ -170,6 +172,7 @@ impl TranslationTable {
             lvl3_tables,
             lvl2_tables,
             lvl2_phys_start_addr,
+            kernel_virt_start_addr,
         })
     }
 
@@ -228,6 +231,9 @@ impl TranslationTable {
     }
 
     fn lvl2_lvl3_index_from(&self, addr: u64) -> Result<(usize, usize)> {
+        // Subtract kernel_virt_start_addr to get offset from kernel virtual start
+        let addr = addr - self.kernel_virt_start_addr;
+
         let lvl2_index = (addr >> GRANULE_512MIB_SHIFT) as usize;
         let lvl3_index = ((addr & GRANULE_512MIB_MASK as u64) >> GRANULE_64KIB_SHIFT) as usize;
 

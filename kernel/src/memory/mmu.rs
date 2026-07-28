@@ -66,6 +66,11 @@ pub struct AddressSpace<const AS_SIZE: usize>;
 pub trait AssociatedTranslationTable {
     /// A translation table whose address range is:
     ///
+    /// [u64::MAX, (u64::MAX - AS_SIZE) + 1]
+    type TableStartFromTop;
+
+    /// A translation table whose address range is:
+    ///
     /// [AS_SIZE - 1, 0]
     type TableStartFromBottom;
 }
