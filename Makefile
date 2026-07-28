@@ -14,6 +14,9 @@ BSP ?= rpi3
 DEV_SERIAL ?= /dev/ttyUSB0
 SCIP ?= scip
 CHAINBOOT_PAYLOAD ?= kernel8.img
+OPENOCD ?= openocd
+GDB ?= gdb-multiarch
+OPENOCD_INTERFACE ?= interface/ftdi/olimex-arm-usb-tiny-h.cfg
 
 
 
@@ -32,7 +35,8 @@ ifeq ($(BSP),rpi3)
     OBJDUMP_BINARY    = rust-objdump
     NM_BINARY         = rust-nm
     READELF_BINARY    = aarch64-none-elf-readelf
-    LD_SCRIPT_PATH    = $(shell pwd)/src/bsp/raspberrypi
+    OPENOCD_TARGET_CONFIG = tools/jtag/rpi3.cfg
+    JTAG_BOOT_IMAGE   = tools/jtag/jtag_boot_rpi3.img
     RUSTC_MISC_ARGS   = -C target-cpu=cortex-a53
 else ifeq ($(BSP),rpi4)
     TARGET            = aarch64-unknown-none-softfloat
@@ -43,7 +47,8 @@ else ifeq ($(BSP),rpi4)
     OBJDUMP_BINARY    = rust-objdump
     NM_BINARY         = rust-nm
     READELF_BINARY    = aarch64-none-elf-readelf
-    LD_SCRIPT_PATH    = $(shell pwd)/src/bsp/raspberrypi
+    OPENOCD_TARGET_CONFIG = tools/jtag/rpi4.cfg
+    JTAG_BOOT_IMAGE   = tools/jtag/jtag_boot_rpi4.img
     RUSTC_MISC_ARGS   = -C target-cpu=cortex-a72
 endif
 
@@ -60,6 +65,11 @@ KERNEL_ELF      = target/$(TARGET)/release/kernel
 TEST_BUILD_DIR  = target/test_build/$(BSP)
 TEST_KERNEL_ELF = $(TEST_BUILD_DIR)/$(TARGET)/release/kernel
 TEST_KERNEL_BIN = $(TEST_BUILD_DIR)/kernel8.img
+JTAG_TARGET_DIR = target/jtag/$(BSP)
+JTAG_OPT0_TARGET_DIR = target/jtag-opt0/$(BSP)
+JTAG_ELF = $(JTAG_TARGET_DIR)/$(TARGET)/release/kernel
+JTAG_OPT0_ELF = $(JTAG_OPT0_TARGET_DIR)/$(TARGET)/release/kernel
+GDB_INIT = tools/jtag/kernel.gdb
 # This parses cargo's dep-info file.
 # https://doc.rust-lang.org/cargo/guide/build-cache.html#dep-info-files
 KERNEL_ELF_DEPS = $(filter-out %: ,$(file < $(KERNEL_ELF).d)) $(KERNEL_MANIFEST) $(LAST_BUILD_CONFIG)
@@ -104,7 +114,7 @@ EXEC_QEMU = $(QEMU_BINARY) -M $(QEMU_MACHINE_TYPE)
 ##--------------------------------------------------------------------------------------------------
 ## Targets
 ##--------------------------------------------------------------------------------------------------
-.PHONY: all chainboot doc qemu test_boot clippy clean readelf objdump nm check
+.PHONY: all chainboot jtagboot openocd gdb gdb-opt0 doc qemu test_boot clippy clean readelf objdump nm check
 
 all: $(KERNEL_BIN)
 
@@ -117,6 +127,34 @@ chainboot: $(NORMAL_KERNEL_BIN)
 		exit 1; \
 	}
 	$(SCIP) --binfile "$(CHAINBOOT_PAYLOAD)" "$(DEV_SERIAL)" 921600 8 N 1 N
+
+##------------------------------------------------------------------------------
+## Real-hardware JTAG workflow
+##------------------------------------------------------------------------------
+jtagboot:
+	@test -f "$(JTAG_BOOT_IMAGE)"
+	$(SCIP) --binfile "$(JTAG_BOOT_IMAGE)" "$(DEV_SERIAL)" 921600 8 N 1 N
+
+openocd:
+	$(OPENOCD) -f "$(OPENOCD_INTERFACE)" -f "$(OPENOCD_TARGET_CONFIG)"
+
+define build_jtag_elf
+	@CARGO_PROFILE_RELEASE_STRIP=none RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" cargo rustc \
+		--target=$(TARGET)                           \
+		--no-default-features                       \
+		--features bsp_$(BSP)                       \
+		--release                                    \
+		--target-dir=$(1)                            \
+		-- -C debuginfo=2 $(2)
+endef
+
+gdb:
+	$(call build_jtag_elf,$(JTAG_TARGET_DIR),)
+	$(GDB) -q -x "$(GDB_INIT)" "$(JTAG_ELF)"
+
+gdb-opt0:
+	$(call build_jtag_elf,$(JTAG_OPT0_TARGET_DIR),-C opt-level=0)
+	$(GDB) -q -x "$(GDB_INIT)" "$(JTAG_OPT0_ELF)"
 
 ##------------------------------------------------------------------------------
 ## Save the configuration as a file, so make understands if it changed.
