@@ -17,7 +17,6 @@ use crate::{
     bsp,
     memory::{Address, Physical, Virtual},
     synchronization::{self, interface::Mutex},
-    warn,
 };
 use core::{fmt, num::NonZeroUsize};
 
@@ -176,9 +175,7 @@ pub fn kernel_add_mapping_record(
     phys_region: &MemoryRegion<Physical>,
     attr: &AttributeFields,
 ) {
-    if let Err(x) = mapping_record::kernel_add(name, virt_region, phys_region, attr) {
-        warn!("{}", x);
-    }
+    mapping_record::kernel_add(name, virt_region, phys_region, attr);
 }
 
 /// MMIO remapping in the kernel translation tables.

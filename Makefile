@@ -60,7 +60,7 @@ KERNEL_MANIFEST      = kernel/Cargo.toml
 CHAINLOADER_BIN      = chainloader8.img
 KERNEL_BIN           = $(if $(CHAINLOADER),$(CHAINLOADER_BIN),$(NORMAL_KERNEL_BIN))
 BUILD_MODE           = $(if $(CHAINLOADER),chainloader,kernel)
-LAST_BUILD_CONFIG    = target/$(BSP).$(BUILD_MODE).build_config
+LAST_BUILD_CONFIG    = target/$(BSP).$(BUILD_MODE).$(DEBUG_PRINTS).build_config
 
 KERNEL_ELF_RAW = target/$(TARGET)/release/kernel
 JTAG_TARGET_DIR = target/jtag/$(BSP)
@@ -128,15 +128,22 @@ RUSTFLAGS_PEDANTIC = $(RUSTFLAGS) \
     -D missing_docs
 
 KERNEL_FEATURES = bsp_$(BSP)
+TEST_KERNEL_FEATURES = bsp_$(BSP),test_build
+ifdef DEBUG_PRINTS
+    KERNEL_FEATURES := $(KERNEL_FEATURES),debug_prints
+    TEST_KERNEL_FEATURES := $(TEST_KERNEL_FEATURES),debug_prints
+endif
 ifdef CHAINLOADER
     KERNEL_FEATURES := $(KERNEL_FEATURES),chainloader
 endif
 FEATURES      = --features $(KERNEL_FEATURES)
-TEST_FEATURES = --no-default-features --features bsp_$(BSP),test_build
+TEST_FEATURES = --no-default-features --features $(TEST_KERNEL_FEATURES)
 COMPILER_ARGS = --target=$(TARGET) \
     $(FEATURES)                    \
     --release
 
+# build-std can be skipped for helper commands that do not rely on correct stack frames and other
+# custom compiler options. This results in a huge speedup.
 RUSTC_CMD   = cargo rustc $(COMPILER_ARGS) --manifest-path $(KERNEL_MANIFEST)
 TEST_SELECTION = $(if $(TEST),--test $(TEST),--tests)
 TEST_CMD = cargo test                            \

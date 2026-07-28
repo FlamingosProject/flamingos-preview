@@ -86,13 +86,13 @@ use crate::{
     synchronization,
     synchronization::InitStateLock,
 };
+use alloc::vec::Vec;
 
 //--------------------------------------------------------------------------------------------------
 // Private Definitions
 //--------------------------------------------------------------------------------------------------
 
-type HandlerTable = [Option<exception::asynchronous::IRQHandlerDescriptor<IRQNumber>>;
-    IRQNumber::MAX_INCLUSIVE + 1];
+type HandlerTable = Vec<Option<exception::asynchronous::IRQHandlerDescriptor<IRQNumber>>>;
 
 //--------------------------------------------------------------------------------------------------
 // Public Definitions
@@ -118,7 +118,7 @@ pub struct GICv2 {
 //--------------------------------------------------------------------------------------------------
 
 impl GICv2 {
-    const MAX_IRQ_NUMBER: usize = 300; // Normally 1019, but keep it lower to save some space.
+    const MAX_IRQ_NUMBER: usize = 1019;
 
     pub const COMPATIBLE: &'static str = "GICv2 (ARM Generic Interrupt Controller v2)";
 
@@ -134,7 +134,7 @@ impl GICv2 {
         Self {
             gicd: gicd::GICD::new(gicd_mmio_start_addr),
             gicc: gicc::GICC::new(gicc_mmio_start_addr),
-            handler_table: InitStateLock::new([None; IRQNumber::MAX_INCLUSIVE + 1]),
+            handler_table: InitStateLock::new(Vec::new()),
         }
     }
 }
@@ -152,6 +152,9 @@ impl driver::interface::DeviceDriver for GICv2 {
     }
 
     unsafe fn init(&self) -> Result<(), &'static str> {
+        self.handler_table
+            .write(|table| table.resize(IRQNumber::MAX_INCLUSIVE + 1, None));
+
         if bsp::cpu::BOOT_CORE_ID == cpu::smp::core_id() {
             self.gicd.boot_core_init();
         }

@@ -327,6 +327,13 @@ impl PL011UartInner {
         self.bytes_written += 1;
     }
 
+    /// Send a slice of characters.
+    fn write_array(&mut self, a: &[u8]) {
+        for &c in a {
+            self.write_byte(c);
+        }
+    }
+
     /// Block execution until the last buffered character has been physically put on the TX wire.
     fn flush(&self) {
         // Spin until the busy bit is cleared.
@@ -447,6 +454,10 @@ impl console::interface::RawWrite for PL011Uart {
     fn write_str(&self, s: &str) {
         use fmt::Write;
         self.inner.lock(|inner| inner.write_str(s).unwrap())
+    }
+
+    fn write_array(&self, a: &[u8]) {
+        self.inner.lock(|inner| inner.write_array(a));
     }
 
     fn flush(&self) {
