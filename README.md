@@ -1,74 +1,69 @@
-# Tutorial 19 - Timer Callbacks
+# Tutorial 20 - Boot Improvements
 
 ## tl;dr
 
-- The timer subsystem can now execute one-shot and periodic timeout callbacks.
-- The AArch64 architectural timer is programmed to raise IRQs instead of only being used for polling
-  and timestamp reads.
-- The Raspberry Pi local interrupt controller is added so timer IRQs can be routed and handled.
+- Early boot now parses the device tree pointer that has been preserved since Chapter 02.
+- The kernel records CPU core IDs from the device tree and prints them during startup.
+- The existing raw-GPIO LED trace remains available across the expanded boot path.
 
 ## Table of Contents
 
 - [Introduction](#introduction)
 - [Implementation](#implementation)
-  - [Timer IRQ Programming](#timer-irq-programming)
-  - [Local Interrupt Controller](#local-interrupt-controller)
-  - [Timeout Management](#timeout-management)
+  - [Device Tree Parsing](#device-tree-parsing)
+  - [Core Discovery](#core-discovery)
+  - [Boot Trace Coverage](#boot-trace-coverage)
 - [Test it](#test-it)
 
 ## Introduction
 
-Earlier tutorials used the architectural timer for timestamps and spin delays. This revision turns
-the timer into an asynchronous kernel facility: code can register callbacks that should run after a
-duration, and the timer subsystem arranges for the next due callback to be delivered from IRQ
-context.
+The previous tutorial made timer IRQ callbacks work, which is one of the pieces needed before
+moving toward multicore and scheduling work. This revision tightens the earliest boot path so later
+code can reason about the machine it is running on.
 
 The developer workflows introduced earlier remain available. Use `make chainboot` to send the
 normal kernel, `CHAINLOADER=1 make` to build the persistent EL2/MMU-off loader as
 `chainloader8.img`, and `make jtagboot`, `make openocd`, `make gdb`, or `make gdb-opt0` for the
 Chapter 08 hardware-debugging workflow.
 
-The feature is intentionally small. It provides the mechanism needed by later scheduling and
-threading work without introducing a full scheduler yet.
+The assembly-to-Rust handoff has preserved the firmware-provided device tree pointer since Chapter
+02. The key change here is that Rust finally interprets it, storing basic core information for later
+reporting.
 
 ## Implementation
 
-### Timer IRQ Programming
+### Device Tree Parsing
 
-The AArch64 timer module gains helpers to:
+The existing boot arguments already carry the incoming device tree pointer through assembly. Early
+boot converts it to an address in the mapped boot-stack region and preserves it across the MMU
+transition. The kernel crate now adds the `fdt` dependency and parses the flattened device tree once
+linked virtual code is safe to execute.
 
-- report the IRQ number used by the non-secure physical timer;
-- program `CNTP_CVAL_EL0` for a target due time;
-- enable the timer interrupt via `CNTP_CTL_EL0`;
-- conclude a pending timeout IRQ by disabling the timer.
+QEMU's `raspi3b` machine supplies the older `ATAG_CORE` handoff instead of a flattened device tree.
+The boot code recognizes that specific format and records the four cores provided by the supported
+Raspberry Pi BSPs, preserving the existing QEMU development and test workflows.
 
-This moves the subsystem beyond `uptime()` and `spin_for()` and lets it request an interrupt at a
-specific future time.
+### Core Discovery
 
-### Local Interrupt Controller
+The AArch64 boot module adds `CoresInfo`, a small static record containing the number of discovered
+cores and their IDs. At the start of `kernel_init()`, `process_device_tree()` walks the device tree
+CPU nodes and fills this structure.
 
-Raspberry Pi timer IRQs are delivered through local core interrupt-controller state, not only
-through the peripheral interrupt controller used for UART IRQs. This revision adds a Broadcom local
-interrupt-controller driver under the existing BCM interrupt-controller module.
+`kernel_main()` prints the discovered core IDs as part of the normal boot log. This makes the
+firmware handoff visible and gives later multicore work a concrete source of topology data.
 
-The local controller stores IRQ handler descriptors, enables timer IRQ bits for core 0, and reports
-pending local IRQs to the generic IRQ manager path.
+### Boot Trace Coverage
 
-### Timeout Management
+The raw GPIO-based LED helpers for Raspberry Pi 3 and Raspberry Pi 4 have existed since Chapter 02.
+This chapter carries them through the expanded boot path. Stage 3 marks the last physical-address
+phase before the MMU transition; device-tree parsing is deliberately deferred until linked virtual
+code is safe to execute.
 
-`kernel/src/time.rs` grows a timeout manager on top of the architectural timer. It supports:
-
-- one-shot callbacks;
-- periodic callbacks;
-- scheduling the next hardware timer event from the earliest due callback;
-- executing callbacks when the timer IRQ fires.
-
-The kernel initializes the timer subsystem during `kernel_init()` before driver IRQ setup is
-completed. `kernel_main()` demonstrates the feature by registering two one-shot callbacks and one
-periodic callback.
+The tracing is controlled by the `boot_trace` feature. When the feature is disabled, the blink
+macros compile to no-op control flow.
 
 ## Test it
 
-Boot the kernel and watch the UART log. After the usual startup diagnostics, the kernel schedules
-callbacks that print after roughly two seconds, five seconds, and then once per second for the
-periodic timer.
+Boot the kernel as before. The startup log now includes a `Cores:` section showing the core IDs
+parsed from the device tree. To diagnose very early boot on hardware, use the Chapter 15 argument
+forwarding with `cargo xtask build rpi3 --features=boot_trace` and observe the board LED blink codes.
