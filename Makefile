@@ -11,6 +11,9 @@ include common/operating_system.mk
 
 # Default to the RPi3.
 BSP ?= rpi3
+DEV_SERIAL ?= /dev/ttyUSB0
+SCIP ?= scip
+CHAINBOOT_PAYLOAD ?= ../05-drivers-gpio-uart/kernel8.img
 
 
 
@@ -76,8 +79,12 @@ RUSTFLAGS = $(RUSTC_MISC_ARGS)                   \
 RUSTFLAGS_PEDANTIC = $(RUSTFLAGS) \
     -D missing_docs
 
-FEATURES      = --features bsp_$(BSP)
-TEST_FEATURES = --features bsp_$(BSP),test_build
+KERNEL_FEATURES = bsp_$(BSP)
+ifdef CHAINLOADER
+    KERNEL_FEATURES := $(KERNEL_FEATURES),chainloader
+endif
+FEATURES      = --features $(KERNEL_FEATURES)
+TEST_FEATURES = --no-default-features --features bsp_$(BSP),test_build
 COMPILER_ARGS = --target=$(TARGET) \
     $(FEATURES)                    \
     --release
@@ -102,9 +109,19 @@ EXEC_QEMU = $(QEMU_BINARY) -M $(QEMU_MACHINE_TYPE)
 ##--------------------------------------------------------------------------------------------------
 ## Targets
 ##--------------------------------------------------------------------------------------------------
-.PHONY: all doc qemu test_boot clippy clean readelf objdump nm check
+.PHONY: all chainboot doc qemu test_boot clippy clean readelf objdump nm check
 
 all: $(KERNEL_BIN)
+
+##------------------------------------------------------------------------------
+## Send a payload to a chainloader already running on the target
+##------------------------------------------------------------------------------
+chainboot:
+	@test -f "$(CHAINBOOT_PAYLOAD)" || { \
+		echo "Missing payload: $(CHAINBOOT_PAYLOAD)"; \
+		exit 1; \
+	}
+	$(SCIP) --binfile "$(CHAINBOOT_PAYLOAD)" "$(DEV_SERIAL)" 921600 8 N 1 N
 
 ##------------------------------------------------------------------------------
 ## Save the configuration as a file, so make understands if it changed.

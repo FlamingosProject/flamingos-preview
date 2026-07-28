@@ -8,11 +8,12 @@ edition = "2021"
 lto = true
 
 [features]
-default = []
+default = ["chainloader"]
 bsp_rpi3 = ["tock-registers"]
 bsp_rpi4 = ["tock-registers"]
 boot_trace = []
 test_build = ["qemu-exit"]
+chainloader = []
 
 [[bin]]
 name = "kernel"
@@ -29,7 +30,7 @@ qemu-exit = { version = "3.x.x", optional = true }
 
 # Optional dependencies
 [dependencies.tock-registers]
-version = "0.9"
+version = "0.10"
 default-features = false
 features = ["register_types"]
 optional = true

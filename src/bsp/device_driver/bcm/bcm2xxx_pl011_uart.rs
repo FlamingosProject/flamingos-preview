@@ -310,8 +310,8 @@ impl PL011UartInner {
 /// [`src/print.rs`]: ../../print/index.html
 impl fmt::Write for PL011UartInner {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        for c in s.bytes() {
-            self.write_byte(c);
+        for b in s.bytes() {
+            self.write_byte(b);
         }
 
         Ok(())
