@@ -4,7 +4,7 @@
 
 //! General purpose code.
 
-/// Checks whether `value` is aligned to `alignment`.
+/// Check if a value is aligned to a given size.
 #[inline(always)]
 pub const fn is_aligned(value: usize, alignment: usize) -> bool {
     assert!(alignment.is_power_of_two());

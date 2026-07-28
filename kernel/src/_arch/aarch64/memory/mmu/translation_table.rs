@@ -321,42 +321,6 @@ impl<const NUM_TABLES: usize> FixedSizeTranslationTable<NUM_TABLES> {
         *desc = *new_desc;
         Ok(())
     }
-
-    /// Populate all entries according to the initial chapter's BSP layout.
-    ///
-    /// This compatibility path retains the whole-board identity map while using the same typed
-    /// translation-table implementation that later chapters extend with selective mappings.
-    pub unsafe fn populate_tt_entries(&mut self) -> Result<(), &'static str> {
-        use memory::mmu::translation_table::interface::TranslationTable;
-
-        self.init();
-
-        for l2_nr in 0..NUM_TABLES {
-            for l3_nr in 0..8192 {
-                let virt_addr = (l2_nr << Granule512MiB::SHIFT) + (l3_nr << Granule64KiB::SHIFT);
-                let (phys_addr, attributes) =
-                    bsp::memory::mmu::virt_mem_layout().virt_addr_properties(virt_addr)?;
-
-                let virt_start = PageAddress::from(virt_addr);
-                let virt_end = virt_start.checked_offset(1).unwrap();
-                let phys_start = PageAddress::from(phys_addr);
-                let phys_end = phys_start.checked_offset(1).unwrap();
-
-                self.map_at(
-                    &MemoryRegion::new(virt_start, virt_end),
-                    &MemoryRegion::new(phys_start, phys_end),
-                    &attributes,
-                )?;
-            }
-        }
-
-        Ok(())
-    }
-
-    /// The translation table's physical base address.
-    pub fn physical_base_address(&self) -> Address<Physical> {
-        self.lvl2.phys_start_addr()
-    }
 }
 
 //------------------------------------------------------------------------------

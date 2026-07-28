@@ -6,9 +6,9 @@
 
 use crate::{
     bsp, common,
-    memory::{Address, AddressType},
+    memory::{Address, AddressType, Physical},
 };
-use core::convert::From;
+use core::{convert::From, num::NonZeroUsize};
 
 //--------------------------------------------------------------------------------------------------
 // Public Definitions
@@ -50,6 +50,13 @@ pub struct AttributeFields {
     pub mem_attributes: MemAttributes,
     pub acc_perms: AccessPermissions,
     pub execute_never: bool,
+}
+
+/// An MMIO descriptor for use in device drivers.
+#[derive(Copy, Clone)]
+pub struct MMIODescriptor {
+    start_addr: Address<Physical>,
+    end_addr_exclusive: Address<Physical>,
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -194,6 +201,42 @@ impl<ATYPE: AddressType> MemoryRegion<ATYPE> {
 
         end_exclusive - start
     }
+
+    /// Splits the MemoryRegion like:
+    ///
+    /// --------------------------------------------------------------------------------
+    /// |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |
+    /// --------------------------------------------------------------------------------
+    ///   ^                               ^                                       ^
+    ///   |                               |                                       |
+    ///   left_start     left_end_exclusive                                       |
+    ///                                                                           |
+    ///                                   ^                                       |
+    ///                                   |                                       |
+    ///                                   right_start           right_end_exclusive
+    ///
+    /// Left region is returned to the caller. Right region is the new region for this struct.
+    pub fn take_first_n_pages(&mut self, num_pages: NonZeroUsize) -> Result<Self, &'static str> {
+        let count: usize = num_pages.into();
+
+        let left_end_exclusive = self.start.checked_offset(count as isize);
+        let left_end_exclusive = match left_end_exclusive {
+            None => return Err("Overflow while calculating left_end_exclusive"),
+            Some(x) => x,
+        };
+
+        if left_end_exclusive > self.end_exclusive {
+            return Err("Not enough free pages");
+        }
+
+        let allocation = Self {
+            start: self.start,
+            end_exclusive: left_end_exclusive,
+        };
+        self.start = left_end_exclusive;
+
+        Ok(allocation)
+    }
 }
 
 impl<ATYPE: AddressType> IntoIterator for MemoryRegion<ATYPE> {
@@ -234,6 +277,45 @@ where
         } else {
             None
         }
+    }
+}
+
+impl From<MMIODescriptor> for MemoryRegion<Physical> {
+    fn from(desc: MMIODescriptor) -> Self {
+        let start = PageAddress::from(desc.start_addr.align_down_page());
+        let end_exclusive = PageAddress::from(desc.end_addr_exclusive().align_up_page());
+
+        Self {
+            start,
+            end_exclusive,
+        }
+    }
+}
+
+//------------------------------------------------------------------------------
+// MMIODescriptor
+//------------------------------------------------------------------------------
+
+impl MMIODescriptor {
+    /// Create an instance.
+    pub const fn new(start_addr: Address<Physical>, size: usize) -> Self {
+        assert!(size > 0);
+        let end_addr_exclusive = Address::new(start_addr.as_usize() + size);
+
+        Self {
+            start_addr,
+            end_addr_exclusive,
+        }
+    }
+
+    /// Return the start address.
+    pub const fn start_addr(&self) -> Address<Physical> {
+        self.start_addr
+    }
+
+    /// Return the exclusive end address.
+    pub fn end_addr_exclusive(&self) -> Address<Physical> {
+        self.end_addr_exclusive
     }
 }
 

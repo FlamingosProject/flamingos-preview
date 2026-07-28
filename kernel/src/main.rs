@@ -24,13 +24,18 @@ use libkernel::{bsp, cpu, driver, exception, info, memory, state, time};
 ///       IRQSafeNullLocks instead of spinlocks), will fail to work (properly) on the RPi SoCs.
 #[no_mangle]
 unsafe fn kernel_init() -> ! {
-    use memory::mmu::interface::MMU;
-
     exception::handling_init();
 
-    if let Err(string) = memory::mmu::mmu().enable_mmu_and_caching() {
-        panic!("MMU: {}", string);
+    let phys_kernel_tables_base_addr = match memory::mmu::kernel_map_binary() {
+        Err(string) => panic!("Error mapping kernel binary: {}", string),
+        Ok(addr) => addr,
+    };
+
+    if let Err(e) = memory::mmu::enable_mmu_and_caching(phys_kernel_tables_base_addr) {
+        panic!("Enabling MMU failed: {}", e);
     }
+
+    memory::mmu::post_enable_init();
 
     // Initialize the BSP driver subsystem.
     if let Err(x) = bsp::driver::init() {
@@ -55,8 +60,8 @@ fn kernel_main() -> ! {
     info!("{}", libkernel::version());
     info!("Booting on: {}", bsp::board_name());
 
-    info!("MMU online. Special regions:");
-    bsp::memory::mmu::virt_mem_layout().print_layout();
+    info!("MMU online:");
+    memory::mmu::kernel_print_mappings();
 
     let (_, privilege_level) = exception::current_privilege_level();
     info!("Current privilege level: {}", privilege_level);

@@ -4,7 +4,11 @@
 
 //! GICC Driver - GIC CPU interface.
 
-use crate::{bsp::device_driver::common::MMIODerefWrapper, exception};
+use crate::{
+    bsp::device_driver::common::MMIODerefWrapper,
+    exception,
+    memory::{Address, Virtual},
+};
 use tock_registers::{
     interfaces::{Readable, Writeable},
     register_bitfields, register_structs,
@@ -73,7 +77,7 @@ impl GICC {
     /// # Safety
     ///
     /// - The user must ensure to provide a correct MMIO start address.
-    pub const unsafe fn new(mmio_start_addr: usize) -> Self {
+    pub const unsafe fn new(mmio_start_addr: Address<Virtual>) -> Self {
         Self {
             registers: Registers::new(mmio_start_addr),
         }
