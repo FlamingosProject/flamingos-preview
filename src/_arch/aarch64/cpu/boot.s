@@ -45,10 +45,10 @@ _start:
 	mov	x19, x0
 
 	// Only proceed on the boot core. Park it otherwise.
-	mrs	x0, MPIDR_EL1
-	and	x0, x0, {CONST_CORE_ID_MASK}
-	ldr	x1, BOOT_CORE_ID      // provided by bsp/__board_name__/cpu.rs
-	cmp	x0, x1
+	mrs	x1, MPIDR_EL1
+	and	x1, x1, {CONST_CORE_ID_MASK}
+	ldr	x2, BOOT_CORE_ID      // provided by bsp/__board_name__/cpu.rs
+	cmp	x1, x2
 	b.ne	.L_parking_loop
 
 	// If execution reaches here, it is the boot core.
@@ -59,6 +59,13 @@ _start:
 	mov	sp, x0
 
 	BLINK_CODE #1
+
+	// Only proceed if the core executes in EL2. Report a fatal boot error otherwise.
+	mrs	x0, CurrentEL
+	cmp	x0, {CONST_CURRENTEL_EL2}
+	b.eq	.L_in_el2
+	PANIC	#0x11
+.L_in_el2:
 
 	// Initialize DRAM.
 	ADR_REL	x0, __bss_start
@@ -74,8 +81,9 @@ _start:
 .L_prepare_rust:
 	BLINK_CODE #2
 
-	// Pass the preserved device tree pointer to Rust.
-	mov	x0, x19
+	// Pass the boot stack and preserved device tree pointer to Rust.
+	ADR_REL	x0, __boot_core_stack_end_exclusive
+	mov	x1, x19
 	b	_start_rust
 
 	// Infinitely wait for events (aka "park the core").
