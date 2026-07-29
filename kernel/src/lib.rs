@@ -120,6 +120,7 @@ compile_error!("features `chainloader` and `test_build` cannot be enabled togeth
 #[cfg(not(any(feature = "bsp_rpi3", feature = "bsp_rpi4")))]
 compile_error!("Either feature \"bsp_rpi3\" or \"bsp_rpi4\" must be enabled for this crate.",);
 
+#[cfg(not(feature = "chainloader"))]
 mod backtrace;
 #[cfg(feature = "chainloader")]
 mod chainloader;
@@ -134,6 +135,8 @@ pub mod driver;
 pub mod exception;
 pub mod memory;
 pub mod print;
+#[cfg(feature = "test_build")]
+pub mod test;
 pub mod time;
 
 //--------------------------------------------------------------------------------------------------
@@ -152,27 +155,4 @@ pub fn version() -> &'static str {
 #[cfg(all(not(test), not(feature = "chainloader")))]
 extern "Rust" {
     fn kernel_init() -> !;
-}
-
-//--------------------------------------------------------------------------------------------------
-// Testing
-//--------------------------------------------------------------------------------------------------
-
-/// The default runner for unit tests.
-pub fn test_runner(tests: &[&test_types::UnitTest]) {
-    // This line will be printed as the test header.
-    println!("Running {} tests", tests.len());
-
-    for (i, test) in tests.iter().enumerate() {
-        print!("{:>3}. {:.<58}", i + 1, test.name);
-
-        // Run the actual test.
-        (test.test_func)();
-
-        // Failed tests call panic!(). Execution reaches here only if the test has passed.
-        println!("[ok]")
-    }
-
-    #[cfg(feature = "test_build")]
-    cpu::qemu_exit_success();
 }

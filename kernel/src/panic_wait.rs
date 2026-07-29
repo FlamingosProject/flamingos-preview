@@ -4,7 +4,9 @@
 
 //! Kernel panic handling for normal and QEMU test builds.
 
-use crate::{cpu, println};
+#[cfg(not(feature = "test_build"))]
+use crate::cpu;
+use crate::println;
 use core::panic::PanicInfo;
 
 //--------------------------------------------------------------------------------------------------
@@ -21,7 +23,7 @@ fn _panic_exit() -> ! {
 
     #[cfg(feature = "test_build")]
     {
-        cpu::qemu_exit_failure()
+        crate::test::exit_panic()
     }
 }
 
@@ -75,6 +77,7 @@ fn panic(info: &PanicInfo) -> ! {
         info.message(),
     );
 
+    #[cfg(not(feature = "chainloader"))]
     crate::backtrace::print_backtrace();
 
     _panic_exit()
