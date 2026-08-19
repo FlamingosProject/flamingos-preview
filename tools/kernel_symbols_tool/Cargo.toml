@@ -1,0 +1,16 @@
+[package]
+name = "kernel_symbols_tool"
+version = "0.1.0"
+edition = "2021"
+
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2022-2023 Andre Richter <andre.o.richter@gmail.com>
+
+[[bin]]
+name = "kernel-elf-symbol"
+path = "src/main.rs"
+
+[dependencies]
+goblin = "0.8"
+anyhow = "1.0"
+rustc-demangle = "0.1"

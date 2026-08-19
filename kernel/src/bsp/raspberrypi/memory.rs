@@ -20,6 +20,7 @@
 //! | .text                                 |
 //! | .rodata                               |
 //! | .got                                  |
+//! | .kernel_symbols                       |
 //! |                                       |
 //! +---------------------------------------+
 //! |                                       | data_start == code_end_exclusive
@@ -41,6 +42,7 @@
 //! | .text                                 |
 //! | .rodata                               |
 //! | .got                                  |
+//! | .kernel_symbols                       |
 //! |                                       |
 //! +---------------------------------------+
 //! |                                       | data_start == code_end_exclusive
