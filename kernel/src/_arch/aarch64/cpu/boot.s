@@ -56,17 +56,14 @@ _start:
 	// Preserve the device tree pointer supplied in x0 by the firmware or chainloader.
 	mov	x19, x0
 
-	// Only proceed on the boot core. Park it otherwise.
+	// Only proceed on the boot core. Park other cores before using the shared boot stack.
 	mrs	x1, MPIDR_EL1
 	and	x1, x1, {CONST_CORE_ID_MASK}
 	ldr	x2, BOOT_CORE_ID      // provided by bsp/__board_name__/cpu.rs
 	cmp	x1, x2
 	b.ne	.L_parking_loop
 
-	// If execution reaches here, it is the boot core.
-
-	// Establish a stack before calling the Rust boot-tracing helper. The stack occupies the
-	// physical address range below the kernel image and is not part of BSS.
+	// Establish a physical stack before calling the Rust boot-tracing helper.
 	ADR_REL	x0, __boot_core_stack_end_exclusive
 	mov	sp, x0
 
@@ -82,29 +79,67 @@ _start:
 	// Initialize DRAM.
 	ADR_REL	x0, __bss_start
 	ADR_REL x1, __bss_end_exclusive
-
 .L_bss_init_loop:
 	cmp	x0, x1
 	b.eq	.L_prepare_rust
 	stp	xzr, xzr, [x0], #16
 	b	.L_bss_init_loop
 
-	// Prepare the jump to Rust code.
 .L_prepare_rust:
+	// QEMU passes an ATAG_CORE header, while firmware and the UART
+	// chainloader pass an FDT. Work out how many bytes must survive.
+	ldr	w4, [x19, #4]
+	movz	w5, #0x0001
+	movk	w5, #0x5441, lsl #16
+	cmp	w4, w5
+	b.ne	.L_device_tree_is_fdt
+	mov	x4, #8
+	b	.L_device_tree_size_ready
+
+.L_device_tree_is_fdt:
+	ldr	w5, [x19]
+	rev	w5, w5
+	movz	w6, #0xfeed
+	movk	w6, #0xd00d, lsl #16
+	cmp	w5, w6
+	b.ne	.L_bad_device_tree
+	rev	w4, w4
+
+.L_device_tree_size_ready:
+	cbz	x4, .L_bad_device_tree
+	mov	x5, {CONST_DEVICE_TREE_BUFFER_SIZE}
+	cmp	x4, x5
+	b.hi	.L_device_tree_too_large
+
+	// The incoming pointer may refer to firmware memory or to the
+	// chainloader's relocated copy around 32 MiB. Copy it into this
+	// kernel's own BSS so it has a known high-half mapping after MMU-on.
+	ADR_REL	x5, DEVICE_TREE_BUFFER
+	add	x6, x5, x4
+.L_device_tree_copy_loop:
+	ldrb	w7, [x19], #1
+	strb	w7, [x5], #1
+	cmp	x5, x6
+	b.lo	.L_device_tree_copy_loop
+
 	BLINK_CODE #2
 
 	// Load the base address of the kernel's translation tables.
 	ldr	x0, PHYS_KERNEL_TABLES_BASE_ADDR // provided by bsp/__board_name__/memory/mmu.rs
 
-	// Load the _absolute_ addresses of the following symbols. Since the kernel is linked at
-	// the top of the 64 bit address space, these are effectively virtual addresses.
+	// Load the kernel's linked virtual stack and entry-point addresses.
 	ADR_ABS	x1, __boot_core_stack_end_exclusive
 	ADR_ABS	x2, kernel_init
+	ADR_ABS	x3, DEVICE_TREE_BUFFER
 
-	// Pass the preserved device tree pointer as the fourth Rust argument.
-	mov	x3, x19
-
+	// Jump to Rust code. x3 is the copied device tree's linked virtual address.
 	b	_start_rust
+
+.L_bad_device_tree:
+	PANIC	#0x12
+
+.L_device_tree_too_large:
+	PANIC	#0x13
 
 	// Infinitely wait for events (aka "park the core").
 .L_parking_loop:
