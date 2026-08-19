@@ -23,6 +23,17 @@ const QEMU_EXIT_HANDLE: qemu_exit::AArch64 = qemu_exit::AArch64::new();
 // Public Code
 //--------------------------------------------------------------------------------------------------
 
+pub use asm::nop;
+
+/// Spin for `n` cycles.
+#[cfg(feature = "bsp_rpi3")]
+#[inline(never)]
+pub fn spin_for_cycles(n: usize) {
+    for _ in 0..n {
+        asm::nop();
+    }
+}
+
 /// Pause execution on the core.
 #[inline(always)]
 #[cfg_attr(feature = "test_build", allow(dead_code))]

@@ -17,6 +17,7 @@ version = "1.0.0"
 dependencies = [
  "aarch64-cpu",
  "qemu-exit",
+ "tock-registers",
 ]
 
 [[package]]
