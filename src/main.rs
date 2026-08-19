@@ -122,6 +122,7 @@ mod chainloader;
 mod console;
 mod cpu;
 mod driver;
+mod exception;
 mod panic_wait;
 mod print;
 mod synchronization;
@@ -151,6 +152,7 @@ unsafe fn kernel_init() -> ! {
 /// The main function running after the early init.
 #[cfg(not(feature = "chainloader"))]
 fn kernel_main() -> ! {
+    use console::{console, set_input_policy, EchoPolicy, InputPolicy};
     use core::time::Duration;
 
     info!(
@@ -160,6 +162,12 @@ fn kernel_main() -> ! {
     );
     info!("Booting on: {}", bsp::board_name());
 
+    let (_, privilege_level) = exception::current_privilege_level();
+    info!("Current privilege level: {}", privilege_level);
+
+    info!("Exception handling state:");
+    exception::asynchronous::print_state();
+
     info!(
         "Architectural timer resolution: {} ns",
         time::time_manager().resolution().as_nanos()
@@ -168,14 +176,23 @@ fn kernel_main() -> ! {
     info!("Drivers loaded:");
     driver::driver_manager().enumerate();
 
-    // Test a failing timer case.
-    time::time_manager().spin_for(Duration::from_nanos(1));
+    info!("Timer test, spinning for 1 second");
+    time::time_manager().spin_for(Duration::from_secs(1));
+
+    info!("Echoing input now");
+
+    set_input_policy(InputPolicy {
+        map_cr_to_lf: true,
+        echo: EchoPolicy::Cooked,
+    });
+
+    // Discard any spurious received characters before enabling terminal echo.
+    console().clear_rx();
 
     #[cfg(feature = "test_build")]
     cpu::qemu_exit_success();
 
     loop {
-        info!("Spinning for 1 second");
-        time::time_manager().spin_for(Duration::from_secs(1));
+        let _ = console().read_byte();
     }
 }

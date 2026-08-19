@@ -15,3 +15,5 @@
 * Replace the Ruby terminal with Rust `scip` plus a Rust
   chainloader host replacement
 * Add a crc32 to the chainloader to validate the kernel
+* In boot parking loop, blink morse on LED to indicate
+  failure mode
