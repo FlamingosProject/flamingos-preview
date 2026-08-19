@@ -87,6 +87,12 @@ unsafe fn post_init_gpio() -> Result<(), &'static str> {
 #[cfg(feature = "bsp_rpi3")]
 unsafe fn instantiate_interrupt_controller() -> Result<(), &'static str> {
     unsafe {
+        let local_mmio_descriptor = MMIODescriptor::new(mmio::LOCAL_IC_START, mmio::LOCAL_IC_SIZE);
+        let local_virt_addr = memory::mmu::kernel_map_mmio(
+            device_driver::InterruptController::COMPATIBLE,
+            &local_mmio_descriptor,
+        )?;
+
         let periph_mmio_descriptor =
             MMIODescriptor::new(mmio::PERIPHERAL_IC_START, mmio::PERIPHERAL_IC_SIZE);
         let periph_virt_addr = memory::mmu::kernel_map_mmio(
@@ -94,7 +100,10 @@ unsafe fn instantiate_interrupt_controller() -> Result<(), &'static str> {
             &periph_mmio_descriptor,
         )?;
 
-        INTERRUPT_CONTROLLER.write(device_driver::InterruptController::new(periph_virt_addr));
+        INTERRUPT_CONTROLLER.write(device_driver::InterruptController::new(
+            local_virt_addr,
+            periph_virt_addr,
+        ));
 
         Ok(())
     }
