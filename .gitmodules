@@ -58,3 +58,7 @@
 	path = 15-virtual-mem-part3
 	url = https://github.com/FlamingosProject/flamingos-preview.git
 	branch = 15-virtual-mem-part3
+[submodule "16-virtual-mem-part4"]
+	path = 16-virtual-mem-part4
+	url = https://github.com/FlamingosProject/flamingos-preview.git
+	branch = 16-virtual-mem-part4
