@@ -117,6 +117,7 @@ mod console;
 mod cpu;
 mod panic_wait;
 mod print;
+mod synchronization;
 
 /// Early init code.
 ///
@@ -124,14 +125,17 @@ mod print;
 ///
 /// - Only a single core must be active and running this function.
 unsafe fn kernel_init() -> ! {
-    println!("Hello from Rust!");
+    use console::console;
+
+    println!("[0] Hello from Rust!");
+
+    println!("[1] Chars written: {}", console().chars_written());
+
+    println!("[2] Stopping here.");
 
     #[cfg(feature = "test_build")]
-    {
-        println!("Boot test complete");
-        cpu::qemu_exit_success()
-    }
+    cpu::qemu_exit_success();
 
     #[cfg(not(feature = "test_build"))]
-    panic!("Stopping here.")
+    cpu::wait_forever()
 }
