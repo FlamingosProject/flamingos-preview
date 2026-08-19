@@ -1,79 +1,77 @@
-# Tutorial 18 - Kernel Heap
+# Tutorial 19 - Timer Callbacks
 
 ## tl;dr
 
-- A global kernel heap allocator is added.
-- The heap is reserved in the kernel linker script and initialized during early kernel setup.
-- Kernel code can now use selected `alloc` types, which is used immediately to simplify driver and
-  interrupt-handler bookkeeping.
+- The timer subsystem can now execute one-shot and periodic timeout callbacks.
+- The AArch64 architectural timer is programmed to raise IRQs instead of only being used for polling
+  and timestamp reads.
+- The Raspberry Pi local interrupt controller is added so timer IRQs can be routed and handled.
 
 ## Table of Contents
 
 - [Introduction](#introduction)
 - [Implementation](#implementation)
-  - [Heap Memory Region](#heap-memory-region)
-  - [Global Allocator](#global-allocator)
-  - [Using Allocation In Kernel Code](#using-allocation-in-kernel-code)
+  - [Timer IRQ Programming](#timer-irq-programming)
+  - [Local Interrupt Controller](#local-interrupt-controller)
+  - [Timeout Management](#timeout-management)
 - [Test it](#test-it)
 
 ## Introduction
 
-Previous tutorials avoided dynamic allocation. That made the kernel easier to reason about while
-the boot path, MMU, exception handling, interrupts, and symbol lookup were still being built.
-However, fixed-size arrays are awkward for subsystems whose size is naturally discovered at runtime,
-such as registered drivers and IRQ handlers.
+Earlier tutorials used the architectural timer for timestamps and spin delays. This revision turns
+the timer into an asynchronous kernel facility: code can register callbacks that should run after a
+duration, and the timer subsystem arranges for the next due callback to be delivered from IRQ
+context.
 
 The developer workflows introduced earlier remain available. Use `make chainboot` to send the
 normal kernel, `CHAINLOADER=1 make` to build the persistent EL2/MMU-off loader as
 `chainloader8.img`, and `make jtagboot`, `make openocd`, `make gdb`, or `make gdb-opt0` for the
 Chapter 08 hardware-debugging workflow.
 
-This tutorial adds a kernel heap. The heap is still deliberately small and controlled: it is carved
-out by the linker, mapped by the existing MMU setup, and initialized once during kernel startup.
-After that, the kernel can use `alloc` collections where they remove artificial fixed limits.
+The feature is intentionally small. It provides the mechanism needed by later scheduling and
+threading work without introducing a full scheduler yet.
 
 ## Implementation
 
-### Heap Memory Region
+### Timer IRQ Programming
 
-The Raspberry Pi linker script gains a dedicated `.heap` output section after `.data`/`.bss` and
-before the virtual MMIO remap reservation. The section is `NOLOAD`, so it reserves address space
-without increasing the kernel image with zero-filled bytes. The current heap size is `16 MiB`.
+The AArch64 timer module gains helpers to:
 
-The BSP memory module exposes the linker-provided heap start and end symbols, and the BSP MMU code
-adds a virtual heap region that is mapped with normal cacheable memory attributes.
+- report the IRQ number used by the non-secure physical timer;
+- program `CNTP_CVAL_EL0` for a target due time;
+- enable the timer interrupt via `CNTP_CTL_EL0`;
+- conclude a pending timeout IRQ by disabling the timer.
 
-### Global Allocator
+This moves the subsystem beyond `uptime()` and `spin_for()` and lets it request an interrupt at a
+specific future time.
 
-`kernel/src/memory/heap_alloc.rs` defines the kernel heap allocator. It wraps
-`linked_list_allocator::Heap` in the existing IRQ-safe lock type and installs it as the Rust global
-allocator with `#[global_allocator]`.
+### Local Interrupt Controller
 
-The allocator is initialized from `memory::init()`, after the MMIO virtual-address allocator is
-prepared. This keeps all memory-subsystem initialization in one place:
+Raspberry Pi timer IRQs are delivered through local core interrupt-controller state, not only
+through the peripheral interrupt controller used for UART IRQs. This revision adds a Broadcom local
+interrupt-controller driver under the existing BCM interrupt-controller module.
 
-- the MMIO allocator manages virtual pages for device registers;
-- the heap allocator manages normal kernel memory for `alloc` users.
+The local controller stores IRQ handler descriptors, enables timer IRQ bits for core 0, and reports
+pending local IRQs to the generic IRQ manager path.
 
-The allocator also exposes `print_usage()`, which is called from `kernel_main()` so boot logs show
-used and free heap space.
+### Timeout Management
 
-### Using Allocation In Kernel Code
+`kernel/src/time.rs` grows a timeout manager on top of the architectural timer. It supports:
 
-The kernel binary enables `extern crate alloc`, and `linked_list_allocator` is added to the kernel
-crate dependencies.
+- one-shot callbacks;
+- periodic callbacks;
+- scheduling the next hardware timer event from the earliest due callback;
+- executing callbacks when the timer IRQ fires.
 
-The driver manager is one of the first users. Its descriptor storage changes from a fixed-size
-array to a `Vec<DeviceDriverDescriptor<_>>`. This removes the previous hardcoded driver-count limit
-and lets driver registration scale with the BSP's actual device list.
-
-IRQ handler tables in the interrupt-controller code are also prepared to use heap-backed `Vec`
-storage where appropriate.
+The kernel initializes the timer subsystem during `kernel_init()` before driver IRQ setup is
+completed. `kernel_main()` demonstrates the feature by registering two one-shot callbacks and one
+periodic callback.
 
 ## Test it
 
 `make clippy` checks the bare-metal kernel with the selected BSP and checks the native host tools for
 the build and test workflows under the host target.
 
-Build and boot the tutorial as before. In the normal boot log, the kernel now prints a `Kernel heap`
-section with current usage information before entering the echo loop.
+Boot the kernel and watch the UART log. After the usual startup diagnostics, the kernel schedules
+callbacks that print after roughly two seconds, five seconds, and then once per second for the
+periodic timer.
