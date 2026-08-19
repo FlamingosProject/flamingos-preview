@@ -74,5 +74,7 @@ fn panic(info: &PanicInfo) -> ! {
         info.message(),
     );
 
+    crate::backtrace::print_backtrace();
+
     panic_exit()
 }

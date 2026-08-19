@@ -116,6 +116,7 @@ compile_error!("features `chainloader` and `test_build` cannot be enabled togeth
 #[cfg(not(any(feature = "bsp_rpi3", feature = "bsp_rpi4")))]
 compile_error!("Either feature \"bsp_rpi3\" or \"bsp_rpi4\" must be enabled for this crate.",);
 
+mod backtrace;
 mod bsp;
 #[cfg(feature = "chainloader")]
 mod chainloader;
@@ -143,6 +144,8 @@ mod time;
 unsafe fn kernel_init() -> ! {
     use memory::mmu::interface::MMU;
 
+    exception::handling_init();
+
     if let Err(string) = memory::mmu::mmu().enable_mmu_and_caching() {
         panic!("MMU: {}", string);
     }
@@ -164,7 +167,6 @@ unsafe fn kernel_init() -> ! {
 #[cfg(not(feature = "chainloader"))]
 fn kernel_main() -> ! {
     use console::{console, set_input_policy, EchoPolicy, InputPolicy};
-    use core::fmt::Write;
     use core::time::Duration;
 
     info!(
@@ -194,13 +196,32 @@ fn kernel_main() -> ! {
     info!("Timer test, spinning for 1 second");
     time::time_manager().spin_for(Duration::from_secs(1));
 
-    let mut remapped_uart = unsafe { bsp::device_driver::PL011Uart::new(0x1FFF_1000) };
-    writeln!(
-        remapped_uart,
-        "[     !!!    ] Writing through the remapped UART at 0x1FFF_1000"
-    )
-    .unwrap();
+    // Cause an exception by accessing a virtual address for which no translation was set up. This
+    // code accesses the address 8 GiB, which is outside the mapped address space.
+    //
+    // For demo purposes, the exception handler will catch the faulting 8 GiB address and allow
+    // execution to continue.
+    info!("");
+    info!("Trying to read from address 8 GiB...");
+    let mut big_addr: u64 = 8 * 1024 * 1024 * 1024;
+    unsafe { core::ptr::read_volatile(big_addr as *mut u64) };
 
+    info!("************************************************");
+    info!("Whoa! We recovered from a synchronous exception!");
+    info!("************************************************");
+    info!("");
+
+    #[cfg(feature = "test_build")]
+    cpu::qemu_exit_success();
+
+    info!("Let's try again");
+
+    // Now use address 9 GiB. The exception handler won't forgive us this time.
+    info!("Trying to read from address 9 GiB...");
+    big_addr = 9 * 1024 * 1024 * 1024;
+    unsafe { core::ptr::read_volatile(big_addr as *mut u64) };
+
+    // Will never reach here in this tutorial.
     info!("Echoing input now");
 
     set_input_policy(InputPolicy {
@@ -210,9 +231,6 @@ fn kernel_main() -> ! {
 
     // Discard any spurious received characters before enabling terminal echo.
     console().clear_rx();
-
-    #[cfg(feature = "test_build")]
-    cpu::qemu_exit_success();
 
     loop {
         let _ = console().read_byte();
