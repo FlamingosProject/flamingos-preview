@@ -13,4 +13,8 @@ mod boot;
 //--------------------------------------------------------------------------------------------------
 // Architectural Public Reexports
 //--------------------------------------------------------------------------------------------------
+#[cfg_attr(feature = "test_build", allow(unused_imports))]
 pub use arch_cpu::wait_forever;
+
+#[cfg(feature = "test_build")]
+pub use arch_cpu::{qemu_exit_failure, qemu_exit_success};

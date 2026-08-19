@@ -1,0 +1,32 @@
+name: Boot Test
+
+on:
+    push:
+        paths-ignore:
+            - "utils/**"
+            - "doc/**"
+            - "docker/**"
+    pull_request:
+        paths-ignore:
+            - "utils/**"
+            - "doc/**"
+            - "docker/**"
+    schedule:
+        - cron: "0 5 * * *"
+
+jobs:
+    build:
+        name: Run boot test
+        runs-on: ubuntu-22.04
+
+        steps:
+            - uses: actions/checkout@v4
+            - name: Install QEMU
+              run: sudo apt-get update && sudo apt-get install --yes qemu-system-arm
+            - name: Set up Rust tools
+              run: |
+                  rustup target add aarch64-unknown-none-softfloat
+                  rustup component add llvm-tools
+                  cargo install cargo-binutils
+            - name: Run stable boot test
+              run: BSP=rpi3 make test_boot

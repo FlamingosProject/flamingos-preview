@@ -1,35 +1,37 @@
-# Tutorial 02 - Runtime Init
+# Tutorial 03 - Hacky Hello World
 
 ## tl;dr
 
-- We extend `boot.s` to call into Rust code for the first time. Before the jump
-  to Rust happens, a bit of runtime init work is done.
-- The firmware-provided device tree pointer is preserved across runtime setup and handed to Rust for
-  later chapters to consume.
-- An optional raw-GPIO LED trace can report boot stages and panic codes before a console exists.
-- The Rust code being called just halts execution with a call to `panic!()`.
-- Check out `make qemu` again to see the additional code run.
+- Introducing global `println!()` macros to enable "printf debugging" at the earliest.
+- Introducing an untimestamped `warn!()` severity alongside the basic print macros.
+- To keep tutorial length reasonable, printing functions for now "abuse" a QEMU property that lets
+  us use the Raspberry's `UART` without setting it up properly.
+- Using the real hardware `UART` is enabled step-by-step in following tutorials.
 
 ## Notable additions
 
-- More additions to the linker script:
-     - New sections: `.rodata`, `.got`, `.data`, `.bss`.
-     - A dedicated place for linking boot-time arguments that need to be read by `_start()`.
-- `_start()` in `_arch/__arch_name__/cpu/boot.s`:
-     1. Halts core if core != core0.
-     1. Saves the device tree pointer supplied by firmware in `x0`.
-     1. Initializes the `DRAM` by zeroing the [bss] section.
-     1. Sets up the `stack pointer`.
-     1. Jumps to the `_start_rust()` function, defined in `arch/__arch_name__/cpu/boot.rs`.
-- `_start_rust()`:
-     - Receives the preserved firmware pointer and passes it to `kernel_init()`. Parsing the device
-       tree is deliberately deferred until Chapter 20.
-     - Calls `kernel_init()`, which calls `panic!()`, which eventually halts core0 as well.
-- The `boot_trace` feature adds a minimal LED diagnostic path that does not depend on the later GPIO
-  driver. It can mark early assembly/Rust stages and blink a numeric code on panic.
-- The library now uses the [aarch64-cpu] crate, which provides zero-overhead abstractions and wraps
-  `unsafe` parts when dealing with the CPU's resources.
-    - See it in action in `_arch/__arch_name__/cpu.rs`.
+- `src/console.rs` introduces interface `Traits` for console commands and global access to the
+  kernel's console through `console::console()`.
+- `src/bsp/raspberrypi/console.rs` implements the interface for QEMU's emulated UART.
+- The panic handler makes use of the new `println!()` to display user error messages.
+- `make test_boot` builds a separate `test_build` kernel and boots it with QEMU semihosting enabled.
+  Reaching the boot checkpoint explicitly exits QEMU successfully, while a panic exits with failure.
+  This makes the boot smoke test deterministic without matching normal console output.
 
-[bss]: https://en.wikipedia.org/wiki/.bss
-[aarch64-cpu]: https://github.com/rust-embedded/aarch64-cpu
+## Test it
+
+QEMU is no longer running in assembly mode. A normal `make qemu` run will from now on show the output
+of the `console` and end at the tutorial's deliberate panic:
+
+```console
+$ make qemu
+[...]
+
+Hello from Rust!
+Kernel panic!
+
+Panic location:
+      File 'src/main.rs', line 126, column 5
+
+Stopping here.
+```
