@@ -1,8 +1,8 @@
 [package]
 name = "mingo"
 version = "1.0.0"
-description = "Hardware Debugging with JTAG — Chapter 08"
-keywords = ["hw-debug-jtag"]
+description = "Privilege Levels — Chapter 09"
+keywords = ["privilege-level"]
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
 edition = "2024"
 
