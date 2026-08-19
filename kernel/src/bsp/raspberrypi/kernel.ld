@@ -8,8 +8,12 @@
 PAGE_SIZE = 64K;
 PAGE_MASK = PAGE_SIZE - 1;
 
-/* This chapter keeps the kernel identity-mapped; Chapter 16 moves it high. */
-__kernel_virt_start_addr = 0x80000;
+/* The kernel's virtual address range will be:
+ *
+ * [END_ADDRESS_INCLUSIVE, START_ADDRESS]
+ * [u64::MAX             , (u64::MAX - __kernel_virt_addr_space_size) + 1]
+ */
+__kernel_virt_start_addr = ((0xffffffffffffffff - __kernel_virt_addr_space_size) + 1);
 
 /* Preserve low memory used by firmware to park secondary cores. */
 __rpi_phys_boot_stack_start = 64K;
@@ -19,7 +23,7 @@ __rpi_phys_binary_load_addr = 0x80000;
 
 /* The stage-1 loader reserves the source ELF for the life of the kernel. */
 __boot_elf_phys_start = 0x04000000;
-__boot_elf_virt_start = __boot_elf_phys_start;
+__boot_elf_virt_start = __kernel_virt_start_addr + 0x02000000;
 __boot_elf_virt_end_exclusive = __boot_elf_virt_start + 0x02000000;
 
 /* Symbols expected by the unwinding crate's fde-static finder. */
@@ -45,15 +49,6 @@ PHDRS
 
 SECTIONS
 {
-    /* Preserve firmware memory; this chapter still uses identity mappings. */
-    . = __rpi_phys_boot_stack_start;
-    .boot_core_stack (NOLOAD) : AT(__rpi_phys_boot_stack_start)
-    {
-        __boot_core_stack_start = .;
-        . += __rpi_phys_binary_load_addr - __rpi_phys_boot_stack_start;
-        __boot_core_stack_end_exclusive = .;
-    } :segment_boot_core_stack
-
     . =  __kernel_virt_start_addr;
 
     ASSERT((. & PAGE_MASK) == 0, "Start of address space is not page aligned")
@@ -144,6 +139,13 @@ SECTIONS
     /***********************************************************************************************
     * Boot Core Stack
     ***********************************************************************************************/
+    .boot_core_stack (NOLOAD) : AT(__rpi_phys_boot_stack_start)
+    {
+        __boot_core_stack_start = .;
+        . += __rpi_phys_binary_load_addr - __rpi_phys_boot_stack_start;
+        __boot_core_stack_end_exclusive = .;
+    } :segment_boot_core_stack
+
     __phys_boot_core_stack_end_exclusive = LOADADDR(.boot_core_stack) + SIZEOF(.boot_core_stack);
 
     ASSERT((. & PAGE_MASK) == 0, "End of boot core stack is not page aligned")

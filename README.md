@@ -1,79 +1,110 @@
-# Tutorial 15 - Virtual Memory Part 3: Kernel ELF Boot
+# Tutorial 16 - Virtual Memory Part 4: Higher-Half Kernel
+
+## tl;dr
+
+- The time has come: We map and run the kernel from the top of the 64 bit virtual address space! 🥳
+
+## Table of Contents
+
+- [Introduction](#introduction)
+- [Implementation](#implementation)
+  - [Linking Changes](#linking-changes)
+  - [Booting into the higher half](#booting-into-the-higher-half)
+- [Build and boot](#build-and-boot)
+- [Test it](#test-it)
 
 ## Introduction
 
-The Raspberry Pi firmware starts the bootstrap at physical
-address `0x80000` (512 KiB), with address translation disabled.
-Moving the kernel into the upper virtual address range will
-require a different link address. This chapter separates the
-code that runs at the physical entry from the kernel that will
-run at its linked addresses. It keeps the stage-2 kernel
-identity-mapped with `TTBR0_EL1`. Chapter 16 moves it to
-`TTBR1_EL1`.
+A long time in the making, in this tutorial we finally map the kernel to the most significant area
+(alternatively: higher-half) of the 64 bit virtual address space. This makes room for future
+applications to use the whole of the least significant area of the virtual memory space.
 
-## Load addresses, link addresses, and PIC
+As has been teased since `tutorial 14`, we will make use of the `AArch64`'s `TTBR1`. Since the
+kernel's virtual address space size currently is `1 GiB` (defined in
+`bsp/__board_name__/memory/mmu.rs`), `TTBR1` will cover the range from `0xffff_ffff_ffff_ffff` down
+to `0xffff_ffff_c000_0000` (both inclusive).
 
-The link address tells the kernel where its code and data will
-appear once translation is active. The physical load address
-tells the bootstrap where those bytes belong in RAM.
+## Implementation
 
-On AArch64, an `ADRP` and `ADD` pair can form the address of a
-nearby object relative to the current instruction's page. For
-a page-aligned move, the pair moves that address by the same
-offset as the code. An absolute address encoded in instructions
-or stored in a global offset table keeps its linked value.
-Source-level address expressions can result in either form.
+In `src/memory/mmu.rs`, we extend the `AssociatedTranslationTable` trait with a `TableStartFromTop`
+associated type:
 
-Position-independent code (PIC) can run after a move when its
-references still resolve. A compiler's PIC mode can also
-introduce global offset table (GOT) references that a dynamic
-loader would normally resolve. Early boot runs without that
-runtime. The stage-1 assembly controls its address calculations
-and moves the loader to its linked physical location before
-calling Rust. The stage-2 assembly also distinguishes physical
-addresses used before translation from linked addresses used
-upon entering EL1.
+```rust
+/// Intended to be implemented for [`AddressSpace`].
+pub trait AssociatedTranslationTable {
+    /// A translation table whose address range is:
+    ///
+    /// [u64::MAX, (u64::MAX - AS_SIZE) + 1]
+    type TableStartFromTop;
 
-## Stage 1 loads the ELF
+    /// A translation table whose address range is:
+    ///
+    /// [AS_SIZE - 1, 0]
+    type TableStartFromBottom;
+}
+```
 
-The bootstrap receives an ELF over UART or finds one embedded
-in the firmware image. The serial transfer still uses the
-existing size-prefixed protocol. The ELF program headers give
-stage 1 the file extent, physical destination, and memory
-extent of each loadable segment. The `kernel-image` library
-validates the static, little-endian AArch64 ELF before any
-segment writes. Stage 1 copies the file-backed bytes and
-zero-fills the remaining memory in each segment.
+Architecture specific code in `_arch/aarch64/memory/mmu/translation_table.rs` populates both types
+now by making use of a new generic that is added to `FixedSizeTranslationTable`, which defines
+whether the covered address space starts from the top or the bottom:
 
-| Physical range | Use |
-| --- | --- |
-| 0–64 KiB | Preserved firmware parking code and release slots |
-| 64–512 KiB | Stage-2 boot stack |
-| 512 KiB–32 MiB | Stage-2 code and data load area |
-| 32–64 MiB | Relocated stage 1, stack, and copied device tree |
-| 64–96 MiB | Retained source ELF, up to 32 MiB |
+```rust
+pub struct FixedSizeTranslationTable<const NUM_TABLES: usize, const START_FROM_TOP: bool> {
+    ...
+```
 
-Stage 1 checks segment bounds, overlap and the executable
-entry before handing off to the physical entry at `0x80000`
-with the MMU off. The handoff passes the device tree pointer
-in `x0`, the retained ELF base in `x1`, and the ELF byte count
-in `x2`.
+```rust
+impl<const AS_SIZE: usize> memory::mmu::AssociatedTranslationTable
+    for memory::mmu::AddressSpace<AS_SIZE>
+where
+    [u8; Self::SIZE >> Granule512MiB::SHIFT]: Sized,
+{
+    type TableStartFromTop =
+        FixedSizeTranslationTable<{ Self::SIZE >> Granule512MiB::SHIFT }, true>;
 
-## Stage 2 builds the translation tables
+    type TableStartFromBottom =
+        FixedSizeTranslationTable<{ Self::SIZE >> Granule512MiB::SHIFT }, false>;
+}
+```
 
-The kernel linker script describes the physical locations and
-virtual bounds of the code, data, and boot stack. Stage 2 reads
-those bounds from its physical bootstrap and fills the kernel
-page tables while the MMU is off. It maps code and read-only
-data as executable, data and the stack as writable and
-execute-never, and the retained ELF read-only and execute-never.
-The build produces the linked ELF and packages it as needed.
-Translation tables are constructed during boot.
+Thanks to this infrastructure, `BSP` Rust code in `bsp/__board_name__/memory/mmu.rs` only needs to
+change to this newly introduced type in order to switch from lower half to higher half translation
+tables for the kernel:
 
-The handoff to EL1 uses the linked addresses for the kernel
-entry and its stack. Keeping the physical and virtual bounds
-explicit here makes the higher-half transition in the next
-chapter possible.
+```rust
+type KernelTranslationTable =
+    <KernelVirtAddrSpace as AssociatedTranslationTable>::TableStartFromTop;
+```
+
+### Linking Changes
+
+`kernel/src/bsp/raspberrypi/kernel.ld` sets the location counter
+to the start of the higher-half kernel address space. The
+`AT(...)` expressions set the physical load addresses. For
+example, `.text` starts at virtual `0xffff_ffff_c000_0000` and
+loads at physical `0x80000`. Run `make readelf` to compare
+`VirtAddr` and `PhysAddr` for the ELF loadable segments.
+
+The ELF loader copies each segment to its physical address.
+The bootstrap stack still occupies physical addresses from
+64 KiB to 512 KiB. Its virtual mapping moves above the MMIO
+reservation, with a guard page between them. This lets a stack
+overflow fault before reaching the MMIO range.
+
+### Booting into the higher half
+
+Stage 1 loads the ELF and transfers control to stage 2 at the
+physical bootstrap address with the MMU off. Stage 2 uses a
+physical stack and reads the linker-provided virtual bounds and
+physical bases to populate the tables. The architecture code
+configures `TCR_EL1` for the top-of-address-space mapping and
+installs the table base in `TTBR1_EL1`.
+
+The assembly loads absolute linked addresses for the EL1
+entry and stack. Once translation is enabled, `eret` takes
+execution to the high virtual entry and the kernel uses its
+high virtual stack. The low virtual range is available for a
+future application address space.
 
 ## Build and boot
 
@@ -112,9 +143,10 @@ make test BSP=rpi3
 make readelf BSP=rpi3
 ```
 
-The ELF shows equal virtual and physical addresses for its
-loadable segments. The boot log reports identity mappings
-once the kernel enables the MMU.
+Check that the first executable loadable segment reports the
+linked higher-half address and the physical load address
+`0x80000`. When the kernel boots, the `MMU online` report lists
+its high virtual mappings alongside the low physical ranges.
 
 ## Kernel documentation
 

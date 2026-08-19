@@ -155,3 +155,7 @@ pub fn version() -> &'static str {
         env!("FLAMINGOS_REVISION")
     )
 }
+
+// Normal kernels and kernel tests provide a globally visible, unmangled `kernel_init` symbol. The
+// early boot assembly references it directly, and the linker verifies that each executable defines
+// it.

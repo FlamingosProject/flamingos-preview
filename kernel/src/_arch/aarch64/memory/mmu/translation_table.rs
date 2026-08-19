@@ -136,7 +136,7 @@ trait StartAddr {
 /// aligned, so the lvl3 is put first.
 #[repr(C)]
 #[repr(align(65536))]
-pub struct FixedSizeTranslationTable<const NUM_TABLES: usize> {
+pub struct FixedSizeTranslationTable<const NUM_TABLES: usize, const START_FROM_TOP: bool> {
     /// Page descriptors, covering 64 KiB windows per entry.
     lvl3: [[PageDescriptor; 8192]; NUM_TABLES],
 
@@ -308,10 +308,18 @@ impl PageDescriptor {
 // }
 
 impl memory::mmu::AssociatedTranslationTable for KernelVirtAddrSpace {
-    type TableStartFromBottom = FixedSizeTranslationTable<{ Self::SIZE >> Granule512MiB::SHIFT }>;
+    type TableStartFromTop =
+        FixedSizeTranslationTable<{ Self::SIZE >> Granule512MiB::SHIFT }, true>;
+    type TableStartFromBottom =
+        FixedSizeTranslationTable<{ Self::SIZE >> Granule512MiB::SHIFT }, false>;
 }
 
-impl<const NUM_TABLES: usize> FixedSizeTranslationTable<NUM_TABLES> {
+impl<const NUM_TABLES: usize, const START_FROM_TOP: bool>
+    FixedSizeTranslationTable<NUM_TABLES, START_FROM_TOP>
+{
+    const START_FROM_TOP_OFFSET: Address<Virtual> =
+        Address::new((usize::MAX - (Granule512MiB::SIZE * NUM_TABLES)) + 1);
+
     /// Create zeroed tables whose level-2 descriptors still need initialization.
     #[allow(clippy::assertions_on_constants)]
     pub(crate) const fn new_uninitialized() -> Self {
@@ -355,9 +363,14 @@ impl<const NUM_TABLES: usize> FixedSizeTranslationTable<NUM_TABLES> {
         &self,
         virt_page_addr: PageAddress<Virtual>,
     ) -> Result<(usize, usize), &'static str> {
-        let addr = virt_page_addr.into_inner().as_usize();
-        let lvl2_index = addr >> Granule512MiB::SHIFT;
-        let lvl3_index = (addr & Granule512MiB::MASK) >> Granule64KiB::SHIFT;
+        let mut addr = virt_page_addr.into_inner();
+
+        if START_FROM_TOP {
+            addr = addr - Self::START_FROM_TOP_OFFSET;
+        }
+
+        let lvl2_index = addr.as_usize() >> Granule512MiB::SHIFT;
+        let lvl3_index = (addr.as_usize() & Granule512MiB::MASK) >> Granule64KiB::SHIFT;
 
         if lvl2_index > (NUM_TABLES - 1) {
             return Err("Virtual page is out of bounds of translation table");
@@ -403,8 +416,9 @@ impl<const NUM_TABLES: usize> FixedSizeTranslationTable<NUM_TABLES> {
 // OS Interface Code
 //------------------------------------------------------------------------------
 
-impl<const NUM_TABLES: usize> memory::mmu::translation_table::interface::TranslationTable
-    for FixedSizeTranslationTable<NUM_TABLES>
+impl<const NUM_TABLES: usize, const START_FROM_TOP: bool>
+    memory::mmu::translation_table::interface::TranslationTable
+    for FixedSizeTranslationTable<NUM_TABLES, START_FROM_TOP>
 {
     fn init(&mut self) -> Result<(), &'static str> {
         self.init_level_two(|address| {

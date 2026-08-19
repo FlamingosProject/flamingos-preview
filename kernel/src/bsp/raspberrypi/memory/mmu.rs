@@ -25,7 +25,7 @@ use crate::{
 //--------------------------------------------------------------------------------------------------
 
 type KernelTranslationTable =
-    <KernelVirtAddrSpace as AssociatedTranslationTable>::TableStartFromBottom;
+    <KernelVirtAddrSpace as AssociatedTranslationTable>::TableStartFromTop;
 
 /// A mapping according to the kernel's linker script.
 #[cfg(not(feature = "chainloader"))]
