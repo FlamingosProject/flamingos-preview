@@ -62,3 +62,7 @@
 	path = 16-virtual-mem-part4
 	url = https://github.com/FlamingosProject/flamingos-preview.git
 	branch = 16-virtual-mem-part4
+[submodule "17-kernel-symbols"]
+	path = 17-kernel-symbols
+	url = https://github.com/FlamingosProject/flamingos-preview.git
+	branch = 17-kernel-symbols
