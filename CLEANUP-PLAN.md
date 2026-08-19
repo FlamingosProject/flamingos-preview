@@ -202,7 +202,7 @@ For the complete chapter chain:
 - all numbered branches must lie on one linear history;
 - persistent features must remain present from their chapter of introduction onward;
 - submodule URLs and branch metadata must be consistent; and
-- no Ruby, obsolete test infrastructure, or other intentionally removed material may reappear.
+- no obsolete scripting, test infrastructure, or other intentionally removed material may reappear.
 
 For the display tree:
 
