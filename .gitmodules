@@ -38,3 +38,7 @@
 	path = 10-virtual-mem-part1
 	url = https://github.com/FlamingosProject/flamingos-preview.git
 	branch = 10-virtual-mem-part1
+[submodule "11-exceptions-part1"]
+	path = 11-exceptions-part1
+	url = https://github.com/FlamingosProject/flamingos-preview.git
+	branch = 11-exceptions-part1
