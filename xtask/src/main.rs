@@ -79,7 +79,9 @@ fn build(args: Vec<String>) {
         .split(',')
         .any(|feature| feature == "chainloader");
     let pid = process::id();
-    let copy_path = format!("/tmp/flamingo-kernel.{pid}");
+    let copy_path = format!("target/xtask-kernel.{pid}");
+    let symbols_path = format!("{copy_path}.symbols");
+    let generated_symbols_path = format!("{copy_path}_symbols.rs");
 
     println!("--- build target");
     run(
@@ -108,7 +110,18 @@ fn build(args: Vec<String>) {
                 "--",
                 "tools/bin/translation_table_tool",
             ]),
-            "ERROR: Failed to build tools ('tools/*' crates)",
+            "ERROR: Failed to build translation_table_tool",
+        );
+        run(
+            Command::new("cargo").args([
+                "build",
+                "-p",
+                "kernel_symbols_tool",
+                "--release",
+                "--bin",
+                "kernel-elf-symbol",
+            ]),
+            "ERROR: Failed to build kernel_symbols_tool",
         );
     }
 
@@ -135,6 +148,15 @@ fn build(args: Vec<String>) {
             Command::new("tools/bin/translation_table_tool").args([cpu, &copy_path]),
             "ERROR: Failed to fix up kernel",
         );
+        run(
+            Command::new("make")
+                .args(["--no-print-directory", "-f", "kernel_symbols.mk"])
+                .env("KERNEL_SYMBOLS_TOOL_PATH", "tools/kernel_symbols_tool")
+                .env("TARGET", "aarch64-unknown-none-softfloat")
+                .env("KERNEL_SYMBOLS_INPUT_ELF", &copy_path)
+                .env("KERNEL_SYMBOLS_OUTPUT_ELF", &symbols_path),
+            "ERROR: Failed to add kernel symbols",
+        );
     }
 
     println!("--- acquire fixed-up kernel");
@@ -143,11 +165,21 @@ fn build(args: Vec<String>) {
     } else {
         "kernel8.img"
     };
+    let final_elf = if chainloader {
+        &copy_path
+    } else {
+        &symbols_path
+    };
     run(
-        Command::new("rust-objcopy").args(["--strip-all", "-O", "binary", &copy_path, output]),
+        Command::new("rust-objcopy").args(["--strip-all", "-O", "binary", final_elf, output]),
         "ERROR: Failed to acquire fixed-up kernel",
     );
     fs::remove_file(&copy_path).expect("could not remove kernel copy");
+    if !chainloader {
+        fs::remove_file(&symbols_path).expect("could not remove kernel symbol copy");
+        fs::remove_file(&generated_symbols_path)
+            .expect("could not remove generated kernel symbols");
+    }
 
     println!("--- build complete, kernel in {output}");
 }

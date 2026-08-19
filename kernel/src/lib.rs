@@ -136,6 +136,7 @@ pub mod exception;
 pub mod memory;
 pub mod print;
 pub mod state;
+pub mod symbols;
 #[cfg(feature = "test_build")]
 pub mod test;
 pub mod time;

@@ -133,6 +133,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "debug-symbol-types"
+version = "0.1.0"
+
+[[package]]
 name = "gimli"
 version = "0.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -162,6 +166,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
+name = "kernel_symbols"
+version = "0.1.0"
+dependencies = [
+ "debug-symbol-types",
+]
+
+[[package]]
+name = "kernel_symbols_tool"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "goblin",
+ "rustc-demangle",
+]
+
+[[package]]
 name = "kernel_test_runner"
 version = "0.1.0"
 
@@ -185,9 +205,10 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "mingo"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "aarch64-cpu",
+ "debug-symbol-types",
  "qemu-exit",
  "tock-registers",
  "unwinding",
@@ -257,6 +278,12 @@ name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+
+[[package]]
+name = "rustc-demangle"
+version = "0.1.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b74b56ffa8bb2830709a538c2cbcae9aa062db0d2a42563bfb09bdaae44020eb"
 
 [[package]]
 name = "scroll"
