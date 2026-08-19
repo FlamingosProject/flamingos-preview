@@ -1,12 +1,14 @@
-use std::{env, fs, process};
+use std::{env, fs, path::PathBuf};
 
 fn main() {
-    let ld_script_path = match env::var("LD_SCRIPT_PATH") {
-        Ok(var) => var,
-        _ => process::exit(0),
+    let ld_script_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/bsp/raspberrypi");
+    let linker_script = if env::var_os("CARGO_FEATURE_CHAINLOADER").is_some() {
+        "chainloader.ld"
+    } else {
+        "kernel.ld"
     };
 
-    let files = fs::read_dir(ld_script_path).unwrap();
+    let files = fs::read_dir(&ld_script_path).unwrap();
     files
         .filter_map(Result::ok)
         .filter(|d| {
@@ -17,4 +19,7 @@ fn main() {
             }
         })
         .for_each(|f| println!("cargo:rerun-if-changed={}", f.path().display()));
+
+    println!("cargo:rustc-link-search={}", ld_script_path.display());
+    println!("cargo:rustc-link-arg=--script={linker_script}");
 }

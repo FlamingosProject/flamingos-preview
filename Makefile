@@ -13,7 +13,7 @@ include common/operating_system.mk
 BSP ?= rpi3
 DEV_SERIAL ?= /dev/ttyUSB0
 SCIP ?= scip
-CHAINBOOT_PAYLOAD ?= ../05-drivers-gpio-uart/kernel8.img
+CHAINBOOT_PAYLOAD ?= kernel8.img
 
 
 
@@ -24,7 +24,7 @@ QEMU_MISSING_STRING = "This board is not yet supported for QEMU."
 
 ifeq ($(BSP),rpi3)
     TARGET            = aarch64-unknown-none-softfloat
-    KERNEL_BIN        = kernel8.img
+    NORMAL_KERNEL_BIN = kernel8.img
     QEMU_BINARY       = qemu-system-aarch64
     QEMU_MACHINE_TYPE = raspi3b
     QEMU_RELEASE_ARGS = -serial stdio -display none
@@ -36,7 +36,7 @@ ifeq ($(BSP),rpi3)
     RUSTC_MISC_ARGS   = -C target-cpu=cortex-a53
 else ifeq ($(BSP),rpi4)
     TARGET            = aarch64-unknown-none-softfloat
-    KERNEL_BIN        = kernel8.img
+    NORMAL_KERNEL_BIN = kernel8.img
     QEMU_BINARY       = qemu-system-aarch64
     QEMU_MACHINE_TYPE =
     QEMU_RELEASE_ARGS = -serial stdio -display none
@@ -47,17 +47,14 @@ else ifeq ($(BSP),rpi4)
     RUSTC_MISC_ARGS   = -C target-cpu=cortex-a72
 endif
 
-# Export for build.rs.
-export LD_SCRIPT_PATH
-
-
-
 ##--------------------------------------------------------------------------------------------------
 ## Targets and Prerequisites
 ##--------------------------------------------------------------------------------------------------
 KERNEL_MANIFEST      = Cargo.toml
-KERNEL_LINKER_SCRIPT = kernel.ld
-LAST_BUILD_CONFIG    = target/$(BSP).build_config
+CHAINLOADER_BIN      = chainloader8.img
+KERNEL_BIN           = $(if $(CHAINLOADER),$(CHAINLOADER_BIN),$(NORMAL_KERNEL_BIN))
+BUILD_MODE           = $(if $(CHAINLOADER),chainloader,kernel)
+LAST_BUILD_CONFIG    = target/$(BSP).$(BUILD_MODE).build_config
 
 KERNEL_ELF      = target/$(TARGET)/release/kernel
 TEST_BUILD_DIR  = target/test_build/$(BSP)
@@ -72,9 +69,7 @@ KERNEL_ELF_DEPS = $(filter-out %: ,$(file < $(KERNEL_ELF).d)) $(KERNEL_MANIFEST)
 ##--------------------------------------------------------------------------------------------------
 ## Command building blocks
 ##--------------------------------------------------------------------------------------------------
-RUSTFLAGS = $(RUSTC_MISC_ARGS)                   \
-    -C link-arg=--library-path=$(LD_SCRIPT_PATH) \
-    -C link-arg=--script=$(KERNEL_LINKER_SCRIPT)
+RUSTFLAGS = $(RUSTC_MISC_ARGS)
 
 RUSTFLAGS_PEDANTIC = $(RUSTFLAGS) \
     -D missing_docs
@@ -116,7 +111,7 @@ all: $(KERNEL_BIN)
 ##------------------------------------------------------------------------------
 ## Send a payload to a chainloader already running on the target
 ##------------------------------------------------------------------------------
-chainboot:
+chainboot: $(NORMAL_KERNEL_BIN)
 	@test -f "$(CHAINBOOT_PAYLOAD)" || { \
 		echo "Missing payload: $(CHAINBOOT_PAYLOAD)"; \
 		exit 1; \
@@ -199,7 +194,7 @@ clippy:
 ## Clean
 ##------------------------------------------------------------------------------
 clean:
-	rm -rf target $(KERNEL_BIN)
+	rm -rf target $(NORMAL_KERNEL_BIN) $(CHAINLOADER_BIN)
 
 ##------------------------------------------------------------------------------
 ## Run readelf
