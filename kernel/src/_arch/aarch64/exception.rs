@@ -11,6 +11,7 @@
 //!
 //! crate::exception::arch_exception
 
+use crate::exception;
 use aarch64_cpu::{asm::barrier, registers::*};
 use core::{arch::global_asm, cell::UnsafeCell, fmt};
 use tock_registers::{
@@ -91,10 +92,10 @@ extern "C" fn current_elx_synchronous(e: &mut ExceptionContext) {
     {
         const TEST_SVC_ID: u64 = 0x1337;
 
-        if let Some(ESR_EL1::EC::Value::SVC64) = e.esr_el1.exception_class()
-            && e.esr_el1.iss() == TEST_SVC_ID
-        {
-            return;
+        if let Some(ESR_EL1::EC::Value::SVC64) = e.esr_el1.exception_class() {
+            if e.esr_el1.iss() == TEST_SVC_ID {
+                return;
+            }
         }
     }
 
@@ -102,8 +103,9 @@ extern "C" fn current_elx_synchronous(e: &mut ExceptionContext) {
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn current_elx_irq(e: &mut ExceptionContext) {
-    default_exception_handler(e);
+extern "C" fn current_elx_irq(_e: &mut ExceptionContext) {
+    let token = unsafe { &exception::asynchronous::IRQContext::new() };
+    exception::asynchronous::irq_manager().handle_pending_irqs(token);
 }
 
 #[unsafe(no_mangle)]

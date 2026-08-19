@@ -6,7 +6,7 @@
 
 mod buffer_console;
 
-use crate::synchronization::{self, NullLock};
+use crate::synchronization::{self, IRQSafeNullLock, InitStateLock};
 
 //--------------------------------------------------------------------------------------------------
 // Public Definitions
@@ -137,12 +137,12 @@ pub struct Terminal;
 // Global instances
 //--------------------------------------------------------------------------------------------------
 
-static CUR_RAW_CONSOLE: NullLock<&'static (dyn interface::RawConsole + Sync)> =
-    NullLock::new(&buffer_console::BUFFER_CONSOLE);
-static OUTPUT_POLICY: NullLock<OutputPolicy> = NullLock::new(OutputPolicy {
+static CUR_RAW_CONSOLE: InitStateLock<&'static (dyn interface::RawConsole + Sync)> =
+    InitStateLock::new(&buffer_console::BUFFER_CONSOLE);
+static OUTPUT_POLICY: IRQSafeNullLock<OutputPolicy> = IRQSafeNullLock::new(OutputPolicy {
     map_lf_to_crlf: true,
 });
-static INPUT_POLICY: NullLock<InputPolicy> = NullLock::new(InputPolicy {
+static INPUT_POLICY: IRQSafeNullLock<InputPolicy> = IRQSafeNullLock::new(InputPolicy {
     map_cr_to_lf: false,
     echo: EchoPolicy::Off,
 });
@@ -152,7 +152,7 @@ static TERMINAL: Terminal = Terminal;
 // Private Code
 //--------------------------------------------------------------------------------------------------
 
-use synchronization::interface::Mutex;
+use synchronization::interface::{Mutex, ReadWriteEx};
 
 impl Terminal {
     fn write_text_byte(&self, c: u8, prev_was_cr: &mut bool) {
@@ -188,13 +188,13 @@ impl core::fmt::Write for TerminalWriter<'_> {
 
 /// Register a new raw console.
 pub fn register_console(new_console: &'static (dyn interface::RawConsole + Sync)) {
-    CUR_RAW_CONSOLE.lock(|con| *con = new_console);
+    CUR_RAW_CONSOLE.write(|con| *con = new_console);
     buffer_console::BUFFER_CONSOLE.drain_to(new_console);
 }
 
 /// Return a reference to the currently registered raw console.
 pub fn raw_console() -> &'static dyn interface::RawConsole {
-    CUR_RAW_CONSOLE.lock(|con| *con)
+    CUR_RAW_CONSOLE.read(|con| *con)
 }
 
 /// Return a reference to the terminal console used by printing macros.

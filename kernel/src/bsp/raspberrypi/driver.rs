@@ -4,8 +4,12 @@
 
 //! BSP driver support.
 
-use super::memory::map::mmio;
-use crate::{bsp::device_driver, console, driver as generic_driver};
+use super::{exception, memory::map::mmio};
+use crate::{
+    bsp::device_driver,
+    console, driver as generic_driver,
+    exception::{self as generic_exception},
+};
 use core::sync::atomic::{AtomicBool, Ordering};
 
 //--------------------------------------------------------------------------------------------------
@@ -15,6 +19,14 @@ use core::sync::atomic::{AtomicBool, Ordering};
 static PL011_UART: device_driver::PL011Uart =
     unsafe { device_driver::PL011Uart::new(mmio::PL011_UART_START) };
 static GPIO: device_driver::GPIO = unsafe { device_driver::GPIO::new(mmio::GPIO_START) };
+
+#[cfg(feature = "bsp_rpi3")]
+static INTERRUPT_CONTROLLER: device_driver::InterruptController =
+    unsafe { device_driver::InterruptController::new(mmio::PERIPHERAL_IC_START) };
+
+#[cfg(feature = "bsp_rpi4")]
+static INTERRUPT_CONTROLLER: device_driver::GICv2 =
+    unsafe { device_driver::GICv2::new(mmio::GICD_START, mmio::GICC_START) };
 
 //--------------------------------------------------------------------------------------------------
 // Private Code
@@ -33,17 +45,39 @@ fn post_init_gpio() -> Result<(), &'static str> {
     Ok(())
 }
 
+/// This must be called only after successful init of the interrupt controller driver.
+fn post_init_interrupt_controller() -> Result<(), &'static str> {
+    generic_exception::asynchronous::register_irq_manager(&INTERRUPT_CONTROLLER);
+
+    Ok(())
+}
+
 fn driver_uart() -> Result<(), &'static str> {
-    let uart_descriptor =
-        generic_driver::DeviceDriverDescriptor::new(&PL011_UART, Some(post_init_uart));
+    let uart_descriptor = generic_driver::DeviceDriverDescriptor::new(
+        &PL011_UART,
+        Some(post_init_uart),
+        Some(exception::asynchronous::irq_map::PL011_UART),
+    );
     generic_driver::driver_manager().register_driver(uart_descriptor);
 
     Ok(())
 }
 
 fn driver_gpio() -> Result<(), &'static str> {
-    let gpio_descriptor = generic_driver::DeviceDriverDescriptor::new(&GPIO, Some(post_init_gpio));
+    let gpio_descriptor =
+        generic_driver::DeviceDriverDescriptor::new(&GPIO, Some(post_init_gpio), None);
     generic_driver::driver_manager().register_driver(gpio_descriptor);
+
+    Ok(())
+}
+
+fn driver_interrupt_controller() -> Result<(), &'static str> {
+    let interrupt_controller_descriptor = generic_driver::DeviceDriverDescriptor::new(
+        &INTERRUPT_CONTROLLER,
+        Some(post_init_interrupt_controller),
+        None,
+    );
+    generic_driver::driver_manager().register_driver(interrupt_controller_descriptor);
 
     Ok(())
 }
@@ -65,6 +99,7 @@ pub unsafe fn init() -> Result<(), &'static str> {
 
     driver_uart()?;
     driver_gpio()?;
+    driver_interrupt_controller()?;
 
     INIT_DONE.store(true, Ordering::Relaxed);
     Ok(())

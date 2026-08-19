@@ -11,7 +11,7 @@
 #![no_main]
 #![no_std]
 
-use libkernel::{bsp, console, driver, exception, info, memory, time};
+use libkernel::{bsp, cpu, driver, exception, info, memory, state, time};
 
 /// Early init code.
 ///
@@ -21,7 +21,7 @@ use libkernel::{bsp, console, driver, exception, info, memory, time};
 /// - The init calls in this function must appear in the correct order:
 ///     - MMU + Data caching must be activated at the earliest. Without it, any atomic operations,
 ///       e.g. the yet-to-be-introduced spinlocks in the device drivers (which currently employ
-///       NullLocks instead of spinlocks), will fail to work (properly) on the RPi SoCs.
+///       IRQSafeNullLocks instead of spinlocks), will fail to work (properly) on the RPi SoCs.
 #[unsafe(no_mangle)]
 unsafe fn kernel_init() -> ! {
     unsafe {
@@ -39,8 +39,13 @@ unsafe fn kernel_init() -> ! {
         }
 
         // Initialize all device drivers.
-        driver::driver_manager().init_drivers();
-        // The UART console is active and early buffered output has been replayed.
+        driver::driver_manager().init_drivers_and_irqs();
+
+        // Unmask interrupts on the boot CPU core.
+        exception::asynchronous::local_irq_unmask();
+
+        // Announce conclusion of the kernel_init() phase.
+        state::state_manager().transition_to_single_core_main();
 
         // Transition from unsafe to safe.
         kernel_main()
@@ -49,8 +54,6 @@ unsafe fn kernel_init() -> ! {
 
 /// The main function running after the early init.
 fn kernel_main() -> ! {
-    use console::{EchoPolicy, InputPolicy, console, set_input_policy};
-
     info!("{}", libkernel::version());
     info!("Booting on: {}", bsp::board_name());
 
@@ -71,20 +74,14 @@ fn kernel_main() -> ! {
     info!("Drivers loaded:");
     driver::driver_manager().enumerate();
 
-    info!("Echoing input now");
+    info!("Registered IRQ handlers:");
+    exception::asynchronous::irq_manager().print_handler();
 
-    set_input_policy(InputPolicy {
-        map_cr_to_lf: true,
-        echo: EchoPolicy::Cooked,
-    });
-
-    // Discard any spurious received characters before enabling terminal echo.
-    console().clear_rx();
+    info!("UART RX IRQs enabled");
 
     #[cfg(feature = "test_build")]
-    libkernel::cpu::qemu_exit_success();
+    cpu::qemu_exit_success();
 
-    loop {
-        let _ = console().read_byte();
-    }
+    #[cfg(not(feature = "test_build"))]
+    cpu::wait_forever();
 }
