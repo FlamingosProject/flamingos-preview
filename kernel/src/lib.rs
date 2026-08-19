@@ -156,7 +156,6 @@ pub fn version() -> &'static str {
     )
 }
 
-#[cfg(all(not(test), not(feature = "chainloader")))]
-unsafe extern "Rust" {
-    fn kernel_init() -> !;
-}
+// Normal kernels and kernel tests provide a globally visible, unmangled `kernel_init` symbol. The
+// early boot assembly references it directly, and the linker verifies that each executable defines
+// it.
