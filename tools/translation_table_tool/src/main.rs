@@ -43,10 +43,14 @@ fn main() -> Result<()> {
 
     // Create translation tables
     let kernel_virt_addr_space_size = bsp.kernel_virt_addr_space_size();
+    let kernel_virt_start_addr = bsp.kernel_virt_start_addr();
     let phys_addr_of_kernel_tables = bsp.phys_addr_of_kernel_tables(&kernel_elf)?;
 
-    let mut translation_tables =
-        TranslationTable::new(kernel_virt_addr_space_size, phys_addr_of_kernel_tables)?;
+    let mut translation_tables = TranslationTable::new(
+        kernel_virt_addr_space_size,
+        kernel_virt_start_addr,
+        phys_addr_of_kernel_tables,
+    )?;
 
     // Generate mapping descriptors
     let mapping_descriptors = kernel_elf.generate_mapping_descriptors()?;
