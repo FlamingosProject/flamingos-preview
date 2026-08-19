@@ -1,45 +1,32 @@
-# Tutorial 17 - Kernel Symbols
+# Tutorial 18 - Kernel Heap
+
+## tl;dr
+
+- A global kernel heap allocator is added.
+- The heap is reserved in the kernel linker script and initialized during early kernel setup.
+- Kernel code can now use selected `alloc` types, which is used immediately to simplify driver and
+  interrupt-handler bookkeeping.
+
+## Table of Contents
+
+- [Introduction](#introduction)
+- [Build and boot](#build-and-boot)
+- [Implementation](#implementation)
+  - [Heap Memory Region](#heap-memory-region)
+  - [Global Allocator](#global-allocator)
+  - [Using Allocation In Kernel Code](#using-allocation-in-kernel-code)
+- [Test it](#test-it)
 
 ## Introduction
 
-`make nm` shows addresses and symbols on the host. During an
-exception, the kernel itself sees addresses such as `ELR_EL1`,
-the exception link register. The kernel can now print the
-corresponding function names from the ELF it booted. The
-backtrace support introduced in Chapter 11 uses the same
-lookup for panic frames.
+Previous tutorials avoided dynamic allocation. That made the kernel easier to reason about while
+the boot path, MMU, exception handling, interrupts, and symbol lookup were still being built.
+However, fixed-size arrays are awkward for subsystems whose size is naturally discovered at runtime,
+such as registered drivers and IRQ handlers.
 
-## Retaining the ELF
-
-Stage 1 uses the ELF program headers to load the kernel into
-RAM. It also keeps the complete source ELF in its reserved
-physical range at 64–96 MiB. Stage 2 maps the pages containing
-the ELF read-only and execute-never at
-`0xffff_ffff_c200_0000`. That mapping keeps the metadata
-accessible once the kernel switches to higher-half addresses.
-
-The build removes debug sections from the normal boot payload
-while keeping the ordinary ELF symbol table, its associated
-string table, and unwind data. Section metadata can stay in
-the retained source ELF while the loadable segments occupy
-their linked locations. The symbol values describe those
-linked virtual addresses.
-
-## Lookup in the kernel
-
-`kernel/src/symbols.rs` asks `kernel-image` to read the
-retained ELF. The lookup scans defined function symbols with
-nonempty address ranges. An address belongs to a function
-when it is at or beyond the function's start and below the
-end. If ranges overlap, the lookup picks the closest
-containing start and then the narrowest range at that start.
-
-The symbol's name is an offset into the associated string
-table. Lookup borrows that raw name from the retained ELF.
-Exception and backtrace printing use `rustc-demangle` while
-formatting the name, without allocating heap memory. When
-metadata is absent or invalid, the diagnostic still has the
-numeric address.
+This tutorial adds a kernel heap. The heap is still deliberately small and controlled: it is carved
+out by the linker, mapped by the existing MMU setup, and initialized once during kernel startup.
+After that, the kernel can use `alloc` collections where they remove artificial fixed limits.
 
 ## Build and boot
 
@@ -71,14 +58,51 @@ and `make gdb-opt0` load a packaged bootstrap at physical
 `0x80000` and add stage-2 symbols at their linked virtual
 addresses. This workflow awaits hardware validation.
 
+## Implementation
+
+### Heap Memory Region
+
+The Raspberry Pi linker script gains a dedicated `.heap` output section after `.data`/`.bss` and
+before the virtual MMIO remap reservation. The section is `NOLOAD`, so it reserves address space
+without increasing the kernel image with zero-filled bytes. The current heap size is `16 MiB`.
+
+The BSP memory module exposes the linker-provided heap start and end symbols, and the BSP MMU code
+adds a virtual heap region that is mapped with normal cacheable memory attributes.
+
+### Global Allocator
+
+`kernel/src/memory/heap_alloc.rs` defines the kernel heap allocator. It wraps
+`linked_list_allocator::Heap` in the existing IRQ-safe lock type and installs it as the Rust global
+allocator with `#[global_allocator]`.
+
+The allocator is initialized from `memory::init()`, after the MMIO virtual-address allocator is
+prepared. This keeps all memory-subsystem initialization in one place:
+
+- the MMIO allocator manages virtual pages for device registers;
+- the heap allocator manages normal kernel memory for `alloc` users.
+
+The allocator also exposes `print_usage()`, which is called from `kernel_main()` so boot logs show
+used and free heap space.
+
+### Using Allocation In Kernel Code
+
+The kernel binary enables `extern crate alloc`, and `linked_list_allocator` is added to the kernel
+crate dependencies.
+
+The driver manager is one of the first users. Its descriptor storage changes from a fixed-size
+array to a `Vec<DeviceDriverDescriptor<_>>`. This removes the previous hardcoded driver-count limit
+and lets driver registration scale with the BSP's actual device list.
+
+IRQ handler tables in the interrupt-controller code are also prepared to use heap-backed `Vec`
+storage where appropriate.
+
 ## Test it
 
-```sh
-TEST=02_exception_sync_page_fault make test_integration BSP=rpi3
-```
+`make clippy` checks the bare-metal kernel with the selected BSP and checks the native host tools for
+the build and test workflows under the host target.
 
-The test triggers a page fault and prints the exception's
-`ELR_EL1` together with the function name `kernel_init`.
+Build and boot the tutorial as before. In the normal boot log, the kernel now prints a `Kernel heap`
+section with current usage information before entering the echo loop.
 
 ## Kernel documentation
 

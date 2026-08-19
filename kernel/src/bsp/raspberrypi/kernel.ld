@@ -44,6 +44,7 @@ PHDRS
 {
     segment_code            PT_LOAD FLAGS(5);
     segment_data            PT_LOAD FLAGS(6);
+    segment_heap            PT_LOAD FLAGS(6);
     segment_boot_core_stack PT_LOAD FLAGS(6);
 }
 
@@ -73,6 +74,9 @@ SECTIONS
         QUAD(__data_start)
         QUAD(__data_end_exclusive)
         QUAD(LOADADDR(.data))
+        QUAD(__heap_start)
+        QUAD(__heap_end_exclusive)
+        QUAD(LOADADDR(.heap))
         QUAD(__boot_core_stack_start)
         QUAD(__boot_core_stack_end_exclusive)
         QUAD(LOADADDR(.boot_core_stack))
@@ -119,7 +123,18 @@ SECTIONS
     . = ALIGN(PAGE_SIZE);
     __data_end_exclusive = .;
 
-    ASSERT(LOADADDR(.bss) + SIZEOF(.bss) <= 0x02000000,
+    /***********************************************************************************************
+    * Heap
+    ***********************************************************************************************/
+    __heap_start = .;
+    .heap (NOLOAD) : AT(__rpi_phys_binary_load_addr + (__heap_start - __code_start))
+    {
+        . += 16 * 1024 * 1024;
+    } :segment_heap
+    __heap_end_exclusive = .;
+
+    ASSERT((. & PAGE_MASK) == 0, "Heap is not page aligned")
+    ASSERT(LOADADDR(.heap) + SIZEOF(.heap) <= 0x02000000,
            "Kernel load regions overlap relocated bootstrap")
 
     /***********************************************************************************************
