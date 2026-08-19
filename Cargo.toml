@@ -3,7 +3,9 @@ resolver="2"
 
 members = [
         "kernel",
-        "tools/kernel_test_runner"
+        "tools/kernel_test_runner",
+        "tools/translation_table_tool",
+        "xtask",
 ]
 
 [profile.release]

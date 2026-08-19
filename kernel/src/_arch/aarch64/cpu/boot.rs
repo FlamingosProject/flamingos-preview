@@ -14,6 +14,8 @@
 mod led_debug;
 
 #[cfg(not(feature = "chainloader"))]
+use crate::{memory, memory::Address};
+#[cfg(not(feature = "chainloader"))]
 use aarch64_cpu::{asm, registers::*};
 use core::arch::global_asm;
 #[cfg(not(feature = "chainloader"))]
@@ -107,6 +109,7 @@ pub unsafe extern "C" fn _panic_code(code: usize) -> ! {
 #[unsafe(no_mangle)]
 #[cfg(not(feature = "chainloader"))]
 pub unsafe extern "C" fn _start_rust(
+    phys_kernel_tables_base_addr: u64,
     phys_boot_core_stack_end_exclusive_addr: u64,
     _device_tree: *const u8,
 ) -> ! {
@@ -115,6 +118,10 @@ pub unsafe extern "C" fn _start_rust(
         led_debug::_blink_code(3, true);
 
         prepare_el2_to_el1_transition(phys_boot_core_stack_end_exclusive_addr);
+
+        // Turn on the MMU for EL1.
+        let addr = Address::new(phys_kernel_tables_base_addr as usize);
+        memory::mmu::enable_mmu_and_caching(addr).unwrap();
 
         // Use `eret` to "return" to EL1. This results in execution of kernel_init() in EL1.
         asm::eret()

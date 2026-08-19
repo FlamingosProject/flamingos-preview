@@ -81,9 +81,15 @@ _start:
 .L_prepare_rust:
 	BLINK_CODE #2
 
-	// Pass the boot stack and preserved device tree pointer to Rust.
-	ADR_REL	x0, __boot_core_stack_end_exclusive
-	mov	x1, x19
+	// Load the base address of the kernel's translation tables.
+	ldr	x0, PHYS_KERNEL_TABLES_BASE_ADDR // provided by bsp/__board_name__/memory/mmu.rs
+
+	// Load the stack address as the second Rust argument.
+	ADR_REL	x1, __boot_core_stack_end_exclusive
+
+	// Pass the preserved device tree pointer as the third Rust argument.
+	mov	x2, x19
+
 	b	_start_rust
 
 	// Infinitely wait for events (aka "park the core").

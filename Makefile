@@ -70,10 +70,7 @@ KERNEL_BIN           = $(if $(CHAINLOADER),$(CHAINLOADER_BIN),$(NORMAL_KERNEL_BI
 BUILD_MODE           = $(if $(CHAINLOADER),chainloader,kernel)
 LAST_BUILD_CONFIG    = target/$(BSP).$(BUILD_MODE).build_config
 
-KERNEL_ELF      = target/$(TARGET)/release/kernel
-TEST_BUILD_DIR  = target/test_build/$(BSP)
-TEST_KERNEL_ELF = $(TEST_BUILD_DIR)/$(TARGET)/release/kernel
-TEST_KERNEL_BIN = $(TEST_BUILD_DIR)/kernel8.img
+KERNEL_ELF_RAW = target/$(TARGET)/release/kernel
 JTAG_TARGET_DIR = target/jtag/$(BSP)
 JTAG_OPT0_TARGET_DIR = target/jtag-opt0/$(BSP)
 JTAG_ELF = $(JTAG_TARGET_DIR)/$(TARGET)/release/kernel
@@ -83,7 +80,25 @@ HOST_TARGET     = $(shell rustc -vV | sed -n 's/^host: //p')
 TEST_RUNNER     = $(shell pwd)/target/$(HOST_TARGET)/release/kernel_test_runner
 # This parses cargo's dep-info file.
 # https://doc.rust-lang.org/cargo/guide/build-cache.html#dep-info-files
-KERNEL_ELF_DEPS = $(filter-out %: ,$(file < $(KERNEL_ELF).d)) $(KERNEL_MANIFEST) $(LAST_BUILD_CONFIG)
+KERNEL_ELF_RAW_DEPS = $(filter-out %: ,$(file < $(KERNEL_ELF_RAW).d)) $(KERNEL_MANIFEST) $(LAST_BUILD_CONFIG)
+
+##------------------------------------------------------------------------------
+## Translation tables
+##------------------------------------------------------------------------------
+TT_TOOL_PATH = tools/bin
+
+KERNEL_ELF_TTABLES      = target/$(TARGET)/release/kernel+ttables
+KERNEL_ELF_TTABLES_DEPS = $(KERNEL_ELF_RAW) $(EXEC_TT_TOOL)
+
+KERNEL_ELF = $(KERNEL_ELF_TTABLES)
+ifdef CHAINLOADER
+KERNEL_ELF = $(KERNEL_ELF_RAW)
+endif
+TEST_BUILD_DIR = target/test_build/$(BSP)
+TEST_KERNEL_BIN = $(TEST_BUILD_DIR)/kernel8.img
+HOST_TARGET = $(shell rustc -vV | sed -n 's/^host: //p')
+TEST_RUNNER = $(shell pwd)/target/$(HOST_TARGET)/release/kernel_test_runner
+TEST_TT_TOOL = $(shell pwd)/target/$(HOST_TARGET)/release/translation_table_tool
 
 
 
@@ -91,7 +106,6 @@ KERNEL_ELF_DEPS = $(filter-out %: ,$(file < $(KERNEL_ELF).d)) $(KERNEL_MANIFEST)
 ## Command building blocks
 ##--------------------------------------------------------------------------------------------------
 RUSTFLAGS = $(RUSTC_MISC_ARGS)
-
 RUSTFLAGS_PEDANTIC = $(RUSTFLAGS) \
     -D missing_docs
 
@@ -106,12 +120,6 @@ COMPILER_ARGS = --target=$(TARGET) \
     --release
 
 RUSTC_CMD   = cargo rustc $(COMPILER_ARGS) --manifest-path $(KERNEL_MANIFEST)
-TEST_BOOT_RUSTC_CMD = cargo rustc                \
-    --target=$(TARGET)                           \
-    $(TEST_FEATURES)                             \
-    --release                                    \
-    --target-dir=$(TEST_BUILD_DIR)               \
-    --manifest-path $(KERNEL_MANIFEST)
 TEST_SELECTION = $(if $(TEST),--test $(TEST),--tests)
 TEST_CMD = cargo test                            \
     --target=$(TARGET)                           \
@@ -120,7 +128,7 @@ TEST_CMD = cargo test                            \
     --manifest-path $(KERNEL_MANIFEST)           \
     $(TEST_SELECTION)
 DOC_CMD     = cargo doc $(COMPILER_ARGS)
-HOST_CLIPPY_PACKAGES = kernel_test_runner
+HOST_CLIPPY_PACKAGES = kernel_test_runner translation_table_tool xtask
 CLIPPY_KERNEL_CMD = cargo clippy $(COMPILER_ARGS) --manifest-path $(KERNEL_MANIFEST)
 CLIPPY_HOST_CMD = cargo clippy --release --target=$(HOST_TARGET) \
     $(addprefix --package=,$(HOST_CLIPPY_PACKAGES))
@@ -129,7 +137,7 @@ OBJCOPY_CMD = rust-objcopy \
     -O binary
 
 EXEC_QEMU = $(QEMU_BINARY) -M $(QEMU_MACHINE_TYPE)
-
+EXEC_TT_TOOL       = $(TT_TOOL_PATH)/translation_table_tool
 
 
 
@@ -161,6 +169,7 @@ openocd:
 	$(OPENOCD) -f "$(OPENOCD_INTERFACE)" -f "$(OPENOCD_TARGET_CONFIG)"
 
 define build_jtag_elf
+	@cargo build --package translation_table_tool --release
 	@CARGO_PROFILE_RELEASE_STRIP=none RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" cargo rustc \
 		--target=$(TARGET)                           \
 		--no-default-features                       \
@@ -170,6 +179,7 @@ define build_jtag_elf
 		--manifest-path $(KERNEL_MANIFEST)            \
 		--bin kernel                                  \
 		-- -C debuginfo=2 $(2)
+	@target/release/translation_table_tool $(BSP_FAMILY) $(if $(filter $(1),$(JTAG_TARGET_DIR)),$(JTAG_ELF),$(JTAG_OPT0_ELF))
 endef
 
 gdb:
@@ -189,11 +199,25 @@ $(LAST_BUILD_CONFIG):
 	@touch $(LAST_BUILD_CONFIG)
 
 ##------------------------------------------------------------------------------
+## Build the host-side translation-table patcher.
+##------------------------------------------------------------------------------
+$(EXEC_TT_TOOL):
+	@cargo objcopy -p translation_table_tool --release -- $(EXEC_TT_TOOL)
+
+##------------------------------------------------------------------------------
 ## Compile the kernel ELF
 ##------------------------------------------------------------------------------
-$(KERNEL_ELF): $(KERNEL_ELF_DEPS)
+$(KERNEL_ELF_RAW): $(KERNEL_ELF_RAW_DEPS)
 	$(call color_header, "Compiling kernel ELF - $(BSP)")
 	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(RUSTC_CMD)
+
+##------------------------------------------------------------------------------
+## Precompute the kernel translation tables and patch them into the kernel ELF
+##------------------------------------------------------------------------------
+$(KERNEL_ELF_TTABLES): $(KERNEL_ELF_TTABLES_DEPS)
+	$(call color_header, "Precomputing kernel translation tables and patching kernel ELF")
+	@cp $(KERNEL_ELF_RAW) $(KERNEL_ELF_TTABLES)
+	$(EXEC_TT_TOOL) $(BSP_FAMILY) $(KERNEL_ELF_TTABLES)
 
 ##------------------------------------------------------------------------------
 ## Generate the stripped kernel binary
@@ -240,8 +264,9 @@ else # QEMU is supported.
 
 test_boot:
 	$(call color_header, "Building QEMU boot test")
-	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(TEST_BOOT_RUSTC_CMD)
-	@$(OBJCOPY_CMD) $(TEST_KERNEL_ELF) $(TEST_KERNEL_BIN)
+	@mkdir -p $(TEST_BUILD_DIR)
+	@CARGO_TARGET_DIR=$(TEST_BUILD_DIR) cargo xtask build $(BSP) --features=test_build
+	@mv $(KERNEL_BIN) $(TEST_KERNEL_BIN)
 	$(call color_header, "Running QEMU boot test")
 	$(EXEC_QEMU) $(QEMU_TEST_ARGS) -kernel $(TEST_KERNEL_BIN)
 endif
@@ -257,14 +282,17 @@ test_integration:
 else # QEMU is supported.
 
 test_integration:
-	$(call color_header, "Building kernel test runner")
+	$(call color_header, "Building kernel test tools")
 	@cargo build --package kernel_test_runner --release --target $(HOST_TARGET)
+	@cargo build --package translation_table_tool --release --target $(HOST_TARGET)
 	$(call color_header, "Running QEMU integration tests")
 	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)"                                             \
 	CARGO_TARGET_AARCH64_UNKNOWN_NONE_SOFTFLOAT_RUNNER="$(TEST_RUNNER)"            \
 	KERNEL_TEST_QEMU="$(QEMU_BINARY)"                                               \
 	KERNEL_TEST_QEMU_ARGS="-M $(QEMU_MACHINE_TYPE) $(QEMU_TEST_ARGS)"               \
 	KERNEL_TEST_OBJCOPY="rust-objcopy"                                              \
+	KERNEL_TEST_TT_TOOL="$(TEST_TT_TOOL)"                                           \
+	KERNEL_TEST_BSP="$(BSP_FAMILY)"                                                        \
 	$(TEST_CMD)
 
 endif

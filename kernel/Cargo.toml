@@ -1,8 +1,8 @@
 [package]
 name = "mingo"
 version = "1.0.0"
-description = "Virtual Memory, Part 2 — Chapter 14"
-keywords = ["virtual-mem-part2"]
+description = "Virtual Memory, Part 3 — Chapter 15"
+keywords = ["virtual-mem-part3"]
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
 edition = "2024"
 
@@ -14,9 +14,9 @@ test_build = ["qemu-exit"]
 boot_trace = []
 chainloader = []
 
-##--------------------------------------------------------------------------------------------------
+##-------------------------------------------------------------------------------------------------
 ## Dependencies
-##--------------------------------------------------------------------------------------------------
+##-------------------------------------------------------------------------------------------------
 
 [dependencies]
 unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "hide-trace"] }
