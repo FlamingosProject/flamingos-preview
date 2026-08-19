@@ -18,6 +18,17 @@
 	add	\register, \register, #:lo12:\symbol
 .endm
 
+// Load the address of a symbol into a register, absolute.
+//
+// # Resources
+//
+// - https://sourceware.org/binutils/docs-2.36/as/AArch64_002dRelocations.html
+.macro ADR_ABS register, symbol
+	movz	\register, #:abs_g2:\symbol
+	movk	\register, #:abs_g1_nc:\symbol
+	movk	\register, #:abs_g0_nc:\symbol
+.endm
+
 .macro BLINK_CODE code
 	mov	x0, {CONST_BOOT_TRACE}
 	cbz	x0, .L_no_blink_\@
@@ -41,8 +52,23 @@
 // fn _start()
 //------------------------------------------------------------------------------
 _start:
-	// Preserve the device tree pointer supplied in x0 by the firmware.
-	mov	x19, x0
+	// Save the device tree pointer passed to the kernel.
+	// x0 initially points to it
+
+	// Set up copy.
+
+	// Device tree length (from Claude)
+	ldr w1, [x0, #4]	// load big-endian totalsize
+	rev w2, w1		// byte-swap to little-endian
+	ADR_ABS	x1, __device_tree_start         // Where the device tree goes
+	add	x2, x2, x1	// Where it will end.
+
+	// Do copy.
+.L_device_tree_copy_loop:
+	ldr	x3, [x0], #8
+	str	x3, [x1], #8
+	cmp	x1, x2
+	b.lo	.L_device_tree_copy_loop
 
 	// Only proceed on the boot core. Park it otherwise.
 	mrs	x0, MPIDR_EL1
@@ -61,22 +87,38 @@ _start:
 	BLINK_CODE #1
 
 	// Initialize DRAM.
-	ADR_REL	x0, __bss_start
-	ADR_REL x1, __bss_end_exclusive
+	ADR_ABS	x0, __bss_start
+	ADR_ABS x1, __bss_end_exclusive
 
 .L_bss_init_loop:
 	cmp	x0, x1
-	b.eq	.L_prepare_rust
+	b.eq	.L_relocate_binary
 	stp	xzr, xzr, [x0], #16
 	b	.L_bss_init_loop
 
+	// Next, relocate the binary.
+.L_relocate_binary:
+	ADR_REL	x0, __binary_nonzero_start         // The address the binary got loaded to.
+	ADR_ABS	x1, __binary_nonzero_start         // The address the binary was linked to.
+	ADR_ABS	x2, __binary_nonzero_end_exclusive
+
+.L_binary_relocate_copy_loop:
+	ldr	x3, [x0], #8
+	str	x3, [x1], #8
+	cmp	x1, x2
+	b.lo	.L_binary_relocate_copy_loop
+
 	// Prepare the jump to Rust code.
-.L_prepare_rust:
+	// Set the stack pointer.
+	ADR_ABS	x0, __boot_core_stack_end_exclusive
+	mov	sp, x0
+
 	BLINK_CODE #2
 
-	// Pass the preserved device tree pointer to Rust.
-	mov	x0, x19
-	b	_start_rust
+	// Pass the relocated device tree to the relocated Rust code.
+	ADR_ABS	x0, __device_tree_start
+	ADR_ABS	x1, _start_rust
+	br	x1
 
 	// Infinitely wait for events (aka "park the core").
 .L_parking_loop:
