@@ -1,0 +1,4 @@
+[submodule "01-wait-forever"]
+	path = 01-wait-forever
+	url = https://github.com/FlamingosProject/flamingos-preview.git
+	branch = 01-wait-forever
