@@ -14,7 +14,10 @@ mod boot;
 // Architectural Public Reexports
 //--------------------------------------------------------------------------------------------------
 #[cfg_attr(feature = "test_build", allow(unused_imports))]
-pub use arch_cpu::wait_forever;
+pub use arch_cpu::{nop, wait_forever};
 
 #[cfg(feature = "test_build")]
 pub use arch_cpu::{qemu_exit_failure, qemu_exit_success};
+
+#[cfg(feature = "bsp_rpi3")]
+pub use arch_cpu::spin_for_cycles;
