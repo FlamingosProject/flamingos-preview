@@ -30,7 +30,7 @@ struct MemoryManagementUnit;
 
 /// no-op placeholder until `core::hint::unlikely` is stable
 ///
-/// Tracking issue: https://github.com/rust-lang/rust/issues/136873
+/// Tracking issue: <https://github.com/rust-lang/rust/issues/136873>
 const fn unlikely(b: bool) -> bool {
     b
 }

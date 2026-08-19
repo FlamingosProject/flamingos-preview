@@ -14,9 +14,7 @@ use libkernel::{bsp, cpu, exception, memory, time};
 unsafe fn kernel_init() -> ! {
     unsafe {
         exception::handling_init();
-        let tables = memory::mmu::kernel_map_binary().expect("Kernel mapping failed");
-        memory::mmu::enable_mmu_and_caching(tables).expect("MMU initialization failed");
-        memory::mmu::post_enable_init();
+        memory::init();
         bsp::driver::qemu_bring_up_console();
 
         assert!(time::time_manager().uptime().as_nanos() > 0);
