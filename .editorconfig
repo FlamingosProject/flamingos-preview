@@ -17,9 +17,6 @@ indent_size = 4
 indent_style = tab
 indent_size = 8
 
-[*.rb]
-indent_size = 4
-
 [*.rs]
 indent_size = 4
 

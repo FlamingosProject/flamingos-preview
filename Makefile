@@ -44,6 +44,7 @@ else ifeq ($(BSP),rpi4)
     QEMU_BINARY       = qemu-system-aarch64
     QEMU_MACHINE_TYPE =
     QEMU_RELEASE_ARGS = -serial stdio -display none
+    QEMU_TEST_ARGS    = $(QEMU_RELEASE_ARGS) -semihosting
     OBJDUMP_BINARY    = rust-objdump
     NM_BINARY         = rust-nm
     READELF_BINARY    = aarch64-none-elf-readelf
@@ -55,7 +56,7 @@ endif
 ##--------------------------------------------------------------------------------------------------
 ## Targets and Prerequisites
 ##--------------------------------------------------------------------------------------------------
-KERNEL_MANIFEST      = Cargo.toml
+KERNEL_MANIFEST      = kernel/Cargo.toml
 CHAINLOADER_BIN      = chainloader8.img
 KERNEL_BIN           = $(if $(CHAINLOADER),$(CHAINLOADER_BIN),$(NORMAL_KERNEL_BIN))
 BUILD_MODE           = $(if $(CHAINLOADER),chainloader,kernel)
@@ -70,6 +71,8 @@ JTAG_OPT0_TARGET_DIR = target/jtag-opt0/$(BSP)
 JTAG_ELF = $(JTAG_TARGET_DIR)/$(TARGET)/release/kernel
 JTAG_OPT0_ELF = $(JTAG_OPT0_TARGET_DIR)/$(TARGET)/release/kernel
 GDB_INIT = tools/jtag/kernel.gdb
+HOST_TARGET     = $(shell rustc -vV | sed -n 's/^host: //p')
+TEST_RUNNER     = $(shell pwd)/target/$(HOST_TARGET)/release/kernel_test_runner
 # This parses cargo's dep-info file.
 # https://doc.rust-lang.org/cargo/guide/build-cache.html#dep-info-files
 KERNEL_ELF_DEPS = $(filter-out %: ,$(file < $(KERNEL_ELF).d)) $(KERNEL_MANIFEST) $(LAST_BUILD_CONFIG)
@@ -94,12 +97,20 @@ COMPILER_ARGS = --target=$(TARGET) \
     $(FEATURES)                    \
     --release
 
-RUSTC_CMD   = cargo rustc $(COMPILER_ARGS)
-TEST_RUSTC_CMD = cargo rustc                     \
+RUSTC_CMD   = cargo rustc $(COMPILER_ARGS) --manifest-path $(KERNEL_MANIFEST)
+TEST_BOOT_RUSTC_CMD = cargo rustc                \
     --target=$(TARGET)                           \
     $(TEST_FEATURES)                             \
     --release                                    \
-    --target-dir=$(TEST_BUILD_DIR)
+    --target-dir=$(TEST_BUILD_DIR)               \
+    --manifest-path $(KERNEL_MANIFEST)
+TEST_SELECTION = $(if $(TEST),--test $(TEST),--tests)
+TEST_CMD = cargo test                            \
+    --target=$(TARGET)                           \
+    $(TEST_FEATURES)                             \
+    --release                                    \
+    --manifest-path $(KERNEL_MANIFEST)           \
+    $(TEST_SELECTION)
 DOC_CMD     = cargo doc $(COMPILER_ARGS)
 CLIPPY_CMD  = cargo clippy $(COMPILER_ARGS)
 OBJCOPY_CMD = rust-objcopy \
@@ -114,7 +125,7 @@ EXEC_QEMU = $(QEMU_BINARY) -M $(QEMU_MACHINE_TYPE)
 ##--------------------------------------------------------------------------------------------------
 ## Targets
 ##--------------------------------------------------------------------------------------------------
-.PHONY: all chainboot jtagboot openocd gdb gdb-opt0 doc qemu test_boot clippy clean readelf objdump nm check
+.PHONY: all chainboot jtagboot openocd gdb gdb-opt0 doc qemu test test_boot test_integration clippy clean readelf objdump nm check
 
 all: $(KERNEL_BIN)
 
@@ -145,6 +156,8 @@ define build_jtag_elf
 		--features bsp_$(BSP)                       \
 		--release                                    \
 		--target-dir=$(1)                            \
+		--manifest-path $(KERNEL_MANIFEST)            \
+		--bin kernel                                  \
 		-- -C debuginfo=2 $(2)
 endef
 
@@ -216,11 +229,36 @@ else # QEMU is supported.
 
 test_boot:
 	$(call color_header, "Building QEMU boot test")
-	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(TEST_RUSTC_CMD)
+	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(TEST_BOOT_RUSTC_CMD)
 	@$(OBJCOPY_CMD) $(TEST_KERNEL_ELF) $(TEST_KERNEL_BIN)
 	$(call color_header, "Running QEMU boot test")
 	$(EXEC_QEMU) $(QEMU_TEST_ARGS) -kernel $(TEST_KERNEL_BIN)
 endif
+
+##------------------------------------------------------------------------------
+## Run the stable, harness-free integration test kernels in QEMU
+##------------------------------------------------------------------------------
+ifeq ($(QEMU_MACHINE_TYPE),) # QEMU is not supported for the board.
+
+test_integration:
+	$(call color_header, "$(QEMU_MISSING_STRING)")
+
+else # QEMU is supported.
+
+test_integration:
+	$(call color_header, "Building kernel test runner")
+	@cargo build --package kernel_test_runner --release --target $(HOST_TARGET)
+	$(call color_header, "Running QEMU integration tests")
+	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)"                                             \
+	CARGO_TARGET_AARCH64_UNKNOWN_NONE_SOFTFLOAT_RUNNER="$(TEST_RUNNER)"            \
+	KERNEL_TEST_QEMU="$(QEMU_BINARY)"                                               \
+	KERNEL_TEST_QEMU_ARGS="-M $(QEMU_MACHINE_TYPE) $(QEMU_TEST_ARGS)"               \
+	KERNEL_TEST_OBJCOPY="rust-objcopy"                                              \
+	$(TEST_CMD)
+
+endif
+
+test: test_boot test_integration
 
 ##------------------------------------------------------------------------------
 ## Run clippy

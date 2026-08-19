@@ -11,7 +11,7 @@ __rpi_phys_dram_start_addr = 0;
 /* The physical address at which the the kernel binary will be loaded by the Raspberry's firmware */
 __rpi_phys_binary_load_addr = 0x80000;
 
-/* Symbols expected by the unwinding crate's fde-static finder */
+/* Symbols expected by the unwinding crate's fde-static finder. */
 __executable_start = ADDR(.text);
 __etext = ADDR(.eh_frame) + SIZEOF(.eh_frame);
 __eh_frame = ADDR(.eh_frame);
@@ -65,7 +65,7 @@ SECTIONS
 
     .rodata : ALIGN(8) { *(.rodata*) } :segment_code
 
-    /* Unwind tables — must be in a mapped, readable segment */
+    /* Unwind tables must be in a mapped, readable segment. */
     .eh_frame_hdr : ALIGN(8) { *(.eh_frame_hdr*) } :segment_code
     .eh_frame     : ALIGN(8) { *(.eh_frame*) } :segment_code
 
