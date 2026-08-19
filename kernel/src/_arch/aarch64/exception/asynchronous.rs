@@ -73,7 +73,7 @@ where
 
 /// Returns whether IRQs are masked on the executing core.
 pub fn is_local_irq_masked() -> bool {
-    !is_masked::<IRQ>()
+    is_masked::<IRQ>()
 }
 
 /// Unmask IRQs on the executing core.
