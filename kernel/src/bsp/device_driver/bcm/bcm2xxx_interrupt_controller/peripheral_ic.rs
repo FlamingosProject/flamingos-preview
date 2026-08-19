@@ -16,6 +16,7 @@ use crate::{
     synchronization,
     synchronization::{IRQSafeNullLock, InitStateLock},
 };
+use alloc::vec::Vec;
 use tock_registers::{
     interfaces::{Readable, Writeable},
     register_structs,
@@ -52,8 +53,7 @@ type WriteOnlyRegisters = MMIODerefWrapper<WORegisterBlock>;
 /// Abstraction for the ReadOnly parts of the associated MMIO registers.
 type ReadOnlyRegisters = MMIODerefWrapper<RORegisterBlock>;
 
-type HandlerTable = [Option<exception::asynchronous::IRQHandlerDescriptor<PeripheralIRQ>>;
-    PeripheralIRQ::MAX_INCLUSIVE + 1];
+type HandlerTable = Vec<Option<exception::asynchronous::IRQHandlerDescriptor<PeripheralIRQ>>>;
 
 //--------------------------------------------------------------------------------------------------
 // Public Definitions
@@ -85,8 +85,14 @@ impl PeripheralIC {
         Self {
             wo_registers: IRQSafeNullLock::new(WriteOnlyRegisters::new(mmio_start_addr)),
             ro_registers: ReadOnlyRegisters::new(mmio_start_addr),
-            handler_table: InitStateLock::new([None; PeripheralIRQ::MAX_INCLUSIVE + 1]),
+            handler_table: InitStateLock::new(Vec::new()),
         }
+    }
+
+    /// Called by the kernel to bring up the device.
+    pub fn init(&self) {
+        self.handler_table
+            .write(|table| table.resize(PeripheralIRQ::MAX_INCLUSIVE + 1, None));
     }
 
     /// Query the list of pending IRQs.

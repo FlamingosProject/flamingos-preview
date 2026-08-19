@@ -28,7 +28,11 @@
 //! | .bss                                  |
 //! |                                       |
 //! +---------------------------------------+
-//! |                                       | data_end_exclusive
+//! |                                       | heap_start == data_end_exclusive
+//! | .heap                                 |
+//! |                                       |
+//! +---------------------------------------+
+//! |                                       | heap_end_exclusive
 //! |                                       |
 //!
 //!
@@ -50,7 +54,11 @@
 //! | .bss                                  |
 //! |                                       |
 //! +---------------------------------------+
-//! |                                       |  mmio_remap_start == data_end_exclusive
+//! |                                       | heap_start == data_end_exclusive
+//! | .heap                                 |
+//! |                                       |
+//! +---------------------------------------+
+//! |                                       |  mmio_remap_start == heap_end_exclusive
 //! | VA region for MMIO remapping          |
 //! |                                       |
 //! +---------------------------------------+
@@ -82,6 +90,9 @@ extern "Rust" {
 
     static __data_start: UnsafeCell<()>;
     static __data_end_exclusive: UnsafeCell<()>;
+
+    static __heap_start: UnsafeCell<()>;
+    static __heap_end_exclusive: UnsafeCell<()>;
 
     static __mmio_remap_start: UnsafeCell<()>;
     static __mmio_remap_end_exclusive: UnsafeCell<()>;
@@ -177,6 +188,22 @@ fn virt_data_start() -> PageAddress<Virtual> {
 #[inline(always)]
 fn data_size() -> usize {
     unsafe { (__data_end_exclusive.get() as usize) - (__data_start.get() as usize) }
+}
+
+/// Start page address of the heap segment.
+#[inline(always)]
+fn virt_heap_start() -> PageAddress<Virtual> {
+    PageAddress::from(unsafe { __heap_start.get() as usize })
+}
+
+/// Size of the heap segment.
+///
+/// # Safety
+///
+/// - Value is provided by the linker script and must be trusted as-is.
+#[inline(always)]
+fn heap_size() -> usize {
+    unsafe { (__heap_end_exclusive.get() as usize) - (__heap_start.get() as usize) }
 }
 
 /// Start page address of the MMIO remap reservation.
