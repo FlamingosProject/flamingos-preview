@@ -4,6 +4,7 @@
 
 //! Common device driver code.
 
+use crate::memory::{Address, Virtual};
 use core::{fmt, marker::PhantomData, ops};
 
 //--------------------------------------------------------------------------------------------------
@@ -11,7 +12,7 @@ use core::{fmt, marker::PhantomData, ops};
 //--------------------------------------------------------------------------------------------------
 
 pub struct MMIODerefWrapper<T> {
-    start_addr: usize,
+    start_addr: Address<Virtual>,
     phantom: PhantomData<fn() -> T>,
 }
 
@@ -25,7 +26,7 @@ pub struct BoundedUsize<const MAX_INCLUSIVE: usize>(usize);
 
 impl<T> MMIODerefWrapper<T> {
     /// Create an instance.
-    pub const unsafe fn new(start_addr: usize) -> Self {
+    pub const unsafe fn new(start_addr: Address<Virtual>) -> Self {
         Self {
             start_addr,
             phantom: PhantomData,
@@ -37,7 +38,7 @@ impl<T> ops::Deref for MMIODerefWrapper<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { &*(self.start_addr as *const _) }
+        unsafe { &*(self.start_addr.as_usize() as *const _) }
     }
 }
 

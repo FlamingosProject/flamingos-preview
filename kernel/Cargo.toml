@@ -1,8 +1,8 @@
 [package]
 name = "mingo"
 version = "1.0.0"
-description = "Exceptions, Part 2 — Chapter 13"
-keywords = ["exceptions-part2"]
+description = "Virtual Memory, Part 2 — Chapter 14"
+keywords = ["virtual-mem-part2"]
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
 edition = "2024"
 
