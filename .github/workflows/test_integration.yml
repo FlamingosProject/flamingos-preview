@@ -1,4 +1,4 @@
-name: Integration-Tests
+name: Integration Tests
 
 on:
     push:
@@ -24,17 +24,13 @@ jobs:
         runs-on: ubuntu-22.04
 
         steps:
-            - uses: actions/checkout@v3
-            - name: Set up Ruby
-              uses: ruby/setup-ruby@v1
-            - name: Set up Rust nightly
+            - uses: actions/checkout@v4
+            - name: Install QEMU
+              run: sudo apt-get update && sudo apt-get install --yes qemu-system-arm
+            - name: Set up Rust tools
               run: |
+                  rustup target add aarch64-unknown-none-softfloat
+                  rustup component add llvm-tools
                   cargo install cargo-binutils
-            - name: Set up Ruby
-              run: |
-                  gem install bundler
-                  bundle config set without 'uart'
-                  bundle install --retry 3
-            - name: Run
-              run: |
-                  bundle exec ruby utils/devtool.rb test_integration
+            - name: Run stable kernel tests
+              run: BSP=rpi3 make test

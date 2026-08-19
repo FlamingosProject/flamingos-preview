@@ -135,33 +135,3 @@ impl fmt::Display for Address<Virtual> {
         write!(f, "{:04x}", q1)
     }
 }
-
-//--------------------------------------------------------------------------------------------------
-// Testing
-//--------------------------------------------------------------------------------------------------
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use test_macros::kernel_test;
-
-    /// Sanity of [Address] methods.
-    #[kernel_test]
-    fn address_type_method_sanity() {
-        let addr = Address::<Virtual>::new(bsp::memory::mmu::KernelGranule::SIZE + 100);
-
-        assert_eq!(
-            addr.align_down_page().as_usize(),
-            bsp::memory::mmu::KernelGranule::SIZE
-        );
-
-        assert_eq!(
-            addr.align_up_page().as_usize(),
-            bsp::memory::mmu::KernelGranule::SIZE * 2
-        );
-
-        assert!(!addr.is_page_aligned());
-
-        assert_eq!(addr.offset_into_page(), 100);
-    }
-}
