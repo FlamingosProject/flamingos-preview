@@ -23,36 +23,45 @@ use libkernel::{bsp, cpu, driver, exception, info, memory, state, time};
 ///
 /// - Only a single core must be active and running this function.
 /// - Printing will not work until the respective driver's MMIO is remapped.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe fn kernel_init() -> ! {
-    unsafe {
-        exception::handling_init();
-        memory::init();
+    // The device tree is mapped now, so its parser can safely execute linked virtual code.
+    #[cfg(not(feature = "chainloader"))]
+    cpu::boot::arch_boot::process_device_tree();
 
-        // Initialize the timer subsystem.
-        if let Err(x) = time::init() {
-            panic!("Error initializing timer subsystem: {}", x);
-        }
+    // Set up exception handlers.
+    exception::handling_init();
 
-        // Initialize the BSP driver subsystem.
-        if let Err(x) = bsp::driver::init() {
-            panic!("Error initializing BSP driver subsystem: {}", x);
-        }
+    // Initialize memory subsystem, in particular memory
+    // allocators.
+    memory::init();
 
-        // Initialize all device drivers.
-        driver::driver_manager().init_drivers_and_irqs();
-
-        bsp::memory::mmu::kernel_add_mapping_records_for_precomputed();
-
-        // Unmask interrupts on the boot CPU core.
-        exception::asynchronous::local_irq_unmask();
-
-        // Announce conclusion of the kernel_init() phase.
-        state::state_manager().transition_to_single_core_main();
-
-        // Transition from unsafe to safe.
-        kernel_main()
+    // Initialize the timer subsystem.
+    if let Err(x) = time::init() {
+        panic!("Error initializing timer subsystem: {}", x);
     }
+
+    // Initialize the BSP driver subsystem.
+    if let Err(x) = bsp::driver::init() {
+        panic!("Error initializing BSP driver subsystem: {}", x);
+    }
+
+    // Initialize all device drivers.
+    driver::driver_manager().init_drivers_and_irqs();
+
+    // Add records of how we mapped the kernel for later
+    // logging once everything is up. Not currently used
+    // otherwise.
+    bsp::memory::mmu::kernel_add_mapping_records_for_precomputed();
+
+    // Unmask interrupts on the boot CPU core.
+    exception::asynchronous::local_irq_unmask();
+
+    // Announce conclusion of the kernel_init() phase.
+    state::state_manager().transition_to_single_core_main();
+
+    // Transition from unsafe to safe.
+    kernel_main()
 }
 
 /// The main function running after the early init.
@@ -62,6 +71,15 @@ fn kernel_main() -> ! {
 
     info!("{}", libkernel::version());
     info!("Booting on: {}", bsp::board_name());
+
+    unsafe {
+        let cores_info = core::ptr::addr_of!(cpu::boot::arch_boot::CORES_INFO);
+        let num_cores = (*cores_info).num_cores;
+        info!("Cores:");
+        for c in 0..num_cores {
+            info!("    {}", (*cores_info).core_ids[c]);
+        }
+    }
 
     info!("MMU online:");
     memory::mmu::kernel_print_mappings();

@@ -56,17 +56,14 @@ _start:
 	// Preserve the device tree pointer supplied in x0 by the firmware or chainloader.
 	mov	x19, x0
 
-	// Only proceed on the boot core. Park it otherwise.
+	// Only proceed on the boot core. Park other cores before using the shared boot stack.
 	mrs	x1, MPIDR_EL1
 	and	x1, x1, {CONST_CORE_ID_MASK}
 	ldr	x2, BOOT_CORE_ID      // provided by bsp/__board_name__/cpu.rs
 	cmp	x1, x2
 	b.ne	.L_parking_loop
 
-	// If execution reaches here, it is the boot core.
-
-	// Establish a stack before calling the Rust boot-tracing helper. The stack occupies the
-	// physical address range below the kernel image and is not part of BSS.
+	// Establish a physical stack before calling the Rust boot-tracing helper.
 	ADR_REL	x0, __boot_core_stack_end_exclusive
 	mov	sp, x0
 
@@ -82,28 +79,25 @@ _start:
 	// Initialize DRAM.
 	ADR_REL	x0, __bss_start
 	ADR_REL x1, __bss_end_exclusive
-
 .L_bss_init_loop:
 	cmp	x0, x1
 	b.eq	.L_prepare_rust
 	stp	xzr, xzr, [x0], #16
 	b	.L_bss_init_loop
 
-	// Prepare the jump to Rust code.
 .L_prepare_rust:
 	BLINK_CODE #2
 
 	// Load the base address of the kernel's translation tables.
 	ldr	x0, PHYS_KERNEL_TABLES_BASE_ADDR // provided by bsp/__board_name__/memory/mmu.rs
 
-	// Load the _absolute_ addresses of the following symbols. Since the kernel is linked at
-	// the top of the 64 bit address space, these are effectively virtual addresses.
+	// Load the kernel's linked virtual stack and entry-point addresses.
 	ADR_ABS	x1, __boot_core_stack_end_exclusive
 	ADR_ABS	x2, kernel_init
+	ADR_ABS	x3, __boot_core_stack_start
+	add	x3, x3, x19
 
-	// Pass the preserved device tree pointer as the fourth Rust argument.
-	mov	x3, x19
-
+	// Jump to Rust code. x3 is the device tree's address in the mapped boot-stack region.
 	b	_start_rust
 
 	// Infinitely wait for events (aka "park the core").

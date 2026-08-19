@@ -19,6 +19,8 @@ use crate::{memory, memory::Address};
 use aarch64_cpu::{asm, registers::*};
 use core::arch::global_asm;
 #[cfg(not(feature = "chainloader"))]
+use fdt::Fdt;
+#[cfg(not(feature = "chainloader"))]
 use tock_registers::interfaces::Writeable;
 
 #[cfg(feature = "boot_trace")]
@@ -57,6 +59,7 @@ global_asm!(
 unsafe fn prepare_el2_to_el1_transition(
     virt_boot_core_stack_end_exclusive_addr: u64,
     virt_kernel_init_addr: u64,
+    virt_device_tree_addr: u64,
 ) {
     // Enable timer counter registers for EL1.
     CNTHCTL_EL2.write(CNTHCTL_EL2::EL1PCEN::SET + CNTHCTL_EL2::EL1PCTEN::SET);
@@ -85,20 +88,86 @@ unsafe fn prepare_el2_to_el1_transition(
     // Set up SP_EL1 (stack pointer), which will be used by EL1 once we "return" to it. Since there
     // are no plans to ever return to EL2, just re-use the same stack.
     SP_EL1.set(virt_boot_core_stack_end_exclusive_addr);
+
+    // Preserve the mapped device tree pointer across the exception return. kernel_init() consumes
+    // and clears this scratch value before thread-local storage can use TPIDR_EL1.
+    TPIDR_EL1.set(virt_device_tree_addr);
 }
 
 //--------------------------------------------------------------------------------------------------
 // Public Code
 //--------------------------------------------------------------------------------------------------
 
+/// Maximum number of CPU IDs retained from the firmware device tree.
+pub const MAX_CORES: usize = 64;
+
+/// CPU topology discovered from the firmware device tree.
+#[derive(Debug)]
+pub struct CoresInfo {
+    /// Number of valid entries in [`Self::core_ids`].
+    pub num_cores: usize,
+
+    /// Firmware-provided CPU IDs.
+    pub core_ids: [usize; MAX_CORES],
+}
+
+/// CPU topology populated once during early boot.
+///
+/// Access is restricted to the boot path while only the boot core is active.
+pub static mut CORES_INFO: CoresInfo = CoresInfo {
+    num_cores: 0,
+    core_ids: [0; MAX_CORES],
+};
+
+/// Consume the firmware device tree pointer retained across the MMU transition.
+///
+/// # Safety
+///
+/// - Must be called exactly once by the boot core after virtual memory is enabled.
+/// - The firmware-provided pointer must identify a valid flattened device tree.
+#[cfg(not(feature = "chainloader"))]
+pub unsafe fn process_device_tree() {
+    let device_tree = TPIDR_EL1.get() as *const u8;
+    TPIDR_EL1.set(0);
+
+    // QEMU's raspi3b machine still supplies a legacy ATAG_CORE handoff instead of an FDT. Both
+    // Raspberry Pi BSPs supported here have four cores, so retain the QEMU workflow explicitly.
+    const ATAG_CORE: u32 = 0x5441_0001;
+    const LEGACY_RPI_CORE_COUNT: usize = 4;
+    let words = device_tree.cast::<u32>();
+    if words.add(1).read_unaligned() == ATAG_CORE {
+        let cores_info = core::ptr::addr_of_mut!(CORES_INFO);
+        (*cores_info).num_cores = LEGACY_RPI_CORE_COUNT;
+        for (id, slot) in (&mut (*cores_info).core_ids)[..LEGACY_RPI_CORE_COUNT]
+            .iter_mut()
+            .enumerate()
+        {
+            *slot = id;
+        }
+        return;
+    }
+
+    let fdt = Fdt::from_ptr(device_tree).unwrap();
+    let num_cores = fdt.cpus().count();
+    if num_cores > MAX_CORES {
+        panic!();
+    }
+    let cores_info = core::ptr::addr_of_mut!(CORES_INFO);
+    for (cid, cpu) in (*cores_info).core_ids.iter_mut().zip(fdt.cpus()) {
+        if cpu.ids().all().count() != 1 {
+            panic!();
+        }
+        *cid = cpu.ids().first();
+    }
+    CORES_INFO.num_cores = num_cores;
+}
+
 /// Blink a fatal early-boot error code forever.
 #[inline(never)]
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn _panic_code(code: usize) -> ! {
-    unsafe {
-        loop {
-            led_debug::_blink_code(code, true);
-        }
+    loop {
+        led_debug::_blink_code(code, true);
     }
 }
 
@@ -109,35 +178,35 @@ pub unsafe extern "C" fn _panic_code(code: usize) -> ! {
 /// # Safety
 ///
 /// - Exception return from EL2 must must continue execution in EL1 with `kernel_init()`.
-#[unsafe(no_mangle)]
+#[inline(never)]
+#[no_mangle]
 #[cfg(not(feature = "chainloader"))]
 pub unsafe extern "C" fn _start_rust(
     phys_kernel_tables_base_addr: u64,
     virt_boot_core_stack_end_exclusive_addr: u64,
     virt_kernel_init_addr: u64,
-    _device_tree: *const u8,
+    device_tree: *const u8,
 ) -> ! {
-    unsafe {
-        #[cfg(feature = "boot_trace")]
-        led_debug::_blink_code(3, true);
+    #[cfg(feature = "boot_trace")]
+    led_debug::_blink_code(3, true);
 
-        prepare_el2_to_el1_transition(
-            virt_boot_core_stack_end_exclusive_addr,
-            virt_kernel_init_addr,
-        );
+    prepare_el2_to_el1_transition(
+        virt_boot_core_stack_end_exclusive_addr,
+        virt_kernel_init_addr,
+        device_tree as u64,
+    );
 
-        // Turn on the MMU for EL1.
-        let addr = Address::new(phys_kernel_tables_base_addr as usize);
-        memory::mmu::enable_mmu_and_caching(addr).unwrap();
+    // Turn on the MMU for EL1.
+    let addr = Address::new(phys_kernel_tables_base_addr as usize);
+    memory::mmu::enable_mmu_and_caching(addr).unwrap();
 
-        // Use `eret` to "return" to EL1. Since virtual memory will already be enabled, this results in
-        // execution of kernel_init() in EL1 from its _virtual address_.
-        asm::eret()
-    }
+    // Use `eret` to "return" to EL1. Since virtual memory will already be enabled, this results in
+    // execution of kernel_init() in EL1 from its _virtual address_.
+    asm::eret()
 }
 
 /// Enter the relocated chainloader without changing exception level or architectural state.
-#[unsafe(no_mangle)]
+#[no_mangle]
 #[cfg(feature = "chainloader")]
 pub unsafe extern "C" fn _start_rust(_device_tree: *const u8) -> ! {
     #[cfg(feature = "boot_trace")]
