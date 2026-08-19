@@ -1,8 +1,8 @@
 [package]
 name = "mingo"
 version = "1.0.0"
-description = "Timestamps — Chapter 07"
-keywords = ["timestamps"]
+description = "Hardware Debugging with JTAG — Chapter 08"
+keywords = ["hw-debug-jtag"]
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
 edition = "2024"
 
