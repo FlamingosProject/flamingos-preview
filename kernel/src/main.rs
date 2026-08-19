@@ -23,35 +23,41 @@ use libkernel::{bsp, cpu, driver, exception, info, memory, state, time};
 ///
 /// - Only a single core must be active and running this function.
 /// - Printing will not work until the respective driver's MMIO is remapped.
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe fn kernel_init() -> ! {
-    unsafe {
-        exception::handling_init();
-        memory::init();
+    exception::handling_init();
+    memory::init();
 
-        // Initialize the BSP driver subsystem.
-        if let Err(x) = bsp::driver::init() {
-            panic!("Error initializing BSP driver subsystem: {}", x);
-        }
-
-        // Initialize all device drivers.
-        driver::driver_manager().init_drivers_and_irqs();
-
-        bsp::memory::mmu::kernel_add_mapping_records_for_precomputed();
-
-        // Unmask interrupts on the boot CPU core.
-        exception::asynchronous::local_irq_unmask();
-
-        // Announce conclusion of the kernel_init() phase.
-        state::state_manager().transition_to_single_core_main();
-
-        // Transition from unsafe to safe.
-        kernel_main()
+    // Initialize the timer subsystem.
+    if let Err(x) = time::init() {
+        panic!("Error initializing timer subsystem: {}", x);
     }
+
+    // Initialize the BSP driver subsystem.
+    if let Err(x) = bsp::driver::init() {
+        panic!("Error initializing BSP driver subsystem: {}", x);
+    }
+
+    // Initialize all device drivers.
+    driver::driver_manager().init_drivers_and_irqs();
+
+    bsp::memory::mmu::kernel_add_mapping_records_for_precomputed();
+
+    // Unmask interrupts on the boot CPU core.
+    exception::asynchronous::local_irq_unmask();
+
+    // Announce conclusion of the kernel_init() phase.
+    state::state_manager().transition_to_single_core_main();
+
+    // Transition from unsafe to safe.
+    kernel_main()
 }
 
 /// The main function running after the early init.
 fn kernel_main() -> ! {
+    use alloc::boxed::Box;
+    use core::time::Duration;
+
     info!("{}", libkernel::version());
     info!("Booting on: {}", bsp::board_name());
 
@@ -77,6 +83,11 @@ fn kernel_main() -> ! {
 
     info!("Kernel heap:");
     memory::heap_alloc::kernel_heap_allocator().print_usage();
+
+    time::time_manager().set_timeout_once(Duration::from_secs(5), Box::new(|| info!("Once 5")));
+    time::time_manager().set_timeout_once(Duration::from_secs(2), Box::new(|| info!("Once 2")));
+    time::time_manager()
+        .set_timeout_periodic(Duration::from_secs(1), Box::new(|| info!("Periodic 1 sec")));
 
     info!("UART RX IRQs enabled");
 
