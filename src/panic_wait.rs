@@ -4,7 +4,7 @@
 
 //! Kernel panic handling for normal and QEMU test builds.
 
-use crate::{cpu, println};
+use crate::cpu;
 use core::panic::PanicInfo;
 
 //--------------------------------------------------------------------------------------------------
@@ -63,15 +63,17 @@ fn panic(info: &PanicInfo) -> ! {
         _ => ("???", 0, 0),
     };
 
-    println!(
-        "Kernel panic!\n\n\
-        Panic location:\n      File '{}', line {}, column {}\n\n\
-        {}",
-        location,
-        line,
-        column,
-        info.message(),
-    );
+    macro_rules! pr {
+        ($($args:tt)*) => {
+            let _ = writeln!($crate::console::console(), $($args)*);
+        };
+    }
+
+    pr!("Kernel panic!");
+    pr!();
+    pr!("Panic location:");
+    pr!("File '{}', line {}, column {}", location, line, column,);
+    pr!("{}", info.message());
 
     panic_exit()
 }
