@@ -2,16 +2,13 @@
 //
 // Copyright (c) 2018-2023 Andre Richter <andre.o.richter@gmail.com>
 
-//! A panic handler that infinitely waits.
-
-use crate::cpu;
-use core::panic::PanicInfo;
+//! BSP Processor code.
 
 //--------------------------------------------------------------------------------------------------
-// Private Code
+// Public Definitions
 //--------------------------------------------------------------------------------------------------
 
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    cpu::wait_forever()
-}
+/// Used by `arch` code to find the early boot core.
+#[no_mangle]
+#[link_section = ".text._start_arguments"]
+pub static BOOT_CORE_ID: u64 = 0;

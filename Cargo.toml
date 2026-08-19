@@ -1,10 +1,8 @@
 [package]
 name = "mingo"
-version = "1.0.0"
-description = "Wait Forever — Chapter 01"
-keywords = ["wait-forever"]
+version = "0.2.0"
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
-edition = "2024"
+edition = "2021"
 
 [profile.release]
 lto = true
@@ -13,6 +11,7 @@ lto = true
 default = []
 bsp_rpi3 = []
 bsp_rpi4 = []
+boot_trace = []
 
 [[bin]]
 name = "kernel"
@@ -25,3 +24,7 @@ bench = false
 ##--------------------------------------------------------------------------------------------------
 
 [dependencies]
+
+# Platform specific dependencies
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+aarch64-cpu = "10.0.0"
