@@ -1,43 +1,35 @@
-# Tutorial 01 - Wait Forever
+# Tutorial 02 - Runtime Init
 
 ## tl;dr
 
-- The project skeleton is set up.
-- A small piece of assembly code runs that just halts all CPU cores executing the kernel code.
+- We extend `boot.s` to call into Rust code for the first time. Before the jump
+  to Rust happens, a bit of runtime init work is done.
+- The firmware-provided device tree pointer is preserved across runtime setup and handed to Rust for
+  later chapters to consume.
+- An optional raw-GPIO LED trace can report boot stages and panic codes before a console exists.
+- The Rust code being called just halts execution with a call to `panic!()`.
+- Check out `make qemu` again to see the additional code run.
 
-## Building
+## Notable additions
 
-- `Makefile` targets:
-    - `doc`: Generate documentation.
-    - `qemu`: Run the `kernel` in QEMU
-    - `clippy`
-    - `clean`
-    - `readelf`: Inspect the `ELF` output.
-    - `objdump`: Inspect the assembly.
-    - `nm`: Inspect the symbols.
+- More additions to the linker script:
+     - New sections: `.rodata`, `.got`, `.data`, `.bss`.
+     - A dedicated place for linking boot-time arguments that need to be read by `_start()`.
+- `_start()` in `_arch/__arch_name__/cpu/boot.s`:
+     1. Halts core if core != core0.
+     1. Saves the device tree pointer supplied by firmware in `x0`.
+     1. Initializes the `DRAM` by zeroing the [bss] section.
+     1. Sets up the `stack pointer`.
+     1. Jumps to the `_start_rust()` function, defined in `arch/__arch_name__/cpu/boot.rs`.
+- `_start_rust()`:
+     - Receives the preserved firmware pointer and passes it to `kernel_init()`. Parsing the device
+       tree is deliberately deferred until Chapter 20.
+     - Calls `kernel_init()`, which calls `panic!()`, which eventually halts core0 as well.
+- The `boot_trace` feature adds a minimal LED diagnostic path that does not depend on the later GPIO
+  driver. It can mark early assembly/Rust stages and blink a numeric code on panic.
+- The library now uses the [aarch64-cpu] crate, which provides zero-overhead abstractions and wraps
+  `unsafe` parts when dealing with the CPU's resources.
+    - See it in action in `_arch/__arch_name__/cpu.rs`.
 
-## Code to look at
-
-- `BSP`-specific `kernel.ld` linker script.
-    - Load address at `0x8_0000`
-    - Only `.text` section.
-- `main.rs`: Important [inner attributes]:
-    - `#![no_std]`, `#![no_main]`
-- `boot.s`: Assembly `_start()` function that executes `wfe` (Wait For Event), halting all cores
-  that are executing `_start()`.
-- We (have to) define a `#[panic_handler]` function to make the compiler happy.
-    - Make it `unimplemented!()` because it will be stripped out since it is not used.
-
-[inner attributes]: https://doc.rust-lang.org/reference/attributes.html
-
-### Test it
-
-In the project folder, invoke QEMU and observe the CPU core spinning on `wfe`:
-
-```console
-$ make qemu
-[...]
-IN:
-0x00080000:  d503205f  wfe
-0x00080004:  17ffffff  b        #0x80000
-```
+[bss]: https://en.wikipedia.org/wiki/.bss
+[aarch64-cpu]: https://github.com/rust-embedded/aarch64-cpu
