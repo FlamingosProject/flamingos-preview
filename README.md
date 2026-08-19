@@ -1,110 +1,45 @@
-# Tutorial 16 - Virtual Memory Part 4: Higher-Half Kernel
-
-## tl;dr
-
-- The time has come: We map and run the kernel from the top of the 64 bit virtual address space! 🥳
-
-## Table of Contents
-
-- [Introduction](#introduction)
-- [Implementation](#implementation)
-  - [Linking Changes](#linking-changes)
-  - [Booting into the higher half](#booting-into-the-higher-half)
-- [Build and boot](#build-and-boot)
-- [Test it](#test-it)
+# Tutorial 17 - Kernel Symbols
 
 ## Introduction
 
-A long time in the making, in this tutorial we finally map the kernel to the most significant area
-(alternatively: higher-half) of the 64 bit virtual address space. This makes room for future
-applications to use the whole of the least significant area of the virtual memory space.
+`make nm` shows addresses and symbols on the host. During an
+exception, the kernel itself sees addresses such as `ELR_EL1`,
+the exception link register. The kernel can now print the
+corresponding function names from the ELF it booted. The
+backtrace support introduced in Chapter 11 uses the same
+lookup for panic frames.
 
-As has been teased since `tutorial 14`, we will make use of the `AArch64`'s `TTBR1`. Since the
-kernel's virtual address space size currently is `1 GiB` (defined in
-`bsp/__board_name__/memory/mmu.rs`), `TTBR1` will cover the range from `0xffff_ffff_ffff_ffff` down
-to `0xffff_ffff_c000_0000` (both inclusive).
+## Retaining the ELF
 
-## Implementation
+Stage 1 uses the ELF program headers to load the kernel into
+RAM. It also keeps the complete source ELF in its reserved
+physical range at 64–96 MiB. Stage 2 maps the pages containing
+the ELF read-only and execute-never at
+`0xffff_ffff_c200_0000`. That mapping keeps the metadata
+accessible once the kernel switches to higher-half addresses.
 
-In `src/memory/mmu.rs`, we extend the `AssociatedTranslationTable` trait with a `TableStartFromTop`
-associated type:
+The build removes debug sections from the normal boot payload
+while keeping the ordinary ELF symbol table, its associated
+string table, and unwind data. Section metadata can stay in
+the retained source ELF while the loadable segments occupy
+their linked locations. The symbol values describe those
+linked virtual addresses.
 
-```rust
-/// Intended to be implemented for [`AddressSpace`].
-pub trait AssociatedTranslationTable {
-    /// A translation table whose address range is:
-    ///
-    /// [u64::MAX, (u64::MAX - AS_SIZE) + 1]
-    type TableStartFromTop;
+## Lookup in the kernel
 
-    /// A translation table whose address range is:
-    ///
-    /// [AS_SIZE - 1, 0]
-    type TableStartFromBottom;
-}
-```
+`kernel/src/symbols.rs` asks `kernel-image` to read the
+retained ELF. The lookup scans defined function symbols with
+nonempty address ranges. An address belongs to a function
+when it is at or beyond the function's start and below the
+end. If ranges overlap, the lookup picks the closest
+containing start and then the narrowest range at that start.
 
-Architecture specific code in `_arch/aarch64/memory/mmu/translation_table.rs` populates both types
-now by making use of a new generic that is added to `FixedSizeTranslationTable`, which defines
-whether the covered address space starts from the top or the bottom:
-
-```rust
-pub struct FixedSizeTranslationTable<const NUM_TABLES: usize, const START_FROM_TOP: bool> {
-    ...
-```
-
-```rust
-impl<const AS_SIZE: usize> memory::mmu::AssociatedTranslationTable
-    for memory::mmu::AddressSpace<AS_SIZE>
-where
-    [u8; Self::SIZE >> Granule512MiB::SHIFT]: Sized,
-{
-    type TableStartFromTop =
-        FixedSizeTranslationTable<{ Self::SIZE >> Granule512MiB::SHIFT }, true>;
-
-    type TableStartFromBottom =
-        FixedSizeTranslationTable<{ Self::SIZE >> Granule512MiB::SHIFT }, false>;
-}
-```
-
-Thanks to this infrastructure, `BSP` Rust code in `bsp/__board_name__/memory/mmu.rs` only needs to
-change to this newly introduced type in order to switch from lower half to higher half translation
-tables for the kernel:
-
-```rust
-type KernelTranslationTable =
-    <KernelVirtAddrSpace as AssociatedTranslationTable>::TableStartFromTop;
-```
-
-### Linking Changes
-
-`kernel/src/bsp/raspberrypi/kernel.ld` sets the location counter
-to the start of the higher-half kernel address space. The
-`AT(...)` expressions set the physical load addresses. For
-example, `.text` starts at virtual `0xffff_ffff_c000_0000` and
-loads at physical `0x80000`. Run `make readelf` to compare
-`VirtAddr` and `PhysAddr` for the ELF loadable segments.
-
-The ELF loader copies each segment to its physical address.
-The bootstrap stack still occupies physical addresses from
-64 KiB to 512 KiB. Its virtual mapping moves above the MMIO
-reservation, with a guard page between them. This lets a stack
-overflow fault before reaching the MMIO range.
-
-### Booting into the higher half
-
-Stage 1 loads the ELF and transfers control to stage 2 at the
-physical bootstrap address with the MMU off. Stage 2 uses a
-physical stack and reads the linker-provided virtual bounds and
-physical bases to populate the tables. The architecture code
-configures `TCR_EL1` for the top-of-address-space mapping and
-installs the table base in `TTBR1_EL1`.
-
-The assembly loads absolute linked addresses for the EL1
-entry and stack. Once translation is enabled, `eret` takes
-execution to the high virtual entry and the kernel uses its
-high virtual stack. The low virtual range is available for a
-future application address space.
+The symbol's name is an offset into the associated string
+table. Lookup borrows that raw name from the retained ELF.
+Exception and backtrace printing use `rustc-demangle` while
+formatting the name, without allocating heap memory. When
+metadata is absent or invalid, the diagnostic still has the
+numeric address.
 
 ## Build and boot
 
@@ -139,14 +74,11 @@ addresses. This workflow awaits hardware validation.
 ## Test it
 
 ```sh
-make test BSP=rpi3
-make readelf BSP=rpi3
+TEST=02_exception_sync_page_fault make test_integration BSP=rpi3
 ```
 
-Check that the first executable loadable segment reports the
-linked higher-half address and the physical load address
-`0x80000`. When the kernel boots, the `MMU online` report lists
-its high virtual mappings alongside the low physical ranges.
+The test triggers a page fault and prints the exception's
+`ELR_EL1` together with the function name `kernel_init`.
 
 ## Kernel documentation
 

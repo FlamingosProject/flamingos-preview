@@ -240,7 +240,7 @@ fn package(board: &str, kernel_elf: &Path, image: &Path, bootstrap_elf: Option<&
         );
         exit(1);
     }
-    if let Err(error) = KernelImage::parse(&bytes) {
+    if let Err(error) = KernelImage::parse(&bytes).and_then(|kernel| kernel.symbols()) {
         eprintln!(
             "ERROR: Invalid kernel ELF {}: {error:?}",
             kernel_elf.display()
