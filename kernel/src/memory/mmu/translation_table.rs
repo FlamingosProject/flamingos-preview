@@ -9,14 +9,7 @@
 mod arch_translation_table;
 
 use super::{AttributeFields, MemoryRegion};
-use crate::{
-    bsp::memory::mmu::KernelVirtAddrSpace,
-    memory::{Address, Physical, Virtual, mmu::AssociatedTranslationTable},
-};
-
-/// Translation table type used by the initial MMU driver.
-pub type KernelTranslationTable =
-    <KernelVirtAddrSpace as AssociatedTranslationTable>::TableStartFromBottom;
+use crate::memory::{Address, Physical, Virtual};
 
 //--------------------------------------------------------------------------------------------------
 // Public Definitions

@@ -10,6 +10,7 @@ use crate::{
     bsp::device_driver::common::BoundedUsize,
     driver,
     exception::{self, asynchronous::IRQHandlerDescriptor},
+    memory::{Address, Virtual},
 };
 use core::fmt;
 
@@ -91,11 +92,9 @@ impl InterruptController {
     /// # Safety
     ///
     /// - The user must ensure to provide a correct MMIO start address.
-    pub const unsafe fn new(periph_mmio_start_addr: usize) -> Self {
-        unsafe {
-            Self {
-                periph: peripheral_ic::PeripheralIC::new(periph_mmio_start_addr),
-            }
+    pub const unsafe fn new(periph_mmio_start_addr: Address<Virtual>) -> Self {
+        Self {
+            periph: peripheral_ic::PeripheralIC::new(periph_mmio_start_addr),
         }
     }
 }

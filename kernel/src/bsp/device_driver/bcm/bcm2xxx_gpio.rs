@@ -5,8 +5,12 @@
 //! GPIO Driver.
 
 use crate::{
-    bsp::device_driver::common::MMIODerefWrapper, driver, exception::asynchronous::IRQNumber,
-    synchronization, synchronization::IRQSafeNullLock,
+    bsp::device_driver::common::MMIODerefWrapper,
+    driver,
+    exception::asynchronous::IRQNumber,
+    memory::{Address, Virtual},
+    synchronization,
+    synchronization::IRQSafeNullLock,
 };
 use tock_registers::{
     interfaces::{ReadWriteable, Writeable},
@@ -131,11 +135,9 @@ impl GPIOInner {
     /// # Safety
     ///
     /// - The user must ensure to provide a correct MMIO start address.
-    pub const unsafe fn new(mmio_start_addr: usize) -> Self {
-        unsafe {
-            Self {
-                registers: Registers::new(mmio_start_addr),
-            }
+    pub const unsafe fn new(mmio_start_addr: Address<Virtual>) -> Self {
+        Self {
+            registers: Registers::new(mmio_start_addr),
         }
     }
 
@@ -200,11 +202,9 @@ impl GPIO {
     /// # Safety
     ///
     /// - The user must ensure to provide a correct MMIO start address.
-    pub const unsafe fn new(mmio_start_addr: usize) -> Self {
-        unsafe {
-            Self {
-                inner: IRQSafeNullLock::new(GPIOInner::new(mmio_start_addr)),
-            }
+    pub const unsafe fn new(mmio_start_addr: Address<Virtual>) -> Self {
+        Self {
+            inner: IRQSafeNullLock::new(GPIOInner::new(mmio_start_addr)),
         }
     }
 

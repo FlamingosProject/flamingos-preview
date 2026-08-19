@@ -9,21 +9,17 @@
 
 use libkernel::{bsp, cpu, exception, info, memory, test};
 
-#[unsafe(no_mangle)]
+#[no_mangle]
 unsafe fn kernel_init() -> ! {
-    unsafe {
-        use memory::mmu::interface::MMU;
+    exception::handling_init();
+    let tables = memory::mmu::kernel_map_binary().expect("Kernel mapping failed");
+    memory::mmu::enable_mmu_and_caching(tables).expect("MMU initialization failed");
+    memory::mmu::post_enable_init();
+    bsp::driver::qemu_bring_up_console();
 
-        exception::handling_init();
-        memory::mmu::mmu()
-            .enable_mmu_and_caching()
-            .expect("MMU initialization failed");
-        bsp::driver::qemu_bring_up_console();
+    info!("Causing a page fault by reading address 9 GiB");
+    test::expect_panic();
+    core::ptr::read_volatile((9_usize * 1024 * 1024 * 1024) as *const u64);
 
-        info!("Causing a page fault by reading address 9 GiB");
-        test::expect_panic();
-        core::ptr::read_volatile((9_usize * 1024 * 1024 * 1024) as *const u64);
-
-        cpu::qemu_exit_failure()
-    }
+    cpu::qemu_exit_failure()
 }

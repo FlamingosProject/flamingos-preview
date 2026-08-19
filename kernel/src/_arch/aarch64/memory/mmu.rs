@@ -15,7 +15,7 @@
 
 use crate::{
     bsp, memory,
-    memory::mmu::{TranslationGranule, translation_table::KernelTranslationTable},
+    memory::{mmu::TranslationGranule, Address, Physical},
 };
 use aarch64_cpu::{asm::barrier, registers::*};
 // use core::hint::unlikely;      uncomment once stable
@@ -53,13 +53,6 @@ pub mod mair {
 // Global instances
 //--------------------------------------------------------------------------------------------------
 
-/// The kernel translation tables.
-///
-/// # Safety
-///
-/// - Supposed to land in `.bss`. Therefore, ensure that all initial member values boil down to "0".
-static mut KERNEL_TABLES: KernelTranslationTable = KernelTranslationTable::new();
-
 static MMU: MemoryManagementUnit = MemoryManagementUnit;
 
 //--------------------------------------------------------------------------------------------------
@@ -70,7 +63,7 @@ impl<const AS_SIZE: usize> memory::mmu::AddressSpace<AS_SIZE> {
     /// Checks for architectural restrictions.
     pub const fn arch_address_space_size_sanity_checks() {
         // Size must be at least one full 512 MiB table.
-        assert!(AS_SIZE.is_multiple_of(Granule512MiB::SIZE));
+        assert!((AS_SIZE % Granule512MiB::SIZE) == 0);
 
         // Check for 48 bit virtual address size as maximum, which is supported by any ARMv8
         // version.
@@ -94,7 +87,7 @@ impl MemoryManagementUnit {
 
     /// Configure various settings of stage 1 of the EL1 translation regime.
     fn configure_translation_control(&self) {
-        let t0sz = (64 - bsp::memory::mmu::KernelAddrSpace::SIZE_SHIFT) as u64;
+        let t0sz = (64 - bsp::memory::mmu::KernelVirtAddrSpace::SIZE_SHIFT) as u64;
 
         TCR_EL1.write(
             TCR_EL1::TBI0::Used
@@ -126,50 +119,41 @@ pub fn mmu() -> &'static impl memory::mmu::interface::MMU {
 use memory::mmu::MMUEnableError;
 
 impl memory::mmu::interface::MMU for MemoryManagementUnit {
-    unsafe fn enable_mmu_and_caching(&self) -> Result<(), MMUEnableError> {
-        unsafe {
-            if unlikely(self.is_enabled()) {
-                return Err(MMUEnableError::AlreadyEnabled);
-            }
-
-            // Fail early if translation granule is not supported.
-            if unlikely(!ID_AA64MMFR0_EL1.matches_all(ID_AA64MMFR0_EL1::TGran64::Supported)) {
-                return Err(MMUEnableError::Other(
-                    "Translation granule not supported in HW",
-                ));
-            }
-
-            // Prepare the memory attribute indirection register.
-            self.set_up_mair();
-
-            // Get a mutable reference to the kernel tables.
-            // # Safety
-            // This function is called only once, during
-            // kernel init.
-            let kt = &mut *core::ptr::addr_of_mut!(KERNEL_TABLES);
-
-            // Populate translation tables.
-            kt.populate_tt_entries().map_err(MMUEnableError::Other)?;
-
-            // Set the "Translation Table Base Register".
-            TTBR0_EL1.set_baddr(kt.physical_base_address().as_usize() as u64);
-
-            self.configure_translation_control();
-
-            // Switch the MMU on.
-            //
-            // First, force all previous changes to be seen before the MMU is enabled.
-            barrier::isb(barrier::SY);
-
-            // Enable the MMU and turn on data and instruction caching.
-            SCTLR_EL1
-                .modify(SCTLR_EL1::M::Enable + SCTLR_EL1::C::Cacheable + SCTLR_EL1::I::Cacheable);
-
-            // Force MMU init to complete before next instruction.
-            barrier::isb(barrier::SY);
-
-            Ok(())
+    unsafe fn enable_mmu_and_caching(
+        &self,
+        phys_tables_base_addr: Address<Physical>,
+    ) -> Result<(), MMUEnableError> {
+        if unlikely(self.is_enabled()) {
+            return Err(MMUEnableError::AlreadyEnabled);
         }
+
+        // Fail early if translation granule is not supported.
+        if unlikely(!ID_AA64MMFR0_EL1.matches_all(ID_AA64MMFR0_EL1::TGran64::Supported)) {
+            return Err(MMUEnableError::Other(
+                "Translation granule not supported in HW",
+            ));
+        }
+
+        // Prepare the memory attribute indirection register.
+        self.set_up_mair();
+
+        // Set the "Translation Table Base Register".
+        TTBR0_EL1.set_baddr(phys_tables_base_addr.as_usize() as u64);
+
+        self.configure_translation_control();
+
+        // Switch the MMU on.
+        //
+        // First, force all previous changes to be seen before the MMU is enabled.
+        barrier::isb(barrier::SY);
+
+        // Enable the MMU and turn on data and instruction caching.
+        SCTLR_EL1.modify(SCTLR_EL1::M::Enable + SCTLR_EL1::C::Cacheable + SCTLR_EL1::I::Cacheable);
+
+        // Force MMU init to complete before next instruction.
+        barrier::isb(barrier::SY);
+
+        Ok(())
     }
 
     #[inline(always)]

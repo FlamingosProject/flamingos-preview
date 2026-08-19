@@ -10,28 +10,24 @@
 use core::time::Duration;
 use libkernel::{bsp, cpu, exception, memory, time};
 
-#[unsafe(no_mangle)]
+#[no_mangle]
 unsafe fn kernel_init() -> ! {
-    unsafe {
-        use memory::mmu::interface::MMU;
+    exception::handling_init();
+    let tables = memory::mmu::kernel_map_binary().expect("Kernel mapping failed");
+    memory::mmu::enable_mmu_and_caching(tables).expect("MMU initialization failed");
+    memory::mmu::post_enable_init();
+    bsp::driver::qemu_bring_up_console();
 
-        exception::handling_init();
-        memory::mmu::mmu()
-            .enable_mmu_and_caching()
-            .expect("MMU initialization failed");
-        bsp::driver::qemu_bring_up_console();
+    assert!(time::time_manager().uptime().as_nanos() > 0);
 
-        assert!(time::time_manager().uptime().as_nanos() > 0);
+    let resolution = time::time_manager().resolution().as_nanos();
+    assert!(resolution > 0);
+    assert!(resolution < 100);
 
-        let resolution = time::time_manager().resolution().as_nanos();
-        assert!(resolution > 0);
-        assert!(resolution < 100);
+    let before = time::time_manager().uptime();
+    time::time_manager().spin_for(Duration::from_secs(1));
+    let after = time::time_manager().uptime();
+    assert_eq!((after - before).as_secs(), 1);
 
-        let before = time::time_manager().uptime();
-        time::time_manager().spin_for(Duration::from_secs(1));
-        let after = time::time_manager().uptime();
-        assert_eq!((after - before).as_secs(), 1);
-
-        cpu::qemu_exit_success()
-    }
+    cpu::qemu_exit_success()
 }
