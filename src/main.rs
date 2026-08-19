@@ -141,34 +141,70 @@ unsafe fn kernel_init() -> ! {
     kernel_main()
 }
 
+const MINILOAD_LOGO: &str = r#"
+ __  __ _      _ _                 _
+|  \/  (_)_ _ (_) |   ___  __ _ __| |
+| |\/| | | ' \| | |__/ _ \/ _` / _` |
+|_|  |_|_|_||_|_|____\___/\__,_\__,_|
+"#;
+
+fn display_logo() {
+    print!("{MINILOAD_LOGO}");
+}
+
 /// The main function running after the early init.
 fn kernel_main() -> ! {
-    use console::{console, set_input_policy, EchoPolicy, InputPolicy};
+    use console::{console, raw_console};
 
-    println!(
-        "[0] {} version {}",
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_VERSION")
-    );
-    println!("[1] Booting on: {}", bsp::board_name());
+    display_logo();
+    println!("{:^37}", bsp::board_name());
+    println!();
+    println!("[ML] Requesting binary");
+    console().flush();
+    let raw = raw_console();
 
-    println!("[2] Drivers loaded:");
-    driver::driver_manager().enumerate();
+    // Discard any spurious received characters before starting with the loader protocol.
+    raw.clear_rx();
 
-    println!("[3] Bytes written: {}", console().bytes_written());
-    println!("[4] Echoing input now");
+    // Notify `Minipush` to send the binary.
+    for _ in 0..3 {
+        raw.write_byte(3);
+    }
 
     #[cfg(feature = "test_build")]
     cpu::qemu_exit_success();
 
-    set_input_policy(InputPolicy {
-        map_cr_to_lf: true,
-        echo: EchoPolicy::Cooked,
-    });
+    // Read the binary's size.
+    let mut size: u32 = u32::from(raw.read_byte());
+    size |= u32::from(raw.read_byte()) << 8;
+    size |= u32::from(raw.read_byte()) << 16;
+    size |= u32::from(raw.read_byte()) << 24;
 
-    // Discard any spurious received characters before enabling terminal echo.
-    console().clear_rx();
-    loop {
-        let _ = console().read_byte();
+    // Trust it's not too big.
+    raw.write_byte(b'O');
+    raw.write_byte(b'K');
+
+    let kernel_addr = bsp::memory::board_default_load_addr();
+    unsafe {
+        // Read the kernel byte by byte.
+        let la = kernel_addr as *mut u8;
+        for i in 0..size {
+            core::ptr::write_volatile(la.offset(i as isize), raw.read_byte())
+        }
+    }
+
+    println!("[ML] Loaded! Executing the payload now\n");
+    console().flush();
+
+    // Use black magic to create a function pointer.
+    let kernel: fn(*const u32) -> ! = unsafe { core::mem::transmute(kernel_addr) };
+
+    // Jump to loaded kernel!
+    extern "C" {
+        static __device_tree_start: u32;
+    }
+    unsafe {
+        assert_eq!(__device_tree_start, 0xedfe0dd0);
+        kernel(core::ptr::addr_of!(__device_tree_start))
     }
 }
