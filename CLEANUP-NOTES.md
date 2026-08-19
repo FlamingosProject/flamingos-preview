@@ -11,7 +11,7 @@
   chapter properly stacked, allowing rebasing to correct
   code in current and subsequent chapters. Some scripts
   would be helpful here
-* Clean up crlf mess starting ch 5.
+* Keep raw drivers byte-exact; terminal line discipline handles text newlines.
 * Replace the Ruby terminal with Rust `scip` plus a Rust
   chainloader host replacement
 * Add a crc32 to the chainloader to validate the kernel
