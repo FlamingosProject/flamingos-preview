@@ -1,8 +1,8 @@
 [package]
 name = "mingo"
 version = "1.0.0"
-description = "Boot Improvements — Chapter 20"
-keywords = ["boot-improvements"]
+description = "Second Core — Chapter 21"
+keywords = ["second-core"]
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
 edition = "2024"
 

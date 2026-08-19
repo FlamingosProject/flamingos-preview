@@ -61,7 +61,22 @@ _start:
 	and	x1, x1, {CONST_CORE_ID_MASK}
 	ldr	x2, BOOT_CORE_ID      // provided by bsp/__board_name__/cpu.rs
 	cmp	x1, x2
-	b.ne	.L_parking_loop
+	b.eq	.L_am_boot_core
+
+	// Leave a core parked until started by setting the core's BOOT_PARK byte to nonzero and
+	// interrupting the core.
+.L_not_boot_core:
+	wfe
+	ADR_REL	x3, BOOT_PARK
+	ldrb	w3, [x3, x1]
+	cbz	w3, .L_not_boot_core
+	mov	x0, x1
+	ADR_REL	x3, __boot_core_stack_end_exclusive
+	mov	sp, x3
+	b	_start_core
+
+.L_am_boot_core:
+	// If execution reaches here, it is the boot core.
 
 	// Establish a physical stack before calling the Rust boot-tracing helper.
 	ADR_REL	x0, __boot_core_stack_end_exclusive
