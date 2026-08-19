@@ -1,13 +1,12 @@
 [package]
 name = "mingo"
-version = "1.0.0"
-description = "Kernel Symbols — Chapter 17"
-keywords = ["kernel-symbols"]
+version = "0.19.0"
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
-edition = "2024"
+edition = "2021"
 
 [features]
 default = []
+debug_prints = []
 bsp_rpi3 = ["tock-registers"]
 bsp_rpi4 = ["tock-registers"]
 test_build = ["qemu-exit"]
@@ -21,6 +20,7 @@ chainloader = []
 [dependencies]
 unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "hide-trace"] }
 debug-symbol-types = { path = "../libraries/debug-symbol-types" }
+linked_list_allocator = { version = "0.10.x", default-features = false, features = ["const_mut_refs"] }
 
 # Optional dependencies
 tock-registers = { version = "0.9", default-features = false, features = [

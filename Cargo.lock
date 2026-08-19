@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "debug-symbol-types"
-version = "1.0.0"
+version = "0.1.0"
 
 [[package]]
 name = "gimli"
@@ -167,14 +167,14 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
 name = "kernel_symbols"
-version = "1.0.0"
+version = "0.1.0"
 dependencies = [
  "debug-symbol-types",
 ]
 
 [[package]]
 name = "kernel_symbols_tool"
-version = "1.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "goblin",
@@ -183,13 +183,19 @@ dependencies = [
 
 [[package]]
 name = "kernel_test_runner"
-version = "1.0.0"
+version = "0.1.0"
 
 [[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
+
+[[package]]
+name = "linked_list_allocator"
+version = "0.10.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9afa463f5405ee81cdb9cc2baf37e08ec7e4c8209442b5d72c04cfb2cd6e6286"
 
 [[package]]
 name = "log"
@@ -205,10 +211,11 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "mingo"
-version = "1.0.0"
+version = "0.19.0"
 dependencies = [
  "aarch64-cpu",
  "debug-symbol-types",
+ "linked_list_allocator",
  "qemu-exit",
  "tock-registers",
  "unwinding",
@@ -341,7 +348,7 @@ checksum = "2b9e2fdb3a1e862c0661768b7ed25390811df1947a8acbfbefe09b47078d93c4"
 
 [[package]]
 name = "translation_table_tool"
-version = "1.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -461,4 +468,4 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "xtask"
-version = "1.0.0"
+version = "0.1.0"
