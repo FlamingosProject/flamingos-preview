@@ -14,3 +14,7 @@
 	path = 04-safe-globals
 	url = https://github.com/FlamingosProject/flamingos-preview.git
 	branch = 04-safe-globals
+[submodule "05-drivers-gpio-uart"]
+	path = 05-drivers-gpio-uart
+	url = https://github.com/FlamingosProject/flamingos-preview.git
+	branch = 05-drivers-gpio-uart
