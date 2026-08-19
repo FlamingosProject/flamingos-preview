@@ -124,7 +124,7 @@ impl<T> interface::ReadWriteEx for InitStateLock<T> {
             "InitStateLock::write called after kernel init phase"
         );
         assert!(
-            !exception::asynchronous::is_local_irq_masked(),
+            exception::asynchronous::is_local_irq_masked(),
             "InitStateLock::write called with IRQs unmasked"
         );
 

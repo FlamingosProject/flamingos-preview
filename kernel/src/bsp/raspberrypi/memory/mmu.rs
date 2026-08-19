@@ -6,11 +6,11 @@
 
 use crate::{
     memory::{
-        Physical, Virtual,
         mmu::{
             self as generic_mmu, AddressSpace, AssociatedTranslationTable, AttributeFields,
             MemoryRegion, PageAddress, TranslationGranule,
         },
+        Physical, Virtual,
     },
     synchronization::InitStateLock,
 };
@@ -20,7 +20,7 @@ use crate::{
 //--------------------------------------------------------------------------------------------------
 
 type KernelTranslationTable =
-    <KernelVirtAddrSpace as AssociatedTranslationTable>::TableStartFromBottom;
+    <KernelVirtAddrSpace as AssociatedTranslationTable>::TableStartFromTop;
 
 //--------------------------------------------------------------------------------------------------
 // Public Definitions
@@ -42,9 +42,9 @@ pub type KernelVirtAddrSpace = AddressSpace<{ kernel_virt_addr_space_size() }>;
 /// It is mandatory that InitStateLock is transparent.
 ///
 /// That is, `size_of(InitStateLock<KernelTranslationTable>) == size_of(KernelTranslationTable)`.
-/// There is a unit tests that checks this porperty.
-#[unsafe(link_section = ".data")]
-#[unsafe(no_mangle)]
+/// The translation-table tool writes the table bytes directly into this static.
+#[link_section = ".data"]
+#[no_mangle]
 static KERNEL_TABLES: InitStateLock<KernelTranslationTable> =
     InitStateLock::new(KernelTranslationTable::new_for_precompute());
 
@@ -52,8 +52,8 @@ static KERNEL_TABLES: InitStateLock<KernelTranslationTable> =
 ///
 /// This will be patched to the correct value by the "translation table tool" after linking. This
 /// given value here is just a dummy.
-#[unsafe(link_section = ".text._start_arguments")]
-#[unsafe(no_mangle)]
+#[link_section = ".text._start_arguments"]
+#[no_mangle]
 static PHYS_KERNEL_TABLES_BASE_ADDR: u64 = 0xCCCCAAAAFFFFEEEE;
 
 //--------------------------------------------------------------------------------------------------
@@ -78,7 +78,7 @@ const fn kernel_virt_addr_space_size() -> usize {
 /// Helper function for calculating the number of pages the given parameter spans.
 const fn size_to_num_pages(size: usize) -> usize {
     assert!(size > 0);
-    assert!(size.is_multiple_of(KernelGranule::SIZE));
+    assert!(size % KernelGranule::SIZE == 0);
 
     size >> KernelGranule::SHIFT
 }
@@ -156,14 +156,6 @@ pub fn virt_mmio_remap_region() -> MemoryRegion<Virtual> {
 /// `translation table tool` and patched into the kernel binary. This function just adds the mapping
 /// record entries.
 pub fn kernel_add_mapping_records_for_precomputed() {
-    let virt_boot_core_stack_region = virt_boot_core_stack_region();
-    generic_mmu::kernel_add_mapping_record(
-        "Kernel boot-core stack",
-        &virt_boot_core_stack_region,
-        &kernel_virt_to_phys_region(virt_boot_core_stack_region),
-        &kernel_page_attributes(virt_boot_core_stack_region.start_page_addr()),
-    );
-
     let virt_code_region = virt_code_region();
     generic_mmu::kernel_add_mapping_record(
         "Kernel code and RO data",
@@ -178,5 +170,13 @@ pub fn kernel_add_mapping_records_for_precomputed() {
         &virt_data_region,
         &kernel_virt_to_phys_region(virt_data_region),
         &kernel_page_attributes(virt_data_region.start_page_addr()),
+    );
+
+    let virt_boot_core_stack_region = virt_boot_core_stack_region();
+    generic_mmu::kernel_add_mapping_record(
+        "Kernel boot-core stack",
+        &virt_boot_core_stack_region,
+        &kernel_virt_to_phys_region(virt_boot_core_stack_region),
+        &kernel_page_attributes(virt_boot_core_stack_region.start_page_addr()),
     );
 }
