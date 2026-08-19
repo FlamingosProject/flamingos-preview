@@ -113,8 +113,10 @@
 compile_error!("Either feature \"bsp_rpi3\" or \"bsp_rpi4\" must be enabled for this crate.");
 
 mod bsp;
+mod console;
 mod cpu;
 mod panic_wait;
+mod print;
 
 /// Early init code.
 ///
@@ -122,5 +124,14 @@ mod panic_wait;
 ///
 /// - Only a single core must be active and running this function.
 unsafe fn kernel_init() -> ! {
-    panic!()
+    println!("Hello from Rust!");
+
+    #[cfg(feature = "test_build")]
+    {
+        println!("Boot test complete");
+        cpu::qemu_exit_success()
+    }
+
+    #[cfg(not(feature = "test_build"))]
+    panic!("Stopping here.")
 }
