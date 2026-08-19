@@ -4,7 +4,7 @@
 
 //! Kernel panic handling for normal and QEMU test builds.
 
-use crate::cpu;
+use crate::{cpu, println};
 use core::panic::PanicInfo;
 
 //--------------------------------------------------------------------------------------------------
@@ -44,9 +44,7 @@ fn panic_prevent_reenter() {
 
     static PANIC_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
-    if !PANIC_IN_PROGRESS.load(Ordering::Relaxed) {
-        PANIC_IN_PROGRESS.store(true, Ordering::Relaxed);
-
+    if !PANIC_IN_PROGRESS.fetch_or(true, Ordering::AcqRel) {
         return;
     }
 
@@ -63,22 +61,16 @@ fn panic(info: &PanicInfo) -> ! {
         _ => ("???", 0, 0),
     };
 
-    macro_rules! pr {
-        ($($args:tt)*) => {
-            let _ = writeln!($crate::console::console(), $($args)*);
-        };
-    }
-
-    pr!("Kernel panic!");
-    pr!();
-    pr!("Panic location:");
-    pr!(
+    println!("Kernel panic!");
+    println!();
+    println!("Panic location:");
+    println!(
         "File '{}', line {}, column {}",
         location,
         line,
         column,
     );
-    pr!("{}", info.message());
+    println!("{}", info.message());
 
     panic_exit()
 }
