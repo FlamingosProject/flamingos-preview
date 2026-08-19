@@ -5,7 +5,7 @@
 //! A console that retains output produced before the real console is available.
 
 use super::interface;
-use crate::synchronization::{self, NullLock};
+use crate::synchronization::{self, InitStateLock};
 
 const BUFFER_SIZE: usize = 64 * 1024;
 
@@ -16,11 +16,11 @@ struct BufferConsoleInner {
 }
 
 pub struct BufferConsole {
-    inner: NullLock<BufferConsoleInner>,
+    inner: InitStateLock<BufferConsoleInner>,
 }
 
 pub static BUFFER_CONSOLE: BufferConsole = BufferConsole {
-    inner: NullLock::new(BufferConsoleInner {
+    inner: InitStateLock::new(BufferConsoleInner {
         // A zero initializer keeps the storage in BSS instead of inflating the kernel image.
         buffer: [0; BUFFER_SIZE],
         len: 0,
@@ -28,11 +28,11 @@ pub static BUFFER_CONSOLE: BufferConsole = BufferConsole {
     }),
 };
 
-use synchronization::interface::Mutex;
+use synchronization::interface::ReadWriteEx;
 
 impl BufferConsole {
     fn write_byte(&self, byte: u8) {
-        self.inner.lock(|inner| {
+        self.inner.write(|inner| {
             if !inner.drained && inner.len < inner.buffer.len() {
                 inner.buffer[inner.len] = byte;
                 inner.len += 1;
@@ -42,7 +42,7 @@ impl BufferConsole {
 
     /// Replay all retained output to `destination` exactly once.
     pub fn drain_to(&self, destination: &dyn interface::RawConsole) {
-        self.inner.lock(|inner| {
+        self.inner.write(|inner| {
             if inner.drained {
                 return;
             }
@@ -72,7 +72,7 @@ impl interface::RawRead for BufferConsole {
 
 impl interface::Statistics for BufferConsole {
     fn bytes_written(&self) -> usize {
-        self.inner.lock(|inner| inner.len)
+        self.inner.read(|inner| inner.len)
     }
 
     fn bytes_read(&self) -> usize {

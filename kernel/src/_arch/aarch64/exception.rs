@@ -11,6 +11,7 @@
 //!
 //! crate::exception::arch_exception
 
+use crate::exception;
 use aarch64_cpu::{asm::barrier, registers::*};
 use core::{arch::global_asm, cell::UnsafeCell, fmt};
 use tock_registers::{
@@ -102,8 +103,9 @@ extern "C" fn current_elx_synchronous(e: &mut ExceptionContext) {
 }
 
 #[no_mangle]
-extern "C" fn current_elx_irq(e: &mut ExceptionContext) {
-    default_exception_handler(e);
+extern "C" fn current_elx_irq(_e: &mut ExceptionContext) {
+    let token = unsafe { &exception::asynchronous::IRQContext::new() };
+    exception::asynchronous::irq_manager().handle_pending_irqs(token);
 }
 
 #[no_mangle]
