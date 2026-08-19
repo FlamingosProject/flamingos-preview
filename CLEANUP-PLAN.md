@@ -115,7 +115,7 @@ experiments, or exact original attribution matters.
 
 ## Historical Preservation
 
-Before rewriting any public ref, we will preserve the current repository in three ways.
+Before rewriting any public ref, we will preserve the current repository in four ways.
 
 ### Remote Archive Refs
 
@@ -123,11 +123,11 @@ We will create immutable remote refs for `main` and every numbered branch, using
 such as:
 
 ```text
-archive-2026-08-12/main
-archive-2026-08-12/01-wait-forever
-archive-2026-08-12/02-runtime-init
+archive/2026-08-19/main
+archive/2026-08-19/01-wait-forever
+archive/2026-08-19/02-runtime-init
 ...
-archive-2026-08-12/21-second-core
+archive/2026-08-19/21-second-core
 ```
 
 Archiving `main` alone is insufficient. A submodule gitlink records another commit's object ID but
@@ -139,6 +139,12 @@ own archive ref, or an equivalent explicit reachability anchor.
 We will create and verify a complete Git bundle containing all refs before the rewrite. The bundle
 will be stored outside the working repository and will provide an independent recovery path even if
 remote archive refs are changed accidentally.
+
+### Independent Local Clone
+
+We will create a local clone at `../flamingos-preview.bak2` using `--no-hardlinks`. This makes its
+object storage independent of the working repository rather than relying on hardlinked local Git
+objects. The clone will be checked with `git fsck` and its refs compared with the frozen manifest.
 
 ### Old-to-New Mapping
 
@@ -158,11 +164,15 @@ not.
 Bart Massey and Philipp Oppermann performed the fork-era work jointly. Attribution at the curated
 commit level does not need to reproduce the authorship granularity of the archived history.
 
-Every human-authored curated commit will list both Bart and Philipp, using one consistent primary
-author and a `Co-authored-by` trailer for the other. We will agree on the primary-author convention
-before constructing commits. The archive remains the source of exact original authorship and dates.
+Every human-authored curated commit will use the neutral identity
+`Flamingos Project <noreply@flamingosproject.org>` as its author and will list Bart and Philipp with
+equal `Co-authored-by` trailers. Neither person will be presented as the primary author. The archive
+remains the source of exact original authorship and dates.
 
-Generated or purely mechanical commits, if any are unavoidable, will be identified explicitly.
+Commits written in part by an AI agent will also retain an agent `Co-authored-by` trailer. Existing
+commit messages identify Claude's contributions to the Chapter 11 backtrace and Chapter 17 kernel
+symbol work. Codex is participating in construction and message-writing for the curated history and
+will therefore be credited on all newly constructed commits. Agent identities use noreply addresses.
 
 ## Commit Content and Messages
 
@@ -209,29 +219,41 @@ unchanged until review is complete.
 1. Confirm `644474cc` as the fork boundary.
 2. Freeze a list of current refs, commits, trees, and submodule pointers.
 3. Create and push the remote archive refs.
-4. Create, verify, and externally store a complete Git bundle.
-5. Draft and review the 21 chapter commit messages and authorship metadata.
-6. Reconstruct the chapter chain from canonical snapshots in an isolated worktree.
-7. Validate each chapter immediately after creating it.
-8. Verify exact tree equality between every archived and rewritten chapter tip.
-9. Construct the clean display-tree history and point it at the rewritten chapter tips.
-10. Produce and review the old-to-new commit and tree mapping.
-11. Review the final graphs, commit messages, archive refs, and validation results.
-12. Force-update public chapter branches and `main` only after explicit approval.
-13. Verify all remote refs after the push and retain the archive refs and bundle permanently.
+4. Create and verify the independent local clone.
+5. Create, verify, and externally store a complete Git bundle.
+6. Draft and review the 21 chapter commit messages and authorship metadata.
+7. Reconstruct the chapter chain from canonical snapshots in an isolated worktree.
+8. Validate each chapter immediately after creating it.
+9. Verify exact tree equality between every archived and rewritten chapter tip.
+10. Construct the clean display-tree history and point it at the rewritten chapter tips.
+11. Produce and review the old-to-new commit and tree mapping.
+12. Review the final graphs, commit messages, archive refs, and validation results.
+13. Force-update public chapter branches and `main` only after explicit approval.
+14. Verify all remote refs after the push and retain the archive refs, clone, and bundle permanently.
 
-## Review Decisions
+## Resolved Decisions
 
-Before implementation, Bart and Philipp should agree on:
+Bart and Philipp approved the following implementation choices:
 
-1. Whether `644474cc` is the correct fork boundary.
-2. The dated archive-ref namespace and retention policy.
-3. Where the verified external bundle will be stored.
-4. Which person is the primary author on curated commits and the exact co-author identities.
-5. Whether the display tree should use one setup commit plus one commit per chapter, as proposed, or
-   a smaller number of aggregate commits.
-6. The desired depth of chapter-by-chapter build and runtime validation.
-7. Whether the mapping report belongs in the final repository or only in the archival material.
+1. `644474cc` is the fork boundary.
+2. Permanent remote archive refs use the namespace `archive/2026-08-19/` and include `main` and all
+   numbered branches.
+3. The verified bundle is stored initially at
+   `/usr/local/src/fp/flamingos-preview-pre-cleanup-2026-08-19.bundle`, outside the repository. It
+   should subsequently be copied to independent storage.
+4. An independent local clone is stored at `../flamingos-preview.bak2` and created without
+   hardlinked Git objects.
+5. Curated commits use `Flamingos Project <noreply@flamingosproject.org>` as a neutral author. Bart
+   Massey and Philipp Oppermann are equal co-authors of every human-authored commit. Claude and
+   Codex receive noreply co-author trailers wherever their work contributes.
+6. The display tree uses one setup commit, one commit per chapter, and, if needed, one final
+   maintenance commit for aggregate material that does not fit naturally into a chapter addition.
+7. Full validation is required. This includes exact tree equality and structural checks everywhere,
+   both BSP builds wherever supported, chainloader builds from Chapter 06 onward, JTAG preparation
+   from Chapter 08 onward, stable QEMU tests from Chapter 12 onward, and applicable smoke checks for
+   earlier chapters.
+8. The old-to-new mapping report is committed to the final display-tree `main` branch.
+9. This resolved plan remains in the final display tree as the rationale for the dual-history
+   structure.
 
-No history rewrite should begin until these decisions and the preservation artifacts have been
-reviewed.
+The rewrite may proceed only after the archive refs and verified external bundle exist.
