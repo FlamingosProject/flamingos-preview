@@ -1,166 +1,254 @@
-# Tutorial 09 - Privilege Level
+# Tutorial 10 - Virtual Memory Part 1: Identity Map All The Things!
 
 ## tl;dr
 
-- In early boot code, we transition from the `Hypervisor` privilege level (`EL2` in AArch64)
-  to the `Kernel` (`EL1`) privilege level.
+- The `MMU` is turned on.
+- A simple scheme is used: Static `64 KiB` translation tables.
+- Physical and virtual addresses, page ranges, and translation-table operations gain typed,
+  architecture-neutral interfaces from their first appearance.
+- For educational purposes, we write to a remapped `UART`, and `identity map` everything else.
 
 ## Table of Contents
 
-- [Tutorial 09 - Privilege Level](#tutorial-09---privilege-level)
+- [Tutorial 10 - Virtual Memory Part 1: Identity Map All The Things!](#tutorial-10---virtual-memory-part-1-identity-map-all-the-things)
   - [tl;dr](#tldr)
   - [Table of Contents](#table-of-contents)
   - [Introduction](#introduction)
-  - [Scope of this tutorial](#scope-of-this-tutorial)
-  - [Checking for EL2 in the entrypoint](#checking-for-el2-in-the-entrypoint)
-  - [Transition preparation](#transition-preparation)
-  - [Returning from an exception that never happened](#returning-from-an-exception-that-never-happened)
+  - [MMU and paging theory](#mmu-and-paging-theory)
+  - [Approach](#approach)
+    - [Generic Kernel code: `memory/mmu.rs`](#generic-kernel-code-memorymmurs)
+    - [BSP: `bsp/raspberrypi/memory/mmu.rs`](#bsp-bspraspberrypimemorymmurs)
+    - [AArch64: `_arch/aarch64/memory/*`](#aarch64-_archaarch64memory)
+    - [`kernel.ld`](#kernelld)
+  - [Address translation examples](#address-translation-examples)
+    - [Address translation using a 64 KiB page descriptor](#address-translation-using-a-64-kib-page-descriptor)
+  - [Zero-cost abstraction](#zero-cost-abstraction)
   - [Test it](#test-it)
 
 ## Introduction
 
-Application-grade CPUs have so-called `privilege levels`, which have different purposes:
+Virtual memory is an immensely complex, but important and powerful topic. In this tutorial, we start
+slow and easy by switching on the `MMU`, using static translation tables and `identity-map`
+everything at once (except for the `UART`, which we also remap a second time for educational
+purposes; This will be gone again in the next tutorial).
 
-| Typically used for     | AArch64 | RISC-V | x86     |
-| ---------------------- | ------- | ------ | ------- |
-| Userspace applications | EL0     | U/VU   | Ring 3  |
-| OS Kernel              | EL1     | S/VS   | Ring 0  |
-| Hypervisor             | EL2     | HS     | Ring -1 |
-| Low-Level Firmware     | EL3     | M      |         |
+## MMU and paging theory
 
-`EL` in AArch64 stands for `Exception Level`. If you want more information regarding the
-other architectures, please have a look at the following links:
-- [x86 privilege rings].
-- [RISC-V privilege modes].
+At this point, we will not re-invent the wheel and go into detailed descriptions of how paging in
+modern application-grade processors works. The internet is full of great resources regarding this
+topic, and we encourage you to read some of it to get a high-level understanding of the topic.
 
-At this point, I strongly recommend that you take a look at the [AArch64 Exception Model]
-before you continue. You might also want to take a look at the (massive) [Programmer's Guide
-for ARMv8-A].
+To follow the rest of this `AArch64` specific tutorial, I strongly recommend that you stop right
+here and first read `Chapter 12` of the [ARM Cortex-A Series Programmer's Guide for ARMv8-A] before
+you continue. This will set you up with all the `AArch64`-specific knowledge needed to follow along.
 
-[x86 privilege rings]: https://en.wikipedia.org/wiki/Protection_ring
-[RISC-V privilege modes]: https://five-embeddev.com/riscv-priv-isa-manual/Priv-v1.12/priv-intro.html#privilege-levels
-[AArch64 Exception Model]: https://developer.arm.com/documentation/102412/0103/Privilege-and-Exception-levels/Types-of-privilege
-[Programmer’s Guide for ARMv8-A]: https://developer.arm.com/documentation/ddi0487/lb
+Back from reading `Chapter 12` already? Good job :+1:!
 
-## Scope of this tutorial
+[ARM Cortex-A Series Programmer's Guide for ARMv8-A]: https://developer.arm.com/documentation/den0013/0400/The-Memory-Management-Unit
 
-The Raspberry Pi pre-boot firmware will start in `EL3` and give us control at `EL2`. It is
-more normal to run OS kernel code at `EL1`, so we will transition there.
+## Approach
 
-## Checking for EL2 in the entrypoint
+1. The generic `kernel` part: `src/memory.rs` and `src/memory/mmu/*` provide typed physical and
+   virtual addresses, page-aligned ranges, portable mapping attributes, and a translation-table
+   interface. `KernelVirtualLayout` retains the simple policy used by this chapter.
+2. The `BSP` part: `src/bsp/raspberrypi/memory/mmu.rs` contains a static instance of
+   `KernelVirtualLayout` and makes it accessible through the function
+   `bsp::memory::mmu::virt_mem_layout()`.
+3. The `aarch64` part: `src/_arch/aarch64/memory/mmu.rs` and its submodules contain the actual `MMU`
+   driver. It picks up the `BSP`'s high-level `KernelVirtualLayout` and maps it using a `64 KiB`
+   granule.
 
-First of all, we need to ensure that we are actually executing in `EL2` before we can call
-respective code to transition to `EL1`. Therefore, we add a new check to the top of
-`boot.s`, which parks the CPU core should it not be in `EL2`.
+### Generic Kernel code: `memory/mmu.rs`
 
-```
-// Only proceed if the core executes in EL2. Park it otherwise.
-mrs	x0, CurrentEL
-cmp	x0, {CONST_CURRENTEL_EL2}
-b.ne	.L_parking_loop
-```
+This first MMU chapter establishes the address and mapping vocabulary that later chapters build on.
+`Address<Physical>` and `Address<Virtual>` prevent accidental mixing of address spaces.
+`PageAddress<ATYPE>` and `MemoryRegion<ATYPE>` make page alignment and half-open ranges explicit.
+The descriptor types express portable attributes such as `R/W`, `no-execute`, and
+`cached/uncached`.
 
-Afterwards, we continue with preparing the `EL2` -> `EL1` transition by calling
-`prepare_el2_to_el1_transition()` in `boot.rs`:
+The durable architecture-neutral interface for a table is introduced at the same time:
 
 ```rust
-#[no_mangle]
-pub unsafe extern "C" fn _start_rust(phys_boot_core_stack_end_exclusive_addr: u64) -> ! {
-    prepare_el2_to_el1_transition(phys_boot_core_stack_end_exclusive_addr);
+pub trait TranslationTable {
+    fn init(&mut self);
+    fn phys_base_address(&self) -> Address<Physical>;
 
-    // Use `eret` to "return" to EL1. This results in execution of kernel_init() in EL1.
-    asm::eret()
+    unsafe fn map_at(
+        &mut self,
+        virt_region: &MemoryRegion<Virtual>,
+        phys_region: &MemoryRegion<Physical>,
+        attr: &AttributeFields,
+    ) -> Result<(), &'static str>;
 }
 ```
 
-## Transition preparation
+Chapter 10 uses this interface to build a fixed table eagerly. Chapter 14 will reuse it when mapping
+only selected regions at runtime.
 
-Since `EL2` is more privileged than `EL1`, it has control over various processor features and can
-allow or disallow `EL1` code to use them. One such example is access to timer and counter registers.
-We are already using them since [tutorial 07](../07_timestamps/), so of course we want to keep them.
-Therefore we set the respective flags in the [Counter-timer Hypervisor Control register] and
-additionally set the virtual offset to zero so that we get the real physical value everytime.
-(Note that `tock_register::fields::FieldValues` currently must be combined with `+` rather than `|`:
-see the [`BitOr` issue].)
+### BSP: `bsp/raspberrypi/memory/mmu.rs`
 
-[`BitOr`issue]: https://github.com/tock/tock/issues/4469
+This file contains an instance of `KernelVirtualLayout`, which stores the board-specific policy. The
+`BSP` is the correct place to do this because it knows the target board's memory map.
 
-[Counter-timer Hypervisor Control register]:  https://docs.rs/aarch64-cpu/9.0.0/src/aarch64_cpu/registers/cnthctl_el2.rs.html
+The policy is to only describe regions that are **not** ordinary, normal cacheable DRAM. However,
+nothing prevents you from defining those too if you wish to. Here is an example for the device MMIO
+region:
 
 ```rust
-// Enable timer counter registers for EL1.
-CNTHCTL_EL2.write(CNTHCTL_EL2::EL1PCEN::SET + CNTHCTL_EL2::EL1PCTEN::SET);
-
-// No offset for reading the counters.
-CNTVOFF_EL2.set(0);
+TranslationDescriptor {
+    name: "Device MMIO",
+    virtual_range: mmio_range_inclusive,
+    physical_range_translation: Translation::Identity,
+    attribute_fields: AttributeFields {
+        mem_attributes: MemAttributes::Device,
+        acc_perms: AccessPermissions::ReadWrite,
+        execute_never: true,
+    },
+},
 ```
 
-Next, we configure the [Hypervisor Configuration Register] such that `EL1` runs in `AArch64` mode,
-and not in `AArch32`, which would also be possible.
-
-[Hypervisor Configuration Register]: https://docs.rs/aarch64-cpu/9.0.0/src/aarch64_cpu/registers/hcr_el2.rs.html
+`KernelVirtualLayout` itself implements the following method:
 
 ```rust
-// Set EL1 execution state to AArch64.
-HCR_EL2.write(HCR_EL2::RW::EL1IsAarch64);
+pub fn virt_addr_properties(
+    &self,
+    virt_addr: usize,
+) -> Result<(usize, AttributeFields), &'static str>
 ```
 
-## Returning from an exception that never happened
+It will be used by `_arch/aarch64`'s `MMU` code to request attributes for a virtual address and the
+translation, which delivers the physical output address (the `usize` in the return-tuple). The
+function scans for a descriptor that contains the queried address, and returns the respective
+findings for the first entry that is a hit. If no entry is found, it returns default attributes for
+normal cacheable DRAM and the input address, hence telling the `MMU` code that the requested
+address should be `identity mapped`.
 
-There is actually only one way to transition from a higher EL to a lower EL, which is by way of
-executing the [ERET] instruction.
+Due to this default behavior, it is not needed to define normal cacheable DRAM regions.
 
-[ERET]: https://docs.rs/aarch64-cpu/9.0.0/src/aarch64_cpu/asm.rs.html#92-101
+### AArch64: `_arch/aarch64/memory/*`
 
-This instruction will copy the contents of the [Saved Program Status Register - EL2] to `Current
-Program Status Register - EL1` and jump to the instruction address that is stored in the [Exception
-Link Register - EL2].
+These modules contain the `AArch64` `MMU` driver. The granule is hardcoded here (`64 KiB` page
+descriptors).
 
-This is basically the reverse of what is happening when an exception is taken. You'll learn about
-that in an upcoming tutorial.
+In `translation_table.rs`, the actual fixed-size table implements the generic `TranslationTable`
+trait. Its number of `LVL2` tables depends on the size of the target board's address space.
 
-[Saved Program Status Register - EL2]: https://docs.rs/aarch64-cpu/9.0.0/src/aarch64_cpu/registers/spsr_el2.rs.html
-[Exception Link Register - EL2]: https://docs.rs/aarch64-cpu/9.0.0/src/aarch64_cpu/registers/elr_el2.rs.html
+This information is used by `translation_table.rs` to calculate the number of needed `LVL2` tables.
+Since one `LVL2` table in a `64 KiB` configuration covers `512 MiB`, all that needs to be done is to
+divide `KernelAddrSpace::SIZE` by `512 MiB` (there are several compile-time checks in place that
+ensure that `KernelAddrSpace::SIZE` is a multiple of `512 MiB`).
+
+The final type is selected through the BSP address-space type's `AssociatedTranslationTable`
+implementation. During `MMU::init()`, `populate_tt_entries()` queries
+`bsp::memory::mmu::virt_mem_layout()` for each page, constructs typed one-page physical and virtual
+regions, and maps them through `TranslationTable::map_at()`. This preserves the chapter's deliberately
+simple whole-address-space policy while establishing an API suitable for later sparse mappings.
+
+One notable thing is that each page descriptor has an entry (`AttrIndex`) that indexes into the
+[MAIR_EL1] register, which holds information about the cacheability of the respective page. We
+currently define normal cacheable memory and device memory (which is not cached).
+
+[MAIR_EL1]: http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.ddi0500d/CIHDHJBB.html
 
 ```rust
-// Set up a simulated exception return.
-//
-// First, fake a saved program status where all interrupts were masked and SP_EL1 was used as a
-// stack pointer.
-SPSR_EL2.write(
-    SPSR_EL2::D::Masked
-        + SPSR_EL2::A::Masked
-        + SPSR_EL2::I::Masked
-        + SPSR_EL2::F::Masked
-        + SPSR_EL2::M::EL1h,
-);
+impl MemoryManagementUnit {
+    /// Setup function for the MAIR_EL1 register.
+    fn set_up_mair(&self) {
+        // Define the memory types being mapped.
+        MAIR_EL1.write(
+            // Attribute 1 - Cacheable normal DRAM.
+            MAIR_EL1::Attr1_Normal_Outer::WriteBack_NonTransient_ReadWriteAlloc +
+        MAIR_EL1::Attr1_Normal_Inner::WriteBack_NonTransient_ReadWriteAlloc +
 
-// Second, let the link register point to kernel_init().
-ELR_EL2.set(crate::kernel_init as *const () as u64);
-
-// Set up SP_EL1 (stack pointer), which will be used by EL1 once we "return" to it. Since there
-// are no plans to ever return to EL2, just re-use the same stack.
-SP_EL1.set(phys_boot_core_stack_end_exclusive_addr);
+        // Attribute 0 - Device.
+        MAIR_EL1::Attr0_Device::nonGathering_nonReordering_EarlyWriteAck,
+        );
+    }
 ```
 
-As you can see, we are populating `ELR_EL2` with the address of the `kernel_init()` function that we
-earlier used to call directly from the entrypoint. Finally, we set the stack pointer for `SP_EL1`.
-
-You might have noticed that the stack's address was supplied as a function argument. As you might
-remember, in  `_start()` in `boot.s`, we are already setting up the stack for `EL2`. Since there
-are no plans to ever return to `EL2`, we can just re-use the same stack for `EL1`, so its address is
-forwarded using function arguments.
-
-Lastly, back in `_start_rust()` a call to `ERET` is made:
+Afterwards, the [Translation Table Base Register 0 - EL1] is set up with the base address of the
+`lvl2` tables and the [Translation Control Register - EL1] is configured:
 
 ```rust
-#[no_mangle]
-pub unsafe extern "C" fn _start_rust(phys_boot_core_stack_end_exclusive_addr: u64) -> ! {
-    prepare_el2_to_el1_transition(phys_boot_core_stack_end_exclusive_addr);
+// Set the "Translation Table Base Register".
+TTBR0_EL1.set_baddr(kt.physical_base_address().as_usize() as u64);
 
-    // Use `eret` to "return" to EL1. This results in execution of kernel_init() in EL1.
-    asm::eret()
+self.configure_translation_control();
+```
+
+Finally, the `MMU` is turned on through the [System Control Register - EL1]. The last step also
+enables caching for data and instructions.
+
+[Translation Table Base Register 0 - EL1]: https://docs.rs/aarch64-cpu/latest/src/aarch64_cpu/registers/ttbr0_el1.rs.html
+[Translation Control Register - EL1]: https://docs.rs/aarch64-cpu/latest/src/aarch64_cpu/registers/tcr_el1.rs.html
+[System Control Register - EL1]: https://docs.rs/aarch64-cpu/latest/src/aarch64_cpu/registers/sctlr_el1.rs.html
+
+### `kernel.ld`
+
+We need to align the `code` segment to `64 KiB` so that it doesn't overlap with the next section
+that needs read/write attributes instead of read/execute attributes:
+
+```ld.s
+. = ALIGN(PAGE_SIZE);
+__code_end_exclusive = .;
+```
+
+This blows up the binary in size, but is a small price to pay considering that it reduces the amount
+of static paging entries significantly, when compared to the classical `4 KiB` granule.
+
+## Address translation examples
+
+For educational purposes, a layout is defined which allows to access the `UART` via two different
+virtual addresses:
+- Since we identity map the whole `Device MMIO` region, it is accessible by accessing its physical
+  base address (`0x3F20_1000` or `0xFA20_1000` depending on which RPi you use) after the `MMU` is
+  turned on.
+- Additionally, it is also mapped into the last `64 KiB` slot in the first `512 MiB`, making it
+  accessible through base address `0x1FFF_1000`.
+
+The following block diagram visualizes the underlying translation for the second mapping.
+
+### Address translation using a 64 KiB page descriptor
+
+<img src="../doc/11_page_tables_64KiB.png" alt="Page Tables 64KiB" width="90%">
+
+## Zero-cost abstraction
+
+The MMU init code is again a good example to see the great potential of Rust's zero-cost
+abstractions[[1]][[2]] for embedded programming.
+
+Let's take a look again at the piece of code for setting up the `MAIR_EL1` register using the
+[aarch64-cpu] crate:
+
+[1]: https://blog.rust-lang.org/2015/05/11/traits.html
+[2]: https://ruudvanasseldonk.com/2016/11/30/zero-cost-abstractions
+[aarch64-cpu]: https://crates.io/crates/aarch64-cpu
+
+```rust
+/// Setup function for the MAIR_EL1 register.
+fn set_up_mair(&self) {
+    // Define the memory types being mapped.
+    MAIR_EL1.write(
+        // Attribute 1 - Cacheable normal DRAM.
+        MAIR_EL1::Attr1_Normal_Outer::WriteBack_NonTransient_ReadWriteAlloc +
+    MAIR_EL1::Attr1_Normal_Inner::WriteBack_NonTransient_ReadWriteAlloc +
+
+    // Attribute 0 - Device.
+    MAIR_EL1::Attr0_Device::nonGathering_nonReordering_EarlyWriteAck,
+    );
 }
+```
+
+This piece of code is super expressive, and it makes use of `traits`, different `types` and
+`constants` to provide type-safe register manipulation.
+
+In the end, this code sets the first four bytes of the register to certain values according to the
+data sheet. Looking at the generated code, we can see that despite all the type-safety and
+abstractions, it boils down to two assembly instructions:
+
+```text
+   800a8:       529fe089        mov     w9, #0xff04                     // #65284
+   800ac:       d518a209        msr     mair_el1, x9
 ```
 
 ## Test it
@@ -170,8 +258,18 @@ normal kernel, `CHAINLOADER=1 make` to build the persistent EL2/MMU-off loader a
 `chainloader8.img`, and `make jtagboot`, `make openocd`, `make gdb`, or `make gdb-opt0` for the
 Chapter 08 hardware-debugging workflow.
 
-In `main.rs`, we print the `current privilege level` and additionally inspect if the mask bits in
-`SPSR_EL2` made it to `EL1` as well:
+Turning on virtual memory is now the first thing we do during kernel init:
+
+```rust
+unsafe fn kernel_init() -> ! {
+    use memory::mmu::interface::MMU;
+
+    if let Err(string) = memory::mmu::mmu().enable_mmu_and_caching() {
+        panic!("MMU: {}", string);
+    }
+```
+
+Later in the boot process, prints about the mappings can be observed:
 
 ```console
 $ make chainboot
@@ -187,18 +285,23 @@ $ make chainboot
 [ML] Requesting binary
 [ML] Loaded! Executing the payload now
 
-[    0.162546] mingo version 0.9.0
-[    0.162745] Booting on: Raspberry Pi 3
-[    0.163201] Current privilege level: EL1
-[    0.163677] Exception handling state:
-[    0.164122]       Debug:  Masked
-[    0.164511]       SError: Masked
-[    0.164901]       IRQ:    Masked
-[    0.165291]       FIQ:    Masked
-[    0.165681] Architectural timer resolution: 52 ns
-[    0.166255] Drivers loaded:
-[    0.166592]       1. BCM PL011 UART
-[    0.167014]       2. BCM GPIO
-[    0.167371] Timer test, spinning for 1 second
-[    1.167904] Echoing input now
+[    0.811167] mingo version 0.10.0
+[    0.811374] Booting on: Raspberry Pi 3
+[    0.811829] MMU online. Special regions:
+[    0.812306]       0x00080000 - 0x0008ffff |  64 KiB | C   RO PX  | Kernel code and RO data
+[    0.813324]       0x1fff0000 - 0x1fffffff |  64 KiB | Dev RW PXN | Remapped Device MMIO
+[    0.814310]       0x3f000000 - 0x4000ffff |  17 MiB | Dev RW PXN | Device MMIO
+[    0.815198] Current privilege level: EL1
+[    0.815675] Exception handling state:
+[    0.816119]       Debug:  Masked
+[    0.816509]       SError: Masked
+[    0.816899]       IRQ:    Masked
+[    0.817289]       FIQ:    Masked
+[    0.817679] Architectural timer resolution: 52 ns
+[    0.818253] Drivers loaded:
+[    0.818589]       1. BCM PL011 UART
+[    0.819011]       2. BCM GPIO
+[    0.819369] Timer test, spinning for 1 second
+[     !!!    ] Writing through the remapped UART at 0x1FFF_1000
+[    1.820409] Echoing input now
 ```
