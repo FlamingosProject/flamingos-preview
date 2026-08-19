@@ -1,8 +1,8 @@
 [package]
 name = "mingo"
 version = "1.0.0"
-description = "Privilege Levels — Chapter 09"
-keywords = ["privilege-level"]
+description = "Virtual Memory, Part 1 — Chapter 10"
+keywords = ["virtual-mem-part1"]
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
 edition = "2024"
 
