@@ -24,6 +24,8 @@ use core::arch::global_asm;
 #[cfg(not(feature = "chainloader"))]
 use core::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(not(feature = "chainloader"))]
+use fdt::Fdt;
+#[cfg(not(feature = "chainloader"))]
 use tock_registers::interfaces::{Readable, Writeable};
 
 #[cfg(feature = "boot_trace")]
@@ -143,6 +145,27 @@ unsafe fn prepare_el2_to_el1_transition(
 // Public Code
 //--------------------------------------------------------------------------------------------------
 
+/// Maximum number of CPU cores tracked by the early boot protocol.
+pub const MAX_CORES: usize = 64;
+
+/// CPU topology discovered from the firmware device tree.
+#[derive(Debug)]
+pub struct CoresInfo {
+    /// Number of valid entries in [`Self::core_ids`].
+    pub num_cores: usize,
+
+    /// Firmware-provided CPU IDs.
+    pub core_ids: [usize; MAX_CORES],
+}
+
+/// CPU topology populated once during early boot.
+///
+/// Access is restricted to the boot path while only the boot core is active.
+pub static mut CORES_INFO: CoresInfo = CoresInfo {
+    num_cores: 0,
+    core_ids: [0; MAX_CORES],
+};
+
 /// The source ELF reserved by the loader for diagnostics throughout kernel execution.
 #[cfg(not(feature = "chainloader"))]
 pub(crate) fn retained_kernel_elf() -> Option<&'static [u8]> {
@@ -158,6 +181,57 @@ pub(crate) fn retained_kernel_elf() -> Option<&'static [u8]> {
     // that backing read-only for the lifetime of the kernel before publishing size.
     // Need: The retained bytes have a linker-defined address outside Rust statics.
     Some(unsafe { core::slice::from_raw_parts(core::ptr::addr_of!(__boot_elf_virt_start), size) })
+}
+
+/// Consume the firmware device tree pointer retained across the MMU transition.
+///
+/// # Safety
+///
+/// - Must be called exactly once by the boot core after virtual memory is enabled.
+/// - The firmware-provided pointer must identify a valid flattened device tree.
+///
+/// # Need
+///
+/// Early boot must read firmware-owned memory and populate once-only boot state.
+#[cfg(not(feature = "chainloader"))]
+pub unsafe fn process_device_tree() {
+    // Safety: the boot contract supplies the preserved FDT and a single active core.
+    // Need: access firmware memory and publish the existing raw boot-state globals.
+    unsafe {
+        let device_tree = TPIDR_EL1.get() as *const u8;
+        TPIDR_EL1.set(0);
+
+        // QEMU's raspi3b machine still supplies a legacy ATAG_CORE handoff instead of an FDT. Both
+        // Raspberry Pi BSPs supported here have four cores, so retain the QEMU workflow explicitly.
+        const ATAG_CORE: u32 = 0x5441_0001;
+        const LEGACY_RPI_CORE_COUNT: usize = 4;
+        let words = device_tree.cast::<u32>();
+        if words.add(1).read_unaligned() == ATAG_CORE {
+            let cores_info = core::ptr::addr_of_mut!(CORES_INFO);
+            (*cores_info).num_cores = LEGACY_RPI_CORE_COUNT;
+            for (id, slot) in (&mut (*cores_info).core_ids)[..LEGACY_RPI_CORE_COUNT]
+                .iter_mut()
+                .enumerate()
+            {
+                *slot = id;
+            }
+            return;
+        }
+
+        let fdt = Fdt::from_ptr(device_tree).unwrap();
+        let num_cores = fdt.cpus().count();
+        if num_cores > MAX_CORES {
+            panic!();
+        }
+        let cores_info = core::ptr::addr_of_mut!(CORES_INFO);
+        for (cid, cpu) in (*cores_info).core_ids.iter_mut().zip(fdt.cpus()) {
+            if cpu.ids().all().count() != 1 {
+                panic!();
+            }
+            *cid = cpu.ids().first();
+        }
+        CORES_INFO.num_cores = num_cores;
+    }
 }
 
 /// Blink a fatal early-boot error code forever.
