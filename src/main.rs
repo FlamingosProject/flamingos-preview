@@ -119,10 +119,12 @@ compile_error!("Either feature \"bsp_rpi3\" or \"bsp_rpi4\" must be enabled for 
 mod bsp;
 #[cfg(feature = "chainloader")]
 mod chainloader;
+mod common;
 mod console;
 mod cpu;
 mod driver;
 mod exception;
+mod memory;
 mod panic_wait;
 mod print;
 mod synchronization;
@@ -133,37 +135,47 @@ mod time;
 /// # Safety
 ///
 /// - Only a single core must be active and running this function.
-/// - The init calls in this function must appear in the correct order.
+/// - The init calls in this function must appear in the correct order:
+///     - MMU + Data caching must be activated at the earliest. Without it, any atomic operations,
+///       e.g. the yet-to-be-introduced spinlocks in the device drivers (which currently employ
+///       NullLocks instead of spinlocks), will fail to work (properly) on the RPi SoCs.
 #[cfg(not(feature = "chainloader"))]
 unsafe fn kernel_init() -> ! {
-    unsafe {
-        // Initialize the BSP driver subsystem.
-        if let Err(x) = bsp::driver::init() {
-            panic!("Error initializing BSP driver subsystem: {}", x);
-        }
+    use memory::mmu::interface::MMU;
 
-        // Initialize all device drivers.
-        driver::driver_manager().init_drivers();
-        // The UART console is active and early buffered output has been replayed.
-
-        // Transition from unsafe to safe.
-        kernel_main()
+    if let Err(string) = memory::mmu::mmu().enable_mmu_and_caching() {
+        panic!("MMU: {}", string);
     }
+
+    // Initialize the BSP driver subsystem.
+    if let Err(x) = bsp::driver::init() {
+        panic!("Error initializing BSP driver subsystem: {}", x);
+    }
+
+    // Initialize all device drivers.
+    driver::driver_manager().init_drivers();
+    // The UART console is active and early buffered output has been replayed.
+
+    // Transition from unsafe to safe.
+    kernel_main()
 }
 
 /// The main function running after the early init.
 #[cfg(not(feature = "chainloader"))]
 fn kernel_main() -> ! {
-    use console::{EchoPolicy, InputPolicy, console, set_input_policy};
+    use console::{console, set_input_policy, EchoPolicy, InputPolicy};
+    use core::fmt::Write;
     use core::time::Duration;
 
     info!(
-        "Flamingos kernel {}\n{}\nrev {}",
-        env!("CARGO_PKG_VERSION"),
-        env!("CARGO_PKG_DESCRIPTION"),
-        env!("FLAMINGOS_REVISION")
+        "{} version {}",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION")
     );
     info!("Booting on: {}", bsp::board_name());
+
+    info!("MMU online. Special regions:");
+    bsp::memory::mmu::virt_mem_layout().print_layout();
 
     let (_, privilege_level) = exception::current_privilege_level();
     info!("Current privilege level: {}", privilege_level);
@@ -181,6 +193,13 @@ fn kernel_main() -> ! {
 
     info!("Timer test, spinning for 1 second");
     time::time_manager().spin_for(Duration::from_secs(1));
+
+    let mut remapped_uart = unsafe { bsp::device_driver::PL011Uart::new(0x1FFF_1000) };
+    writeln!(
+        remapped_uart,
+        "[     !!!    ] Writing through the remapped UART at 0x1FFF_1000"
+    )
+    .unwrap();
 
     info!("Echoing input now");
 

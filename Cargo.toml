@@ -1,10 +1,8 @@
 [package]
 name = "mingo"
-version = "1.0.0"
-description = "Privilege Levels — Chapter 09"
-keywords = ["privilege-level"]
+version = "0.10.0"
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
-edition = "2024"
+edition = "2021"
 
 [profile.release]
 lto = true
