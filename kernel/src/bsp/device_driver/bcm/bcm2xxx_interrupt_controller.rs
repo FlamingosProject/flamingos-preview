@@ -4,6 +4,7 @@
 
 //! Interrupt Controller Driver.
 
+mod local_ic;
 mod peripheral_ic;
 
 use crate::{
@@ -40,6 +41,7 @@ pub enum IRQNumber {
 
 /// Representation of the Interrupt Controller.
 pub struct InterruptController {
+    local: local_ic::LocalIC,
     periph: peripheral_ic::PeripheralIC,
 }
 
@@ -81,7 +83,7 @@ impl fmt::Display for IRQNumber {
 }
 
 impl InterruptController {
-    // Restrict to 3 for now. This makes future code for local_ic.rs more straight forward.
+    // Restrict to 3 for now. This makes the code for local_ic.rs more straight forward.
     const MAX_LOCAL_IRQ_NUMBER: usize = 3;
     const MAX_PERIPHERAL_IRQ_NUMBER: usize = 63;
 
@@ -92,8 +94,12 @@ impl InterruptController {
     /// # Safety
     ///
     /// - The user must ensure to provide a correct MMIO start address.
-    pub const unsafe fn new(periph_mmio_start_addr: Address<Virtual>) -> Self {
+    pub const unsafe fn new(
+        local_mmio_start_addr: Address<Virtual>,
+        periph_mmio_start_addr: Address<Virtual>,
+    ) -> Self {
         Self {
+            local: local_ic::LocalIC::new(local_mmio_start_addr),
             periph: peripheral_ic::PeripheralIC::new(periph_mmio_start_addr),
         }
     }
@@ -111,6 +117,7 @@ impl driver::interface::DeviceDriver for InterruptController {
     }
 
     unsafe fn init(&self) -> Result<(), &'static str> {
+        self.local.init();
         self.periph.init();
 
         Ok(())
@@ -125,7 +132,15 @@ impl exception::asynchronous::interface::IRQManager for InterruptController {
         irq_handler_descriptor: exception::asynchronous::IRQHandlerDescriptor<Self::IRQNumberType>,
     ) -> Result<(), &'static str> {
         match irq_handler_descriptor.number() {
-            IRQNumber::Local(_) => unimplemented!("Local IRQ controller not implemented."),
+            IRQNumber::Local(lirq) => {
+                let local_descriptor = IRQHandlerDescriptor::new(
+                    lirq,
+                    irq_handler_descriptor.name(),
+                    irq_handler_descriptor.handler(),
+                );
+
+                self.local.register_handler(local_descriptor)
+            }
             IRQNumber::Peripheral(pirq) => {
                 let periph_descriptor = IRQHandlerDescriptor::new(
                     pirq,
@@ -140,7 +155,7 @@ impl exception::asynchronous::interface::IRQManager for InterruptController {
 
     fn enable(&self, irq: &Self::IRQNumberType) {
         match irq {
-            IRQNumber::Local(_) => unimplemented!("Local IRQ controller not implemented."),
+            IRQNumber::Local(lirq) => self.local.enable(lirq),
             IRQNumber::Peripheral(pirq) => self.periph.enable(pirq),
         }
     }
@@ -149,11 +164,12 @@ impl exception::asynchronous::interface::IRQManager for InterruptController {
         &'irq_context self,
         ic: &exception::asynchronous::IRQContext<'irq_context>,
     ) {
-        // It can only be a peripheral IRQ pending because enable() does not support local IRQs yet.
+        self.local.handle_pending_irqs(ic);
         self.periph.handle_pending_irqs(ic)
     }
 
     fn print_handler(&self) {
+        self.local.print_handler();
         self.periph.print_handler();
     }
 }
