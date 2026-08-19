@@ -1,6 +1,6 @@
 [package]
 name = "mingo"
-version = "0.16.0"
+version = "0.17.0"
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
 edition = "2021"
 
@@ -18,6 +18,7 @@ chainloader = []
 
 [dependencies]
 unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "hide-trace"] }
+debug-symbol-types = { path = "../libraries/debug-symbol-types" }
 
 # Optional dependencies
 tock-registers = { version = "0.9", default-features = false, features = [
@@ -52,6 +53,10 @@ harness = false
 
 [[test]]
 name = "04_exception_irq_sanity"
+harness = false
+
+[[test]]
+name = "05_kernel_symbols_sanity"
 harness = false
 
 # Disable unit tests for the kernel binary.
