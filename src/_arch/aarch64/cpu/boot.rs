@@ -20,9 +20,17 @@ const BOOT_TRACE: u64 = 1;
 #[cfg(not(feature = "boot_trace"))]
 const BOOT_TRACE: u64 = 0;
 
-// Assembly counterpart to this file.
+// Normal and chainloader builds have deliberately different early-boot contracts.
+#[cfg(not(feature = "chainloader"))]
 global_asm!(
     include_str!("boot.s"),
+    CONST_CORE_ID_MASK = const 0b11,
+    CONST_BOOT_TRACE = const BOOT_TRACE,
+);
+
+#[cfg(feature = "chainloader")]
+global_asm!(
+    include_str!("chainloader.s"),
     CONST_CORE_ID_MASK = const 0b11,
     CONST_BOOT_TRACE = const BOOT_TRACE,
 );
@@ -33,24 +41,31 @@ global_asm!(
 
 /// Blink a fatal early-boot error code forever.
 #[inline(never)]
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn _panic_code(code: usize) -> ! {
-    unsafe {
-        loop {
-            led_debug::_blink_code(code, true);
-        }
+    loop {
+        led_debug::_blink_code(code, true);
     }
 }
 
 /// The Rust entry of the `kernel` binary.
 ///
 /// The function is called from the assembly `_start` function.
-#[unsafe(no_mangle)]
+#[no_mangle]
+#[cfg(not(feature = "chainloader"))]
 pub unsafe extern "C" fn _start_rust(_device_tree: *const u8) -> ! {
-    unsafe {
-        #[cfg(feature = "boot_trace")]
-        led_debug::_blink_code(3, true);
+    #[cfg(feature = "boot_trace")]
+    led_debug::_blink_code(3, true);
 
-        crate::kernel_init()
-    }
+    crate::kernel_init()
+}
+
+/// Enter the relocated chainloader directly, without normal kernel initialization.
+#[no_mangle]
+#[cfg(feature = "chainloader")]
+pub unsafe extern "C" fn _start_rust(_device_tree: *const u8) -> ! {
+    #[cfg(feature = "boot_trace")]
+    led_debug::_blink_code(3, true);
+
+    crate::chainloader::run()
 }
