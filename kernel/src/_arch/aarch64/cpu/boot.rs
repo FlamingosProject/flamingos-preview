@@ -22,7 +22,7 @@ use crate::{
 use aarch64_cpu::{asm, registers::*};
 use core::arch::global_asm;
 #[cfg(not(feature = "chainloader"))]
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 #[cfg(not(feature = "chainloader"))]
 use fdt::Fdt;
 #[cfg(not(feature = "chainloader"))]
@@ -146,7 +146,7 @@ unsafe fn prepare_el2_to_el1_transition(
 //--------------------------------------------------------------------------------------------------
 
 /// Maximum number of CPU cores tracked by the early boot protocol.
-pub const MAX_CORES: usize = 64;
+pub const MAX_CORES: usize = 16;
 
 /// CPU topology discovered from the firmware device tree.
 #[derive(Debug)]
@@ -165,6 +165,11 @@ pub static mut CORES_INFO: CoresInfo = CoresInfo {
     num_cores: 0,
     core_ids: [0; MAX_CORES],
 };
+
+/// Per-core release flags used by the assembly parking loop.
+#[unsafe(no_mangle)]
+#[cfg(not(feature = "chainloader"))]
+pub static mut BOOT_PARK: [AtomicBool; MAX_CORES] = [const { AtomicBool::new(false) }; MAX_CORES];
 
 /// The source ELF reserved by the loader for diagnostics throughout kernel execution.
 #[cfg(not(feature = "chainloader"))]
@@ -247,6 +252,18 @@ pub unsafe extern "C" fn _panic_code(code: usize) -> ! {
             led_debug::_blink_code(code, true);
         }
     }
+}
+
+/// Rust entry point for a released secondary core.
+///
+/// # Safety
+///
+/// - The caller must provide the current core's firmware ID.
+/// - The core must have a valid stack and must be released exactly once.
+#[inline(never)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn _start_core(_id: usize) -> ! {
+    unsafe { _panic_code(17) }
 }
 
 /// Build the kernel's translation tables and transition from physical EL2 to mapped EL1.
