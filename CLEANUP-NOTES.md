@@ -12,8 +12,7 @@
   code in current and subsequent chapters. Some scripts
   would be helpful here
 * Keep raw drivers byte-exact; terminal line discipline handles text newlines.
-* Replace the Ruby terminal with Rust `scip` plus a Rust
-  chainloader host replacement
+* Use the Rust `scip` terminal for serial loading and interaction
 * Add a crc32 to the chainloader to validate the kernel
 * In boot parking loop, blink morse on LED to indicate
   failure mode

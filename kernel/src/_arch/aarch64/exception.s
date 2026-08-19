@@ -8,18 +8,10 @@
 
 /// Call the function provided by parameter `\handler` after saving the exception context. Provide
 /// the context as the first parameter to '\handler'.
-/// XXX There are 28 instructions here currently. We have room
-/// for 32 in the instruction vector.
 .macro CALL_WITH_CONTEXT handler
 __vector_\handler:
-	.cfi_startproc simple
-	.cfi_signal_frame
-
 	// Make room on the stack for the exception context.
 	sub	sp,  sp,  #16 * 17
-
-	// CFA = pre-exception SP = current sp + 272
-	.cfi_def_cfa sp, 16 * 17
 
 	// Store all general purpose registers on the stack.
 	stp	x0,  x1,  [sp, #16 * 0]
@@ -47,42 +39,6 @@ __vector_\handler:
 	stp	lr,  x1,  [sp, #16 * 15]
 	stp	x2,  x3,  [sp, #16 * 16]
 
-	// Tell the unwinder where each register was saved (offsets from CFA).
-	// x0..x29 are at their natural positions.
-	.cfi_offset x0,  -(16 * 17)
-	.cfi_offset x1,  -(16 * 17 - 8)
-	.cfi_offset x2,  -(16 * 17 - 16)
-	.cfi_offset x3,  -(16 * 17 - 24)
-	.cfi_offset x4,  -(16 * 17 - 32)
-	.cfi_offset x5,  -(16 * 17 - 40)
-	.cfi_offset x6,  -(16 * 17 - 48)
-	.cfi_offset x7,  -(16 * 17 - 56)
-	.cfi_offset x8,  -(16 * 17 - 64)
-	.cfi_offset x9,  -(16 * 17 - 72)
-	.cfi_offset x10, -(16 * 17 - 80)
-	.cfi_offset x11, -(16 * 17 - 88)
-	.cfi_offset x12, -(16 * 17 - 96)
-	.cfi_offset x13, -(16 * 17 - 104)
-	.cfi_offset x14, -(16 * 17 - 112)
-	.cfi_offset x15, -(16 * 17 - 120)
-	.cfi_offset x16, -(16 * 17 - 128)
-	.cfi_offset x17, -(16 * 17 - 136)
-	.cfi_offset x18, -(16 * 17 - 144)
-	.cfi_offset x19, -(16 * 17 - 152)
-	.cfi_offset x20, -(16 * 17 - 160)
-	.cfi_offset x21, -(16 * 17 - 168)
-	.cfi_offset x22, -(16 * 17 - 176)
-	.cfi_offset x23, -(16 * 17 - 184)
-	.cfi_offset x24, -(16 * 17 - 192)
-	.cfi_offset x25, -(16 * 17 - 200)
-	.cfi_offset x26, -(16 * 17 - 208)
-	.cfi_offset x27, -(16 * 17 - 216)
-	.cfi_offset x28, -(16 * 17 - 224)
-	.cfi_offset x29, -(16 * 17 - 232)
-	// x30 (return-address register on aarch64) -> ELR_EL1 at sp+248, so the
-	// unwinder uses the faulting PC to continue into the interrupted frame.
-	.cfi_offset x30, -(16 * 17 - 248)
-
 	// x0 is the first argument for the function called through `\handler`.
 	mov	x0,  sp
 
@@ -93,7 +49,6 @@ __vector_\handler:
 	// `eret`.
 	b	__exception_restore_context
 
-	.cfi_endproc
 .size	__vector_\handler, . - __vector_\handler
 .type	__vector_\handler, function
 .endm

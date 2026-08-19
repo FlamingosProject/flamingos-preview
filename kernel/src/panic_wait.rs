@@ -4,15 +4,18 @@
 
 //! Kernel panic handling for normal and QEMU test builds.
 
-use crate::{cpu, println};
+#[cfg(not(feature = "test_build"))]
+use crate::cpu;
+use crate::println;
 use core::panic::PanicInfo;
 
 //--------------------------------------------------------------------------------------------------
 // Private Code
 //--------------------------------------------------------------------------------------------------
 
-/// Stop the kernel or report a failed test build.
-fn panic_exit() -> ! {
+/// The point of exit for `libkernel`.
+#[no_mangle]
+fn _panic_exit() -> ! {
     #[cfg(not(feature = "test_build"))]
     {
         cpu::wait_forever()
@@ -20,7 +23,7 @@ fn panic_exit() -> ! {
 
     #[cfg(feature = "test_build")]
     {
-        cpu::qemu_exit_failure()
+        crate::test::exit_panic()
     }
 }
 
@@ -48,7 +51,7 @@ fn panic_prevent_reenter() {
         return;
     }
 
-    panic_exit()
+    _panic_exit()
 }
 
 #[panic_handler]
@@ -74,7 +77,8 @@ fn panic(info: &PanicInfo) -> ! {
         info.message(),
     );
 
+    #[cfg(not(feature = "chainloader"))]
     crate::backtrace::print_backtrace();
 
-    panic_exit()
+    _panic_exit()
 }
