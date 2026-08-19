@@ -24,7 +24,8 @@ ifeq ($(BSP),rpi3)
     KERNEL_BIN        = kernel8.img
     QEMU_BINARY       = qemu-system-aarch64
     QEMU_MACHINE_TYPE = raspi3b
-    QEMU_RELEASE_ARGS = -d in_asm -display none
+    QEMU_RELEASE_ARGS = -serial stdio -display none
+    QEMU_TEST_ARGS    = $(QEMU_RELEASE_ARGS) -semihosting
     OBJDUMP_BINARY    = rust-objdump
     NM_BINARY         = rust-nm
     READELF_BINARY    = aarch64-none-elf-readelf
@@ -35,7 +36,7 @@ else ifeq ($(BSP),rpi4)
     KERNEL_BIN        = kernel8.img
     QEMU_BINARY       = qemu-system-aarch64
     QEMU_MACHINE_TYPE =
-    QEMU_RELEASE_ARGS = -d in_asm -display none
+    QEMU_RELEASE_ARGS = -serial stdio -display none
     OBJDUMP_BINARY    = rust-objdump
     NM_BINARY         = rust-nm
     READELF_BINARY    = aarch64-none-elf-readelf
@@ -56,6 +57,9 @@ KERNEL_LINKER_SCRIPT = kernel.ld
 LAST_BUILD_CONFIG    = target/$(BSP).build_config
 
 KERNEL_ELF      = target/$(TARGET)/release/kernel
+TEST_BUILD_DIR  = target/test_build/$(BSP)
+TEST_KERNEL_ELF = $(TEST_BUILD_DIR)/$(TARGET)/release/kernel
+TEST_KERNEL_BIN = $(TEST_BUILD_DIR)/kernel8.img
 # This parses cargo's dep-info file.
 # https://doc.rust-lang.org/cargo/guide/build-cache.html#dep-info-files
 KERNEL_ELF_DEPS = $(filter-out %: ,$(file < $(KERNEL_ELF).d)) $(KERNEL_MANIFEST) $(LAST_BUILD_CONFIG)
@@ -73,11 +77,17 @@ RUSTFLAGS_PEDANTIC = $(RUSTFLAGS) \
     -D missing_docs
 
 FEATURES      = --features bsp_$(BSP)
+TEST_FEATURES = --features bsp_$(BSP),test_build
 COMPILER_ARGS = --target=$(TARGET) \
     $(FEATURES)                    \
     --release
 
 RUSTC_CMD   = cargo rustc $(COMPILER_ARGS)
+TEST_RUSTC_CMD = cargo rustc                     \
+    --target=$(TARGET)                           \
+    $(TEST_FEATURES)                             \
+    --release                                    \
+    --target-dir=$(TEST_BUILD_DIR)
 DOC_CMD     = cargo doc $(COMPILER_ARGS)
 CLIPPY_CMD  = cargo clippy $(COMPILER_ARGS)
 OBJCOPY_CMD = rust-objcopy \
@@ -92,7 +102,7 @@ EXEC_QEMU = $(QEMU_BINARY) -M $(QEMU_MACHINE_TYPE)
 ##--------------------------------------------------------------------------------------------------
 ## Targets
 ##--------------------------------------------------------------------------------------------------
-.PHONY: all doc qemu clippy clean readelf objdump nm check
+.PHONY: all doc qemu test_boot clippy clean readelf objdump nm check
 
 all: $(KERNEL_BIN)
 
@@ -145,6 +155,24 @@ qemu: $(KERNEL_BIN)
 endif
 
 ##------------------------------------------------------------------------------
+## Run a deterministic boot smoke test in QEMU
+##------------------------------------------------------------------------------
+ifeq ($(QEMU_MACHINE_TYPE),) # QEMU is not supported for the board.
+
+test_boot:
+	$(call color_header, "$(QEMU_MISSING_STRING)")
+
+else # QEMU is supported.
+
+test_boot:
+	$(call color_header, "Building QEMU boot test")
+	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(TEST_RUSTC_CMD)
+	@$(OBJCOPY_CMD) $(TEST_KERNEL_ELF) $(TEST_KERNEL_BIN)
+	$(call color_header, "Running QEMU boot test")
+	$(EXEC_QEMU) $(QEMU_TEST_ARGS) -kernel $(TEST_KERNEL_BIN)
+endif
+
+##------------------------------------------------------------------------------
 ## Run clippy
 ##------------------------------------------------------------------------------
 clippy:
@@ -179,4 +207,3 @@ objdump: $(KERNEL_ELF)
 nm: $(KERNEL_ELF)
 	$(call color_header, "Launching nm")
 	$(NM_BINARY) --demangle --print-size $(KERNEL_ELF) | sort
-
