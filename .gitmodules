@@ -74,3 +74,7 @@
 	path = 19-timer-callbacks
 	url = https://github.com/FlamingosProject/flamingos-preview.git
 	branch = 19-timer-callbacks
+[submodule "20-boot-improvements"]
+	path = 20-boot-improvements
+	url = https://github.com/FlamingosProject/flamingos-preview.git
+	branch = 20-boot-improvements
