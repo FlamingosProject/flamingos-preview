@@ -1,10 +1,8 @@
 [package]
 name = "mingo"
-version = "1.0.0"
-description = "Integrated Testing — Chapter 12"
-keywords = ["integrated-testing"]
+version = "0.13.0"
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
-edition = "2024"
+edition = "2021"
 
 [features]
 default = []
