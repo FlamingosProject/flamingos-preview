@@ -84,3 +84,31 @@ macro_rules! warn {
         );
     })
 }
+
+/// Debug print, with a newline.
+#[macro_export]
+macro_rules! debug {
+    ($string:expr) => ({
+        if cfg!(feature = "debug_prints") {
+            let timestamp = $crate::time::time_manager().uptime();
+
+            $crate::println!(
+                concat!("[D {:>3}.{:06}] ", $string),
+                timestamp.as_secs(),
+                timestamp.subsec_micros(),
+            );
+        }
+    });
+    ($format_string:expr, $($arg:tt)*) => ({
+        if cfg!(feature = "debug_prints") {
+            let timestamp = $crate::time::time_manager().uptime();
+
+            $crate::println!(
+                concat!("[D {:>3}.{:06}] ", $format_string),
+                timestamp.as_secs(),
+                timestamp.subsec_micros(),
+                $($arg)*
+            );
+        }
+    })
+}
