@@ -8,7 +8,7 @@
 #[path = "_arch/aarch64/cpu.rs"]
 mod arch_cpu;
 
-mod boot;
+pub mod boot;
 
 pub mod smp;
 

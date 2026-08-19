@@ -26,7 +26,15 @@ use libkernel::{bsp, cpu, driver, exception, info, memory, state, time};
 #[unsafe(no_mangle)]
 pub unsafe fn kernel_init() -> ! {
     unsafe {
+        // The device tree is mapped now, so its parser can safely execute linked virtual code.
+        #[cfg(not(feature = "chainloader"))]
+        cpu::boot::arch_boot::process_device_tree();
+
+        // Set up exception handlers.
         exception::handling_init();
+
+        // Initialize memory subsystem, in particular memory
+        // allocators.
         memory::init();
 
         // Initialize the timer subsystem.
@@ -42,6 +50,9 @@ pub unsafe fn kernel_init() -> ! {
         // Initialize all device drivers.
         driver::driver_manager().init_drivers_and_irqs();
 
+        // Add records of how we mapped the kernel for later
+        // logging once everything is up. Not currently used
+        // otherwise.
         bsp::memory::mmu::kernel_add_mapping_records_for_precomputed();
 
         // Unmask interrupts on the boot CPU core.
@@ -62,6 +73,15 @@ fn kernel_main() -> ! {
 
     info!("{}", libkernel::version());
     info!("Booting on: {}", bsp::board_name());
+
+    unsafe {
+        let cores_info = core::ptr::addr_of!(cpu::boot::arch_boot::CORES_INFO);
+        let num_cores = (*cores_info).num_cores;
+        info!("Cores:");
+        for c in 0..num_cores {
+            info!("    {}", (*cores_info).core_ids[c]);
+        }
+    }
 
     info!("MMU online:");
     memory::mmu::kernel_print_mappings();
