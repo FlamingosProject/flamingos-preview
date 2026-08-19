@@ -26,18 +26,46 @@ fn image_path(elf: &Path) -> PathBuf {
     image.into()
 }
 
-fn make_image(elf: &Path, image: &Path) -> Result<(), String> {
+fn patched_elf_path(elf: &Path) -> PathBuf {
+    let mut patched = elf.as_os_str().to_owned();
+    patched.push(".patched");
+    patched.into()
+}
+
+fn patch_translation_tables(elf: &Path) -> Result<PathBuf, String> {
+    let Some(tool) = env::var_os("KERNEL_TEST_TT_TOOL") else {
+        return Ok(elf.to_owned());
+    };
+    let bsp = required_env("KERNEL_TEST_BSP")?;
+    let patched = patched_elf_path(elf);
+    fs::copy(elf, &patched).map_err(|err| format!("failed to copy test ELF: {err}"))?;
+
+    let status = Command::new(&tool)
+        .arg(bsp)
+        .arg(&patched)
+        .status()
+        .map_err(|err| format!("failed to execute {tool:?}: {err}"))?;
+    if status.success() {
+        Ok(patched)
+    } else {
+        let _ = fs::remove_file(&patched);
+        Err(format!("{tool:?} failed with {status}"))
+    }
+}
+
+fn make_image(elf: &Path, image: &Path) -> Result<PathBuf, String> {
+    let prepared_elf = patch_translation_tables(elf)?;
     let objcopy =
         env::var_os("KERNEL_TEST_OBJCOPY").unwrap_or_else(|| OsString::from("rust-objcopy"));
     let status = Command::new(&objcopy)
         .args(["--strip-all", "-O", "binary"])
-        .arg(elf)
+        .arg(&prepared_elf)
         .arg(image)
         .status()
         .map_err(|err| format!("failed to execute {objcopy:?}: {err}"))?;
 
     if status.success() {
-        Ok(())
+        Ok(prepared_elf)
     } else {
         Err(format!("{objcopy:?} failed with {status}"))
     }
@@ -74,7 +102,7 @@ fn run() -> Result<(), String> {
         .ok_or_else(|| "usage: kernel_test_runner <test-elf>".to_owned())?;
     let image = image_path(&elf);
 
-    make_image(&elf, &image)?;
+    let prepared_elf = make_image(&elf, &image)?;
 
     let qemu = required_env("KERNEL_TEST_QEMU")?;
     let qemu_args = env::var("KERNEL_TEST_QEMU_ARGS").unwrap_or_default();
@@ -100,6 +128,9 @@ fn run() -> Result<(), String> {
             .ok_or_else(|| format!("QEMU failed with {status}"))
     });
     let _ = fs::remove_file(image);
+    if prepared_elf != elf {
+        let _ = fs::remove_file(prepared_elf);
+    }
     result
 }
 

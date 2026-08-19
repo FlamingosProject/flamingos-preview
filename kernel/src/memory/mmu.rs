@@ -16,7 +16,8 @@ mod types;
 use crate::{
     bsp,
     memory::{Address, Physical, Virtual},
-    synchronization, warn,
+    synchronization::{self, interface::Mutex},
+    warn,
 };
 use core::{fmt, num::NonZeroUsize};
 
@@ -73,16 +74,8 @@ pub trait AssociatedTranslationTable {
 // Private Code
 //--------------------------------------------------------------------------------------------------
 use interface::MMU;
-use synchronization::interface::*;
+use synchronization::interface::ReadWriteEx;
 use translation_table::interface::TranslationTable;
-
-/// Query the BSP for the reserved virtual addresses for MMIO remapping and initialize the kernel's
-/// MMIO VA allocator with it.
-fn kernel_init_mmio_va_allocator() {
-    let region = bsp::memory::mmu::virt_mmio_remap_region();
-
-    page_alloc::kernel_mmio_va_allocator().lock(|allocator| allocator.init(region));
-}
 
 /// Map a region in the kernel's translation tables.
 ///
@@ -98,16 +91,22 @@ unsafe fn kernel_map_at_unchecked(
     phys_region: &MemoryRegion<Physical>,
     attr: &AttributeFields,
 ) -> Result<(), &'static str> {
-    unsafe {
-        bsp::memory::mmu::kernel_translation_tables()
-            .write(|tables| tables.map_at(virt_region, phys_region, attr))?;
+    bsp::memory::mmu::kernel_translation_tables()
+        .write(|tables| tables.map_at(virt_region, phys_region, attr))?;
 
-        if let Err(x) = mapping_record::kernel_add(name, virt_region, phys_region, attr) {
-            warn!("{}", x);
-        }
+    kernel_add_mapping_record(name, virt_region, phys_region, attr);
 
-        Ok(())
-    }
+    Ok(())
+}
+
+/// Try to translate a kernel virtual address to a physical address.
+///
+/// Will only succeed if there exists a valid mapping for the input address.
+pub fn try_kernel_virt_addr_to_phys_addr(
+    virt_addr: Address<Virtual>,
+) -> Result<Address<Physical>, &'static str> {
+    bsp::memory::mmu::kernel_translation_tables()
+        .read(|tables| tables.try_virt_addr_to_phys_addr(virt_addr))
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -157,28 +156,23 @@ impl<const AS_SIZE: usize> AddressSpace<AS_SIZE> {
     }
 }
 
-/// Raw mapping of a virtual to physical region in the kernel translation tables.
-///
-/// Prevents mapping into the MMIO range of the tables.
-///
-/// # Safety
-///
-/// - See `kernel_map_at_unchecked()`.
-/// - Does not prevent aliasing. Currently, the callers must be trusted.
-pub unsafe fn kernel_map_at(
+/// Query the BSP for the reserved virtual addresses for MMIO remapping and initialize the kernel's
+/// MMIO VA allocator with it.
+pub fn kernel_init_mmio_va_allocator() {
+    let region = bsp::memory::mmu::virt_mmio_remap_region();
+
+    page_alloc::kernel_mmio_va_allocator().lock(|allocator| allocator.init(region));
+}
+
+/// Add an entry to the mapping info record.
+pub fn kernel_add_mapping_record(
     name: &'static str,
     virt_region: &MemoryRegion<Virtual>,
     phys_region: &MemoryRegion<Physical>,
     attr: &AttributeFields,
-) -> Result<(), &'static str> {
-    unsafe {
-        if bsp::memory::mmu::virt_mmio_remap_region().overlaps(virt_region) {
-            return Err("Attempt to manually map into MMIO region");
-        }
-
-        kernel_map_at_unchecked(name, virt_region, phys_region, attr)?;
-
-        Ok(())
+) {
+    if let Err(x) = mapping_record::kernel_add(name, virt_region, phys_region, attr) {
+        warn!("{}", x);
     }
 }
 
@@ -193,60 +187,64 @@ pub unsafe fn kernel_map_mmio(
     name: &'static str,
     mmio_descriptor: &MMIODescriptor,
 ) -> Result<Address<Virtual>, &'static str> {
-    unsafe {
-        let phys_region = MemoryRegion::from(*mmio_descriptor);
-        let offset_into_start_page = mmio_descriptor.start_addr().offset_into_page();
+    let phys_region = MemoryRegion::from(*mmio_descriptor);
+    let offset_into_start_page = mmio_descriptor.start_addr().offset_into_page();
 
-        // Check if an identical region has been mapped for another driver. If so, reuse it.
-        let virt_addr = if let Some(addr) =
-            mapping_record::kernel_find_and_insert_mmio_duplicate(mmio_descriptor, name)
-        {
-            addr
-        // Otherwise, allocate a new region and map it.
-        } else {
-            let num_pages = match NonZeroUsize::new(phys_region.num_pages()) {
-                None => return Err("Requested 0 pages"),
-                Some(x) => x,
-            };
-
-            let virt_region = page_alloc::kernel_mmio_va_allocator()
-                .lock(|allocator| allocator.alloc(num_pages))?;
-
-            kernel_map_at_unchecked(
-                name,
-                &virt_region,
-                &phys_region,
-                &AttributeFields {
-                    mem_attributes: MemAttributes::Device,
-                    acc_perms: AccessPermissions::ReadWrite,
-                    execute_never: true,
-                },
-            )?;
-
-            virt_region.start_addr()
+    // Check if an identical region has been mapped for another driver. If so, reuse it.
+    let virt_addr = if let Some(addr) =
+        mapping_record::kernel_find_and_insert_mmio_duplicate(mmio_descriptor, name)
+    {
+        addr
+    // Otherwise, allocate a new region and map it.
+    } else {
+        let num_pages = match NonZeroUsize::new(phys_region.num_pages()) {
+            None => return Err("Requested 0 pages"),
+            Some(x) => x,
         };
 
-        Ok(virt_addr + offset_into_start_page)
-    }
+        let virt_region =
+            page_alloc::kernel_mmio_va_allocator().lock(|allocator| allocator.alloc(num_pages))?;
+
+        kernel_map_at_unchecked(
+            name,
+            &virt_region,
+            &phys_region,
+            &AttributeFields {
+                mem_attributes: MemAttributes::Device,
+                acc_perms: AccessPermissions::ReadWrite,
+                execute_never: true,
+            },
+        )?;
+
+        virt_region.start_addr()
+    };
+
+    Ok(virt_addr + offset_into_start_page)
 }
 
-/// Map the kernel's binary. Returns the translation table's base address.
+/// Try to translate a kernel virtual page address to a physical page address.
 ///
-/// # Safety
+/// Will only succeed if there exists a valid mapping for the input page.
+pub fn try_kernel_virt_page_addr_to_phys_page_addr(
+    virt_page_addr: PageAddress<Virtual>,
+) -> Result<PageAddress<Physical>, &'static str> {
+    bsp::memory::mmu::kernel_translation_tables()
+        .read(|tables| tables.try_virt_page_addr_to_phys_page_addr(virt_page_addr))
+}
+
+/// Try to get the attributes of a kernel page.
 ///
-/// - See [`bsp::memory::mmu::kernel_map_binary()`].
-pub unsafe fn kernel_map_binary() -> Result<Address<Physical>, &'static str> {
-    unsafe {
-        let phys_kernel_tables_base_addr =
-            bsp::memory::mmu::kernel_translation_tables().write(|tables| {
-                tables.init();
-                tables.phys_base_address()
-            });
+/// Will only succeed if there exists a valid mapping for the input page.
+pub fn try_kernel_page_attributes(
+    virt_page_addr: PageAddress<Virtual>,
+) -> Result<AttributeFields, &'static str> {
+    bsp::memory::mmu::kernel_translation_tables()
+        .read(|tables| tables.try_page_attributes(virt_page_addr))
+}
 
-        bsp::memory::mmu::kernel_map_binary()?;
-
-        Ok(phys_kernel_tables_base_addr)
-    }
+/// Human-readable print of all recorded kernel mappings.
+pub fn kernel_print_mappings() {
+    mapping_record::kernel_print()
 }
 
 /// Enable the MMU and data + instruction caching.
@@ -254,18 +252,9 @@ pub unsafe fn kernel_map_binary() -> Result<Address<Physical>, &'static str> {
 /// # Safety
 ///
 /// - Crucial function during kernel init. Changes the the complete memory view of the processor.
+#[inline(always)]
 pub unsafe fn enable_mmu_and_caching(
     phys_tables_base_addr: Address<Physical>,
 ) -> Result<(), MMUEnableError> {
-    unsafe { arch_mmu::mmu().enable_mmu_and_caching(phys_tables_base_addr) }
-}
-
-/// Finish initialization of the MMU subsystem.
-pub fn post_enable_init() {
-    kernel_init_mmio_va_allocator();
-}
-
-/// Human-readable print of all recorded kernel mappings.
-pub fn kernel_print_mappings() {
-    mapping_record::kernel_print()
+    arch_mmu::mmu().enable_mmu_and_caching(phys_tables_base_addr)
 }

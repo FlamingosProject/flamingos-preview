@@ -15,46 +15,35 @@ use libkernel::{bsp, cpu, driver, exception, info, memory, state, time};
 
 /// Early init code.
 ///
+/// When this code runs, virtual memory is already enabled.
+///
 /// # Safety
 ///
 /// - Only a single core must be active and running this function.
-/// - The init calls in this function must appear in the correct order:
-///     - MMU + Data caching must be activated at the earliest. Without it, any atomic operations,
-///       e.g. the yet-to-be-introduced spinlocks in the device drivers (which currently employ
-///       IRQSafeNullLocks instead of spinlocks), will fail to work (properly) on the RPi SoCs.
-#[unsafe(no_mangle)]
+/// - Printing will not work until the respective driver's MMIO is remapped.
+#[no_mangle]
 unsafe fn kernel_init() -> ! {
-    unsafe {
-        exception::handling_init();
+    exception::handling_init();
+    memory::init();
 
-        let phys_kernel_tables_base_addr = match memory::mmu::kernel_map_binary() {
-            Err(string) => panic!("Error mapping kernel binary: {}", string),
-            Ok(addr) => addr,
-        };
-
-        if let Err(e) = memory::mmu::enable_mmu_and_caching(phys_kernel_tables_base_addr) {
-            panic!("Enabling MMU failed: {}", e);
-        }
-
-        memory::mmu::post_enable_init();
-
-        // Initialize the BSP driver subsystem.
-        if let Err(x) = bsp::driver::init() {
-            panic!("Error initializing BSP driver subsystem: {}", x);
-        }
-
-        // Initialize all device drivers.
-        driver::driver_manager().init_drivers_and_irqs();
-
-        // Unmask interrupts on the boot CPU core.
-        exception::asynchronous::local_irq_unmask();
-
-        // Announce conclusion of the kernel_init() phase.
-        state::state_manager().transition_to_single_core_main();
-
-        // Transition from unsafe to safe.
-        kernel_main()
+    // Initialize the BSP driver subsystem.
+    if let Err(x) = bsp::driver::init() {
+        panic!("Error initializing BSP driver subsystem: {}", x);
     }
+
+    // Initialize all device drivers.
+    driver::driver_manager().init_drivers_and_irqs();
+
+    bsp::memory::mmu::kernel_add_mapping_records_for_precomputed();
+
+    // Unmask interrupts on the boot CPU core.
+    exception::asynchronous::local_irq_unmask();
+
+    // Announce conclusion of the kernel_init() phase.
+    state::state_manager().transition_to_single_core_main();
+
+    // Transition from unsafe to safe.
+    kernel_main()
 }
 
 /// The main function running after the early init.
