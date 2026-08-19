@@ -81,6 +81,11 @@ _start:
 .L_prepare_rust:
 	BLINK_CODE #2
 
+	// Zero the frame pointer and link register so that the unwinder knows this is the
+	// bottom of the call stack.
+	mov	x29, xzr
+	mov	x30, xzr
+
 	// Pass the boot stack and preserved device tree pointer to Rust.
 	ADR_REL	x0, __boot_core_stack_end_exclusive
 	mov	x1, x19
