@@ -22,3 +22,7 @@
 	path = 06-uart-chainloader
 	url = https://github.com/FlamingosProject/flamingos-preview.git
 	branch = 06-uart-chainloader
+[submodule "07-timestamps"]
+	path = 07-timestamps
+	url = https://github.com/FlamingosProject/flamingos-preview.git
+	branch = 07-timestamps
