@@ -4,7 +4,7 @@
 
 //! System console.
 
-use crate::bsp;
+use crate::{bsp, synchronization, synchronization::NullLock};
 
 //--------------------------------------------------------------------------------------------------
 // Public Definitions
@@ -24,11 +24,25 @@ pub mod interface {
         fn flush(&self) {}
     }
 
+    /// Console statistics.
+    pub trait Statistics {
+        /// Return the number of characters written.
+        fn chars_written(&self) -> usize {
+            0
+        }
+    }
+
+    /// Trait alias for a raw byte console.
+    pub trait RawConsole: RawWrite + Statistics {}
+
     /// Terminal write functions. These apply the selected line discipline.
     pub trait Write {
         /// Write Rust formatted output.
         fn write_fmt(&self, args: fmt::Arguments) -> fmt::Result;
     }
+
+    /// Trait alias for a full-fledged terminal console.
+    pub trait All: Write + Statistics {}
 }
 
 /// Output line discipline policy.
@@ -38,46 +52,43 @@ pub struct OutputPolicy {
     pub map_lf_to_crlf: bool,
 }
 
-/// Terminal output line discipline.
-pub struct Terminal<R> {
-    raw: R,
-    output_policy: OutputPolicy,
-}
+/// The terminal console line discipline.
+pub struct Terminal;
+
+//--------------------------------------------------------------------------------------------------
+// Global instances
+//--------------------------------------------------------------------------------------------------
+
+static OUTPUT_POLICY: NullLock<OutputPolicy> = NullLock::new(OutputPolicy {
+    map_lf_to_crlf: true,
+});
+static TERMINAL: Terminal = Terminal;
 
 //--------------------------------------------------------------------------------------------------
 // Private Code
 //--------------------------------------------------------------------------------------------------
 
-impl<R> Terminal<R>
-where
-    R: interface::RawWrite,
-{
-    pub const fn new(raw: R, output_policy: OutputPolicy) -> Self {
-        Self { raw, output_policy }
-    }
+use synchronization::interface::Mutex;
 
+impl Terminal {
     fn write_text_byte(&self, c: u8, prev_was_cr: &mut bool) {
-        if self.output_policy.map_lf_to_crlf && c == b'\n' && !*prev_was_cr {
-            self.raw.write_byte(b'\r');
+        let output_policy = OUTPUT_POLICY.lock(|policy| *policy);
+
+        if output_policy.map_lf_to_crlf && c == b'\n' && !*prev_was_cr {
+            raw_console().write_byte(b'\r');
         }
 
-        self.raw.write_byte(c);
+        raw_console().write_byte(c);
         *prev_was_cr = c == b'\r';
     }
 }
 
-struct TerminalWriter<'a, R>
-where
-    R: interface::RawWrite,
-{
-    terminal: &'a Terminal<R>,
+struct TerminalWriter<'a> {
+    terminal: &'a Terminal,
     prev_was_cr: bool,
 }
 
-impl<R> core::fmt::Write for TerminalWriter<'_, R>
-where
-    R: interface::RawWrite,
-{
+impl core::fmt::Write for TerminalWriter<'_> {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         for b in s.bytes() {
             self.terminal.write_text_byte(b, &mut self.prev_was_cr);
@@ -91,15 +102,23 @@ where
 // Public Code
 //--------------------------------------------------------------------------------------------------
 
-/// Return a terminal console.
-pub fn console() -> impl interface::Write {
-    bsp::console::console()
+/// Return a reference to the raw console device.
+pub fn raw_console() -> &'static dyn interface::RawConsole {
+    bsp::console::raw_console()
 }
 
-impl<R> interface::Write for Terminal<R>
-where
-    R: interface::RawWrite,
-{
+/// Return a reference to the terminal console used by printing macros.
+pub fn console() -> &'static dyn interface::All {
+    &TERMINAL
+}
+
+/// Set the terminal output policy.
+#[allow(unused)]
+pub fn set_output_policy(policy: OutputPolicy) {
+    OUTPUT_POLICY.lock(|current| *current = policy);
+}
+
+impl interface::Write for Terminal {
     fn write_fmt(&self, args: core::fmt::Arguments) -> core::fmt::Result {
         core::fmt::Write::write_fmt(
             &mut TerminalWriter {
@@ -110,3 +129,11 @@ where
         )
     }
 }
+
+impl interface::Statistics for Terminal {
+    fn chars_written(&self) -> usize {
+        raw_console().chars_written()
+    }
+}
+
+impl interface::All for Terminal {}
