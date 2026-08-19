@@ -1,69 +1,58 @@
-# Tutorial 20 - Boot Improvements
+# Tutorial 21 - Second Core
 
 ## tl;dr
 
-- Early boot now parses the device tree pointer that has been preserved since Chapter 02.
-- The kernel records CPU core IDs from the device tree and prints them during startup.
-- The existing raw-GPIO LED trace remains available across the expanded boot path.
+- Non-boot cores are no longer treated as immediate boot failures.
+- Early boot introduces a parking flag array that can be used to release secondary cores later.
+- A placeholder secondary-core entry point is added so the next stage of multicore bring-up has a
+  concrete target.
 
 ## Table of Contents
 
 - [Introduction](#introduction)
 - [Implementation](#implementation)
-  - [Device Tree Parsing](#device-tree-parsing)
-  - [Core Discovery](#core-discovery)
-  - [Boot Trace Coverage](#boot-trace-coverage)
+  - [Core Parking State](#core-parking-state)
+  - [Secondary-Core Entry Point](#secondary-core-entry-point)
 - [Test it](#test-it)
 
 ## Introduction
 
-The previous tutorial made timer IRQ callbacks work, which is one of the pieces needed before
-moving toward multicore and scheduling work. This revision tightens the earliest boot path so later
-code can reason about the machine it is running on.
+This revision is a small, focused step toward running code on a second CPU core. The previous boot
+path identified non-boot cores and treated their presence in the entry path as a panic condition.
+That is useful while the kernel is single-core only, but it is not enough for controlled multicore
+bring-up.
 
 The developer workflows introduced earlier remain available. Use `make chainboot` to send the
 normal kernel, `CHAINLOADER=1 make` to build the persistent EL2/MMU-off loader as
 `chainloader8.img`, and `make jtagboot`, `make openocd`, `make gdb`, or `make gdb-opt0` for the
 Chapter 08 hardware-debugging workflow.
 
-The assembly-to-Rust handoff has preserved the firmware-provided device tree pointer since Chapter
-02. The key change here is that Rust finally interprets it, storing basic core information for later
-reporting.
+The code now distinguishes the boot core from secondary cores and leaves the secondary cores parked
+until they are explicitly released.
 
 ## Implementation
 
-### Device Tree Parsing
+### Core Parking State
 
-The existing boot arguments already carry the incoming device tree pointer through assembly. Early
-boot converts it to an address in the mapped boot-stack region and preserves it across the MMU
-transition. The kernel crate now adds the `fdt` dependency and parses the flattened device tree once
-linked virtual code is safe to execute.
+The AArch64 boot module adds a `BOOT_PARK` static array of `AtomicBool` values. Its size is tied to
+`MAX_CORES`, which is reduced from `64` to `16` for this early implementation.
 
-QEMU's `raspi3b` machine supplies the older `ATAG_CORE` handoff instead of a flattened device tree.
-The boot code recognizes that specific format and records the four cores provided by the supported
-Raspberry Pi BSPs, preserving the existing QEMU development and test workflows.
+When assembly boot code detects that the current CPU is not the boot core, it enters a `wfe` loop.
+After each wake event, it checks the corresponding parking flag. While the flag is zero, the core
+continues waiting. Once the flag is set, the core leaves the parking loop.
 
-### Core Discovery
+### Secondary-Core Entry Point
 
-The AArch64 boot module adds `CoresInfo`, a small static record containing the number of discovered
-cores and their IDs. At the start of `kernel_init()`, `process_device_tree()` walks the device tree
-CPU nodes and fills this structure.
+The Rust boot module adds `_start_core(id)`, an exported placeholder entry point for a released
+secondary core. In this revision it still reports progress through the early panic/blink-code path,
+which makes it clear that the secondary-core path has not yet become a full kernel thread or
+scheduler entry.
 
-`kernel_main()` prints the discovered core IDs as part of the normal boot log. This makes the
-firmware handoff visible and gives later multicore work a concrete source of topology data.
-
-### Boot Trace Coverage
-
-The raw GPIO-based LED helpers for Raspberry Pi 3 and Raspberry Pi 4 have existed since Chapter 02.
-This chapter carries them through the expanded boot path. Stage 3 marks the last physical-address
-phase before the MMU transition; device-tree parsing is deliberately deferred until linked virtual
-code is safe to execute.
-
-The tracing is controlled by the `boot_trace` feature. When the feature is disabled, the blink
-macros compile to no-op control flow.
+The assembly path branches to `_start_core` after a secondary core is released from the parking
+loop.
 
 ## Test it
 
-Boot the kernel as before. The startup log now includes a `Cores:` section showing the core IDs
-parsed from the device tree. To diagnose very early boot on hardware, use the Chapter 15 argument
-forwarding with `cargo xtask build rpi3 --features=boot_trace` and observe the board LED blink codes.
+For normal single-core boot behavior, this revision should behave like the previous one. The
+secondary-core path is preparatory: it introduces the parking/release structure, but higher-level
+code to set the release flag and start useful work on the second core is still to come.
