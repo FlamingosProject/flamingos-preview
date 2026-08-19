@@ -15,7 +15,17 @@ pub fn print_backtrace() {
     extern "C" fn trace_fn(ctx: &UnwindContext<'_>, arg: *mut c_void) -> UnwindReasonCode {
         let frame_num = unsafe { &mut *(arg as *mut u32) };
         let ip = _Unwind_GetIP(ctx);
-        println!("  #{}: {:#018x}", frame_num, ip);
+        let lookup_ip = ip.saturating_sub(1);
+        match crate::symbols::lookup_symbol(crate::memory::Address::new(lookup_ip)) {
+            Some(symbol) => println!(
+                "  #{}: {:#018x} - {}+{:#x}",
+                frame_num,
+                ip,
+                symbol.name(),
+                lookup_ip - symbol.addr() as usize
+            ),
+            None => println!("  #{}: {:#018x}", frame_num, ip),
+        }
         *frame_num += 1;
         UnwindReasonCode::NO_REASON
     }
