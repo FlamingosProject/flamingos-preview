@@ -1,6 +1,7 @@
 target
 **/.gdb_history
 **/kernel8.img
+**/chainloader8.img
 
 node_modules
 .bundle

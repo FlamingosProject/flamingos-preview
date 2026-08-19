@@ -56,16 +56,23 @@ fn panic(info: &PanicInfo) -> ! {
     // Protect against panic infinite loops if any of the following code panics itself.
     panic_prevent_reenter();
 
+    let timestamp = crate::time::time_manager().uptime();
     let (location, line, column) = match info.location() {
         Some(loc) => (loc.file(), loc.line(), loc.column()),
         _ => ("???", 0, 0),
     };
 
-    println!("Kernel panic!");
-    println!();
-    println!("Panic location:");
-    println!("File '{}', line {}, column {}", location, line, column,);
-    println!("{}", info.message());
+    println!(
+        "[  {:>3}.{:06}] Kernel panic!\n\n\
+        Panic location:\n      File '{}', line {}, column {}\n\n\
+        {}",
+        timestamp.as_secs(),
+        timestamp.subsec_micros(),
+        location,
+        line,
+        column,
+        info.message(),
+    );
 
     panic_exit()
 }

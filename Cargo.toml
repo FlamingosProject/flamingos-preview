@@ -1,8 +1,8 @@
 [package]
 name = "mingo"
 version = "1.0.0"
-description = "UART Chainloader — Chapter 06"
-keywords = ["uart-chainloader"]
+description = "Timestamps — Chapter 07"
+keywords = ["timestamps"]
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
 edition = "2024"
 
@@ -10,7 +10,7 @@ edition = "2024"
 lto = true
 
 [features]
-default = ["chainloader"]
+default = []
 bsp_rpi3 = ["tock-registers"]
 bsp_rpi4 = ["tock-registers"]
 boot_trace = []
@@ -32,7 +32,7 @@ qemu-exit = { version = "3.x.x", optional = true }
 
 # Optional dependencies
 [dependencies.tock-registers]
-version = "0.10"
+version = "0.9"
 default-features = false
 features = ["register_types"]
 optional = true

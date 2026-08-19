@@ -4,7 +4,10 @@
 
 //! Driver support.
 
-use crate::synchronization::{NullLock, interface::Mutex};
+use crate::{
+    info,
+    synchronization::{NullLock, interface::Mutex},
+};
 
 //--------------------------------------------------------------------------------------------------
 // Private Definitions
@@ -142,14 +145,25 @@ impl DriverManager {
 
                 // 2. Call corresponding post init callback.
                 if let Some(callback) = &descriptor.post_init_callback
-                    && let Err(x) = callback() {
-                        panic!(
-                            "Error during driver post-init callback: {}: {}",
-                            descriptor.device_driver.compatible(),
-                            x
-                        );
-                    }
+                    && let Err(x) = callback()
+                {
+                    panic!(
+                        "Error during driver post-init callback: {}: {}",
+                        descriptor.device_driver.compatible(),
+                        x
+                    );
+                }
             });
         }
+    }
+
+    /// Enumerate all registered device drivers.
+    pub fn enumerate(&self) {
+        let mut i: usize = 1;
+        self.for_each_descriptor(|descriptor| {
+            info!("      {}. {}", i, descriptor.device_driver.compatible());
+
+            i += 1;
+        });
     }
 }
