@@ -133,7 +133,7 @@ EXEC_TT_TOOL       = $(TT_TOOL_PATH)/translation_table_tool
 ##--------------------------------------------------------------------------------------------------
 ## Targets
 ##--------------------------------------------------------------------------------------------------
-.PHONY: all chainboot jtagboot openocd gdb gdb-opt0 doc qemu test test_boot test_integration clippy clean readelf objdump nm check
+.PHONY: all chainboot jtagboot openocd gdb gdb-opt0 doc qemu test test_boot test_integration clippy clean readelf objdump nm check FORCE
 
 all: $(KERNEL_BIN)
 
@@ -190,7 +190,7 @@ $(LAST_BUILD_CONFIG):
 ##------------------------------------------------------------------------------
 ## Build the host-side translation-table patcher.
 ##------------------------------------------------------------------------------
-$(EXEC_TT_TOOL):
+$(EXEC_TT_TOOL): FORCE
 	@cargo objcopy -p translation_table_tool --release -- $(EXEC_TT_TOOL)
 
 ##------------------------------------------------------------------------------
@@ -205,8 +205,11 @@ $(KERNEL_ELF_RAW): $(KERNEL_ELF_RAW_DEPS)
 ##------------------------------------------------------------------------------
 $(KERNEL_ELF_TTABLES): $(KERNEL_ELF_TTABLES_DEPS)
 	$(call color_header, "Precomputing kernel translation tables and patching kernel ELF")
-	@cp $(KERNEL_ELF_RAW) $(KERNEL_ELF_TTABLES)
-	$(EXEC_TT_TOOL) $(BSP) $(KERNEL_ELF_TTABLES)
+	TMP=/tmp/kernel-elf-raw.$$$$ && \
+	cp $(KERNEL_ELF_RAW) $$TMP && \
+	$(EXEC_TT_TOOL) $(BSP) $$TMP && \
+	cp $$TMP $(KERNEL_ELF_TTABLES) && \
+	rm $$TMP
 
 ##------------------------------------------------------------------------------
 ## Generate the stripped kernel binary

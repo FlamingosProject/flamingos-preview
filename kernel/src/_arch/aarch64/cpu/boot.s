@@ -18,6 +18,18 @@
 	add	\register, \register, #:lo12:\symbol
 .endm
 
+// Load the address of a symbol into a register, absolute.
+//
+// # Resources
+//
+// - https://sourceware.org/binutils/docs-2.36/as/AArch64_002dRelocations.html
+.macro ADR_ABS register, symbol
+	movz	\register, #:abs_g3:\symbol
+	movk	\register, #:abs_g2_nc:\symbol
+	movk	\register, #:abs_g1_nc:\symbol
+	movk	\register, #:abs_g0_nc:\symbol
+.endm
+
 .macro BLINK_CODE code
 	mov	x0, {CONST_BOOT_TRACE}
 	cbz	x0, .L_no_blink_\@
@@ -84,11 +96,13 @@ _start:
 	// Load the base address of the kernel's translation tables.
 	ldr	x0, PHYS_KERNEL_TABLES_BASE_ADDR // provided by bsp/__board_name__/memory/mmu.rs
 
-	// Load the stack address as the second Rust argument.
-	ADR_REL	x1, __boot_core_stack_end_exclusive
+	// Load the _absolute_ addresses of the following symbols. Since the kernel is linked at
+	// the top of the 64 bit address space, these are effectively virtual addresses.
+	ADR_ABS	x1, __boot_core_stack_end_exclusive
+	ADR_ABS	x2, kernel_init
 
-	// Pass the preserved device tree pointer as the third Rust argument.
-	mov	x2, x19
+	// Pass the preserved device tree pointer as the fourth Rust argument.
+	mov	x3, x19
 
 	b	_start_rust
 

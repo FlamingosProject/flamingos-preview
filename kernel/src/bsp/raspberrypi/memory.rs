@@ -37,13 +37,7 @@
 //! The virtual memory layout is as follows:
 //!
 //! +---------------------------------------+
-//! |                                       | boot_core_stack_start @ 0x0
-//! |                                       |                                ^
-//! | Boot-core Stack                       |                                | stack
-//! |                                       |                                | growth
-//! |                                       |                                | direction
-//! +---------------------------------------+
-//! |                                       | code_start @ 0x8_0000 == boot_core_stack_end_exclusive
+//! |                                       | code_start @ __kernel_virt_start_addr
 //! | .text                                 |
 //! | .rodata                               |
 //! | .got                                  |
@@ -59,6 +53,16 @@
 //! |                                       |
 //! +---------------------------------------+
 //! |                                       |  mmio_remap_end_exclusive
+//! | Unmapped guard page                   |
+//! |                                       |
+//! +---------------------------------------+
+//! |                                       | boot_core_stack_start
+//! |                                       |                                ^
+//! | Boot-core Stack                       |                                | stack
+//! |                                       |                                | growth
+//! |                                       |                                | direction
+//! +---------------------------------------+
+//! |                                       | boot_core_stack_end_exclusive
 //! |                                       |
 pub mod mmu;
 
