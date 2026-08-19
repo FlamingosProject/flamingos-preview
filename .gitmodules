@@ -2,3 +2,7 @@
 	path = 01-wait-forever
 	url = https://github.com/FlamingosProject/flamingos-preview.git
 	branch = 01-wait-forever
+[submodule "02-runtime-init"]
+	path = 02-runtime-init
+	url = https://github.com/FlamingosProject/flamingos-preview.git
+	branch = 02-runtime-init
