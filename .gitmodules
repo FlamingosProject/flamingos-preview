@@ -18,3 +18,7 @@
 	path = 05-drivers-gpio-uart
 	url = https://github.com/FlamingosProject/flamingos-preview.git
 	branch = 05-drivers-gpio-uart
+[submodule "06-uart-chainloader"]
+	path = 06-uart-chainloader
+	url = https://github.com/FlamingosProject/flamingos-preview.git
+	branch = 06-uart-chainloader
