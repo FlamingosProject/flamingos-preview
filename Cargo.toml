@@ -1,8 +1,8 @@
 [package]
 name = "mingo"
 version = "1.0.0"
-description = "Virtual Memory, Part 1 — Chapter 10"
-keywords = ["virtual-mem-part1"]
+description = "Exceptions, Part 1 — Chapter 11"
+keywords = ["exceptions-part1"]
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
 edition = "2024"
 
@@ -29,6 +29,7 @@ bench = false
 
 [dependencies]
 qemu-exit = { version = "3.x.x", optional = true }
+unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "hide-trace"] }
 
 # Optional dependencies
 [dependencies.tock-registers]
