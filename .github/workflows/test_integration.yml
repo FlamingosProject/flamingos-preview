@@ -1,4 +1,4 @@
-name: Boot Test
+name: Integration Tests
 
 on:
     push:
@@ -16,7 +16,7 @@ on:
 
 jobs:
     build:
-        name: Run boot test
+        name: Run integration tests
         runs-on: ubuntu-22.04
 
         steps:
@@ -28,5 +28,5 @@ jobs:
                   rustup target add aarch64-unknown-none-softfloat
                   rustup component add llvm-tools
                   cargo install cargo-binutils
-            - name: Run stable boot test
-              run: BSP=rpi3 make test_boot
+            - name: Run stable kernel tests
+              run: BSP=rpi3 make test
