@@ -70,3 +70,7 @@
 	path = 18-kernel-heap
 	url = https://github.com/FlamingosProject/flamingos-preview.git
 	branch = 18-kernel-heap
+[submodule "19-timer-callbacks"]
+	path = 19-timer-callbacks
+	url = https://github.com/FlamingosProject/flamingos-preview.git
+	branch = 19-timer-callbacks
