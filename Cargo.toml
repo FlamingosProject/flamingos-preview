@@ -1,0 +1,27 @@
+[package]
+name = "mingo"
+version = "1.0.0"
+description = "Wait Forever — Chapter 01"
+keywords = ["wait-forever"]
+authors = ["Andre Richter <andre.o.richter@gmail.com>"]
+edition = "2024"
+
+[profile.release]
+lto = true
+
+[features]
+default = []
+bsp_rpi3 = []
+bsp_rpi4 = []
+
+[[bin]]
+name = "kernel"
+path = "src/main.rs"
+test = false
+bench = false
+
+##--------------------------------------------------------------------------------------------------
+## Dependencies
+##--------------------------------------------------------------------------------------------------
+
+[dependencies]
