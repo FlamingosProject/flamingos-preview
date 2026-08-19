@@ -1,8 +1,8 @@
 [package]
 name = "mingo"
 version = "1.0.0"
-description = "Virtual Memory, Part 2 — Chapter 14"
-keywords = ["virtual-mem-part2"]
+description = "Virtual Memory, Part 3 (Kernel ELF Boot) — Chapter 15"
+keywords = ["virtual-mem-part3"]
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
 edition = "2024"
 
@@ -13,12 +13,14 @@ bsp_rpi4 = ["tock-registers"]
 test_build = ["qemu-exit"]
 boot_trace = []
 chainloader = []
+embedded-kernel = ["chainloader"]
 
-##--------------------------------------------------------------------------------------------------
+##-------------------------------------------------------------------------------------------------
 ## Dependencies
-##--------------------------------------------------------------------------------------------------
+##-------------------------------------------------------------------------------------------------
 
 [dependencies]
+kernel-image = { path = "../libraries/kernel-image" }
 unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "hide-trace"] }
 
 # Optional dependencies

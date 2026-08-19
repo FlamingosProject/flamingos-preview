@@ -19,4 +19,4 @@ jobs:
                   rustup component add llvm-tools
                   cargo install cargo-binutils
             - name: Run
-              run: BSP=rpi3 make
+              run: cargo xtask build rpi3

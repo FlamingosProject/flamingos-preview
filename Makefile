@@ -13,7 +13,7 @@ include common/operating_system.mk
 BSP ?= rpi3
 DEV_SERIAL ?= /dev/ttyUSB0
 SCIP ?= scip
-CHAINBOOT_PAYLOAD ?= kernel8.img
+CHAINBOOT_PAYLOAD ?= $(NORMAL_KERNEL_ELF)
 OPENOCD ?= openocd
 GDB ?= gdb-multiarch
 OPENOCD_INTERFACE ?= interface/ftdi/olimex-arm-usb-tiny-h.cfg
@@ -65,25 +65,20 @@ endif
 ## Targets and Prerequisites
 ##--------------------------------------------------------------------------------------------------
 KERNEL_MANIFEST      = kernel/Cargo.toml
+NORMAL_KERNEL_ELF    = kernel.elf
 CHAINLOADER_BIN      = chainloader8.img
 KERNEL_BIN           = $(if $(CHAINLOADER),$(CHAINLOADER_BIN),$(NORMAL_KERNEL_BIN))
-BUILD_MODE           = $(if $(CHAINLOADER),chainloader,kernel)
-LAST_BUILD_CONFIG    = target/$(BSP).$(BUILD_MODE).build_config
-
-KERNEL_ELF      = target/$(TARGET)/release/kernel
-TEST_BUILD_DIR  = target/test_build/$(BSP)
-TEST_KERNEL_ELF = $(TEST_BUILD_DIR)/$(TARGET)/release/kernel
-TEST_KERNEL_BIN = $(TEST_BUILD_DIR)/kernel8.img
+KERNEL_ELF           = $(if $(CHAINLOADER),target/$(TARGET)/release/kernel,$(NORMAL_KERNEL_ELF))
 JTAG_TARGET_DIR = target/jtag/$(BSP)
 JTAG_OPT0_TARGET_DIR = target/jtag-opt0/$(BSP)
-JTAG_ELF = $(JTAG_TARGET_DIR)/$(TARGET)/release/kernel
-JTAG_OPT0_ELF = $(JTAG_OPT0_TARGET_DIR)/$(TARGET)/release/kernel
+JTAG_BOOT_ELF = target/jtag-bootstrap/$(BSP)/jtag_boot.elf
 GDB_INIT = tools/jtag/kernel.gdb
-HOST_TARGET     = $(shell rustc -vV | sed -n 's/^host: //p')
-TEST_RUNNER     = $(shell pwd)/target/$(HOST_TARGET)/release/kernel_test_runner
-# This parses cargo's dep-info file.
-# https://doc.rust-lang.org/cargo/guide/build-cache.html#dep-info-files
-KERNEL_ELF_DEPS = $(filter-out %: ,$(file < $(KERNEL_ELF).d)) $(KERNEL_MANIFEST) $(LAST_BUILD_CONFIG)
+TEST_BUILD_DIR = target/test_build/$(BSP)
+TEST_KERNEL_BIN = $(TEST_BUILD_DIR)/kernel8.img
+HOST_TARGET = $(shell rustc -vV | sed -n 's/^host: //p')
+HOST_TOOL_DIR = $(CURDIR)/target/$(HOST_TARGET)/release
+TEST_RUNNER = $(HOST_TOOL_DIR)/kernel_test_runner
+TEST_XTASK = $(HOST_TOOL_DIR)/xtask
 
 
 
@@ -91,27 +86,21 @@ KERNEL_ELF_DEPS = $(filter-out %: ,$(file < $(KERNEL_ELF).d)) $(KERNEL_MANIFEST)
 ## Command building blocks
 ##--------------------------------------------------------------------------------------------------
 RUSTFLAGS = $(RUSTC_MISC_ARGS)
-
 RUSTFLAGS_PEDANTIC = $(RUSTFLAGS) \
     -D missing_docs
+XTASK_RUSTFLAGS = FLAMINGOS_KERNEL_RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)"
 
 KERNEL_FEATURES = bsp_$(BSP_FAMILY)
+TEST_KERNEL_FEATURES = bsp_$(BSP_FAMILY),test_build
 ifdef CHAINLOADER
     KERNEL_FEATURES := $(KERNEL_FEATURES),chainloader
 endif
 FEATURES      = --features $(KERNEL_FEATURES)
-TEST_FEATURES = --no-default-features --features bsp_$(BSP_FAMILY),test_build
+TEST_FEATURES = --no-default-features --features $(TEST_KERNEL_FEATURES)
 COMPILER_ARGS = --target=$(TARGET) \
     $(FEATURES)                    \
     --release
 
-RUSTC_CMD   = cargo rustc $(COMPILER_ARGS) --manifest-path $(KERNEL_MANIFEST)
-TEST_BOOT_RUSTC_CMD = cargo rustc                \
-    --target=$(TARGET)                           \
-    $(TEST_FEATURES)                             \
-    --release                                    \
-    --target-dir=$(TEST_BUILD_DIR)               \
-    --manifest-path $(KERNEL_MANIFEST)
 TEST_SELECTION = $(if $(TEST),--test $(TEST),--tests)
 TEST_CMD = cargo test                            \
     --target=$(TARGET)                           \
@@ -119,31 +108,30 @@ TEST_CMD = cargo test                            \
     --release                                    \
     --manifest-path $(KERNEL_MANIFEST)           \
     $(TEST_SELECTION)
-DOC_CMD     = cargo doc $(COMPILER_ARGS)
-HOST_CLIPPY_PACKAGES = kernel_test_runner
+DOC_CMD     = cargo xtask doc $(BSP) $(FEATURES)
+HOST_CLIPPY_PACKAGES = kernel_test_runner xtask
 CLIPPY_KERNEL_CMD = cargo clippy $(COMPILER_ARGS) --manifest-path $(KERNEL_MANIFEST)
 CLIPPY_HOST_CMD = cargo clippy --release --target=$(HOST_TARGET) \
     $(addprefix --package=,$(HOST_CLIPPY_PACKAGES))
-OBJCOPY_CMD = rust-objcopy \
-    --strip-all            \
-    -O binary
-
-EXEC_QEMU = $(QEMU_BINARY) -M $(QEMU_MACHINE_TYPE)
-
+EXEC_QEMU              = $(QEMU_BINARY) -M $(QEMU_MACHINE_TYPE)
 
 
 
 ##--------------------------------------------------------------------------------------------------
 ## Targets
 ##--------------------------------------------------------------------------------------------------
-.PHONY: all chainboot jtagboot openocd gdb gdb-opt0 doc qemu test test_boot test_integration clippy clippy_kernel clippy_host clean readelf objdump nm check
+.PHONY: all chainboot jtagboot openocd gdb gdb-opt0 doc qemu test test_boot test_integration clippy clippy_kernel clippy_host clean readelf objdump nm check FORCE
 
 all: $(KERNEL_BIN)
+
+ifndef CHAINLOADER
+$(NORMAL_KERNEL_ELF): $(NORMAL_KERNEL_BIN)
+endif
 
 ##------------------------------------------------------------------------------
 ## Send a payload to a chainloader already running on the target
 ##------------------------------------------------------------------------------
-chainboot: $(NORMAL_KERNEL_BIN)
+chainboot: $(if $(filter $(NORMAL_KERNEL_ELF),$(CHAINBOOT_PAYLOAD)),$(NORMAL_KERNEL_ELF))
 	@test -f "$(CHAINBOOT_PAYLOAD)" || { \
 		echo "Missing payload: $(CHAINBOOT_PAYLOAD)"; \
 		exit 1; \
@@ -155,12 +143,15 @@ chainboot: $(NORMAL_KERNEL_BIN)
 ##------------------------------------------------------------------------------
 jtagboot:
 	@test -f "$(JTAG_BOOT_IMAGE)"
-	$(SCIP) --binfile "$(JTAG_BOOT_IMAGE)" "$(DEV_SERIAL)" 921600 8 N 1 N
+	@cargo xtask wrap-flat "$(JTAG_BOOT_IMAGE)" "$(JTAG_BOOT_ELF)"
+	$(SCIP) --binfile "$(JTAG_BOOT_ELF)" "$(DEV_SERIAL)" 921600 8 N 1 N
 
 openocd:
 	$(OPENOCD) -f "$(OPENOCD_INTERFACE)" -f "$(OPENOCD_TARGET_CONFIG)"
 
-define build_jtag_elf
+# GDB loads the bootstrap at its physical entry and reads stage-2 symbols at
+# their linked virtual addresses.
+define debug_kernel
 	@CARGO_PROFILE_RELEASE_STRIP=none RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" cargo rustc \
 		--target=$(TARGET)                           \
 		--no-default-features                       \
@@ -170,37 +161,24 @@ define build_jtag_elf
 		--manifest-path $(KERNEL_MANIFEST)            \
 		--bin kernel                                  \
 		-- -C debuginfo=2 $(2)
+	@rust-objcopy --strip-debug "$(1)/$(TARGET)/release/kernel" "$(1)/kernel.elf"
+	@$(XTASK_RUSTFLAGS) cargo xtask package $(BSP) "$(1)/kernel.elf" "$(1)/kernel8.img" \
+		--bootstrap-elf "$(1)/bootstrap.elf"
+	$(GDB) -q -x "$(GDB_INIT)" -ex 'add-symbol-file "$(1)/$(TARGET)/release/kernel"' "$(1)/bootstrap.elf"
 endef
 
 gdb:
-	$(call build_jtag_elf,$(JTAG_TARGET_DIR),)
-	$(GDB) -q -x "$(GDB_INIT)" "$(JTAG_ELF)"
+	$(call debug_kernel,$(JTAG_TARGET_DIR),)
 
 gdb-opt0:
-	$(call build_jtag_elf,$(JTAG_OPT0_TARGET_DIR),-C opt-level=0)
-	$(GDB) -q -x "$(GDB_INIT)" "$(JTAG_OPT0_ELF)"
+	$(call debug_kernel,$(JTAG_OPT0_TARGET_DIR),-C opt-level=0)
 
 ##------------------------------------------------------------------------------
-## Save the configuration as a file, so make understands if it changed.
+## Build the kernel ELF and firmware image, or the serial chainloader
 ##------------------------------------------------------------------------------
-$(LAST_BUILD_CONFIG):
-	@rm -f target/*.build_config
-	@mkdir -p target
-	@touch $(LAST_BUILD_CONFIG)
-
-##------------------------------------------------------------------------------
-## Compile the kernel ELF
-##------------------------------------------------------------------------------
-$(KERNEL_ELF): $(KERNEL_ELF_DEPS)
-	$(call color_header, "Compiling kernel ELF - $(BSP)")
-	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(RUSTC_CMD)
-
-##------------------------------------------------------------------------------
-## Generate the stripped kernel binary
-##------------------------------------------------------------------------------
-$(KERNEL_BIN): $(KERNEL_ELF)
-	$(call color_header, "Generating stripped binary")
-	@$(OBJCOPY_CMD) $(KERNEL_ELF) $(KERNEL_BIN)
+$(KERNEL_BIN): FORCE
+	$(call color_header, "Building boot artifacts - $(BSP)")
+	@$(XTASK_RUSTFLAGS) cargo xtask build $(BSP) $(FEATURES)
 	$(call color_progress_prefix, "Name")
 	@echo $(KERNEL_BIN)
 	$(call color_progress_prefix, "Size")
@@ -211,7 +189,7 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 ##------------------------------------------------------------------------------
 doc:
 	$(call color_header, "Generating docs")
-	@$(DOC_CMD) --document-private-items --open
+	@$(DOC_CMD) --open
 
 ##------------------------------------------------------------------------------
 ## Run the kernel in QEMU
@@ -240,8 +218,8 @@ else # QEMU is supported.
 
 test_boot:
 	$(call color_header, "Building QEMU boot test")
-	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(TEST_BOOT_RUSTC_CMD)
-	@$(OBJCOPY_CMD) $(TEST_KERNEL_ELF) $(TEST_KERNEL_BIN)
+	@$(XTASK_RUSTFLAGS) CARGO_TARGET_DIR=$(TEST_BUILD_DIR) \
+		cargo xtask build $(BSP) --out-dir $(TEST_BUILD_DIR) --features=$(TEST_KERNEL_FEATURES)
 	$(call color_header, "Running QEMU boot test")
 	$(EXEC_QEMU) $(QEMU_TEST_ARGS) -kernel $(TEST_KERNEL_BIN)
 endif
@@ -256,15 +234,18 @@ test_integration:
 
 else # QEMU is supported.
 
+# The runner executes a prebuilt xtask while Cargo holds the test build lock.
 test_integration:
-	$(call color_header, "Building kernel test runner")
-	@cargo build --package kernel_test_runner --release --target $(HOST_TARGET)
+	$(call color_header, "Building kernel test tools")
+	@cargo build --package kernel_test_runner --package xtask --release --target $(HOST_TARGET)
 	$(call color_header, "Running QEMU integration tests")
-	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)"                                             \
-	CARGO_TARGET_AARCH64_UNKNOWN_NONE_SOFTFLOAT_RUNNER="$(TEST_RUNNER)"            \
-	KERNEL_TEST_QEMU="$(QEMU_BINARY)"                                               \
-	KERNEL_TEST_QEMU_ARGS="-M $(QEMU_MACHINE_TYPE) $(QEMU_TEST_ARGS)"               \
-	KERNEL_TEST_OBJCOPY="rust-objcopy"                                              \
+	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)"                                              \
+	CARGO_TARGET_AARCH64_UNKNOWN_NONE_SOFTFLOAT_RUNNER="$(TEST_RUNNER)"             \
+	KERNEL_TEST_QEMU="$(QEMU_BINARY)"                                              \
+	KERNEL_TEST_QEMU_ARGS="-M $(QEMU_MACHINE_TYPE) $(QEMU_TEST_ARGS)"                \
+	KERNEL_TEST_XTASK="$(TEST_XTASK)"                                              \
+	KERNEL_TEST_REPO_ROOT="$(CURDIR)"                                              \
+	KERNEL_TEST_BSP="$(BSP)"                                                      \
 	$(TEST_CMD)
 
 endif
@@ -286,19 +267,19 @@ clippy_host:
 ## Clean
 ##------------------------------------------------------------------------------
 clean:
-	rm -rf target $(NORMAL_KERNEL_BIN) $(CHAINLOADER_BIN)
+	rm -rf target $(NORMAL_KERNEL_BIN) $(NORMAL_KERNEL_ELF) $(CHAINLOADER_BIN)
 
 ##------------------------------------------------------------------------------
 ## Run readelf
 ##------------------------------------------------------------------------------
-readelf: $(KERNEL_ELF)
+readelf: $(KERNEL_BIN)
 	$(call color_header, "Launching readelf")
 	$(READELF_BINARY) --headers $(KERNEL_ELF)
 
 ##------------------------------------------------------------------------------
 ## Run objdump
 ##------------------------------------------------------------------------------
-objdump: $(KERNEL_ELF)
+objdump: $(KERNEL_BIN)
 	$(call color_header, "Launching objdump")
 	$(OBJDUMP_BINARY) --disassemble --demangle \
                 --section .text   \
@@ -308,6 +289,6 @@ objdump: $(KERNEL_ELF)
 ##------------------------------------------------------------------------------
 ## Run nm
 ##------------------------------------------------------------------------------
-nm: $(KERNEL_ELF)
+nm: $(KERNEL_BIN)
 	$(call color_header, "Launching nm")
 	$(NM_BINARY) --demangle --print-size $(KERNEL_ELF) | sort

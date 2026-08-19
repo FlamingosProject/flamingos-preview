@@ -2,8 +2,10 @@
 resolver="2"
 
 members = [
+        "libraries/kernel-image",
         "kernel",
-        "tools/kernel_test_runner"
+        "tools/kernel_test_runner",
+        "xtask",
 ]
 
 [profile.release]

@@ -17,6 +17,8 @@ use crate::memory::{Address, Physical, Virtual};
 
 /// Translation table interfaces.
 pub mod interface {
+    use crate::memory::mmu::PageAddress;
+
     use super::*;
 
     /// Translation table operations.
@@ -27,10 +29,8 @@ pub mod interface {
         ///
         /// - Implementor must ensure that this function can run only once or is harmless if invoked
         ///   multiple times.
-        fn init(&mut self);
-
-        /// The translation table's base address to be used for programming the MMU.
-        fn phys_base_address(&self) -> Address<Physical>;
+        #[allow(dead_code)]
+        fn init(&mut self) -> Result<(), &'static str>;
 
         /// Map the given virtual memory region to the given physical memory region.
         ///
@@ -47,5 +47,29 @@ pub mod interface {
             phys_region: &MemoryRegion<Physical>,
             attr: &AttributeFields,
         ) -> Result<(), &'static str>;
+
+        /// Try to translate a virtual page address to a physical page address.
+        ///
+        /// Will only succeed if there exists a valid mapping for the input page.
+        fn try_virt_page_addr_to_phys_page_addr(
+            &self,
+            virt_page_addr: PageAddress<Virtual>,
+        ) -> Result<PageAddress<Physical>, &'static str>;
+
+        /// Try to get the attributes of a page.
+        ///
+        /// Will only succeed if there exists a valid mapping for the input page.
+        fn try_page_attributes(
+            &self,
+            virt_page_addr: PageAddress<Virtual>,
+        ) -> Result<AttributeFields, &'static str>;
+
+        /// Try to translate a virtual address to a physical address.
+        ///
+        /// Will only succeed if there exists a valid mapping for the input address.
+        fn try_virt_addr_to_phys_addr(
+            &self,
+            virt_addr: Address<Virtual>,
+        ) -> Result<Address<Physical>, &'static str>;
     }
 }

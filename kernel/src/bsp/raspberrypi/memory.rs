@@ -6,11 +6,12 @@
 //!
 //! The physical memory layout.
 //!
-//! The Raspberry's firmware copies the kernel binary to 0x8_0000. The preceding region will be used
-//! as the boot core's stack.
+//! Stage 1 loads kernel ELF segments at their physical addresses. The first
+//! 64 KiB preserves firmware park code; the boot stack is 64–512 KiB. The
+//! source ELF remains reserved at 64–96 MiB for runtime diagnostics.
 //!
 //! +---------------------------------------+
-//! |                                       | boot_core_stack_start @ 0x0
+//! |                                       | boot_core_stack_start @ 0x10000
 //! |                                       |                                ^
 //! | Boot-core Stack                       |                                | stack
 //! |                                       |                                | growth
@@ -19,7 +20,7 @@
 //! |                                       | code_start @ 0x8_0000 == boot_core_stack_end_exclusive
 //! | .text                                 |
 //! | .rodata                               |
-//! | .got                                  |
+//! | .eh_frame_hdr / .eh_frame              |
 //! |                                       |
 //! +---------------------------------------+
 //! |                                       | data_start == code_end_exclusive
@@ -37,7 +38,7 @@
 //! The virtual memory layout is as follows:
 //!
 //! +---------------------------------------+
-//! |                                       | boot_core_stack_start @ 0x0
+//! |                                       | boot_core_stack_start @ 0x10000
 //! |                                       |                                ^
 //! | Boot-core Stack                       |                                | stack
 //! |                                       |                                | growth
@@ -46,7 +47,7 @@
 //! |                                       | code_start @ 0x8_0000 == boot_core_stack_end_exclusive
 //! | .text                                 |
 //! | .rodata                               |
-//! | .got                                  |
+//! | .eh_frame_hdr / .eh_frame              |
 //! |                                       |
 //! +---------------------------------------+
 //! |                                       | data_start == code_end_exclusive

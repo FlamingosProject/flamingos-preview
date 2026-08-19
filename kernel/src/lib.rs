@@ -155,8 +155,3 @@ pub fn version() -> &'static str {
         env!("FLAMINGOS_REVISION")
     )
 }
-
-#[cfg(all(not(test), not(feature = "chainloader")))]
-unsafe extern "Rust" {
-    fn kernel_init() -> !;
-}

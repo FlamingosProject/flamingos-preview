@@ -27,20 +27,22 @@ fn image_path(elf: &Path) -> PathBuf {
 }
 
 fn make_image(elf: &Path, image: &Path) -> Result<(), String> {
-    let objcopy =
-        env::var_os("KERNEL_TEST_OBJCOPY").unwrap_or_else(|| OsString::from("rust-objcopy"));
-    let status = Command::new(&objcopy)
-        .args(["--strip-all", "-O", "binary"])
+    let xtask = required_env("KERNEL_TEST_XTASK")?;
+    let bsp = required_env("KERNEL_TEST_BSP")?;
+    let repo_root = required_env("KERNEL_TEST_REPO_ROOT")?;
+    let status = Command::new(&xtask)
+        .current_dir(repo_root)
+        .arg("package")
+        .arg(bsp)
         .arg(elf)
         .arg(image)
         .status()
-        .map_err(|err| format!("failed to execute {objcopy:?}: {err}"))?;
+        .map_err(|err| format!("failed to execute {xtask:?}: {err}"))?;
 
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("{objcopy:?} failed with {status}"))
-    }
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| format!("{xtask:?} package failed with {status}"))
 }
 
 fn wait_with_timeout(child: &mut Child, timeout: Duration) -> Result<ExitStatus, String> {
@@ -67,15 +69,7 @@ fn wait_with_timeout(child: &mut Child, timeout: Duration) -> Result<ExitStatus,
     }
 }
 
-fn run() -> Result<(), String> {
-    let elf = env::args_os()
-        .nth(1)
-        .map(PathBuf::from)
-        .ok_or_else(|| "usage: kernel_test_runner <test-elf>".to_owned())?;
-    let image = image_path(&elf);
-
-    make_image(&elf, &image)?;
-
+fn run_qemu(image: &Path) -> Result<(), String> {
     let qemu = required_env("KERNEL_TEST_QEMU")?;
     let qemu_args = env::var("KERNEL_TEST_QEMU_ARGS").unwrap_or_default();
     let timeout = env::var("KERNEL_TEST_TIMEOUT_SECONDS")
@@ -86,19 +80,28 @@ fn run() -> Result<(), String> {
     let mut child = Command::new(&qemu)
         .args(qemu_args.split_ascii_whitespace())
         .arg("-kernel")
-        .arg(&image)
+        .arg(image)
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
         .map_err(|err| format!("failed to execute {qemu:?}: {err}"))?;
 
-    let result = wait_with_timeout(&mut child, Duration::from_secs(timeout)).and_then(|status| {
-        status
-            .success()
-            .then_some(())
-            .ok_or_else(|| format!("QEMU failed with {status}"))
-    });
+    let status = wait_with_timeout(&mut child, Duration::from_secs(timeout))?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| format!("QEMU failed with {status}"))
+}
+
+fn run() -> Result<(), String> {
+    let elf = env::args_os()
+        .nth(1)
+        .ok_or_else(|| "usage: kernel_test_runner <test-elf>".to_owned())?;
+    let elf = fs::canonicalize(elf).map_err(|err| format!("failed to resolve test ELF: {err}"))?;
+    let image = image_path(&elf);
+
+    let result = make_image(&elf, &image).and_then(|()| run_qemu(&image));
     let _ = fs::remove_file(image);
     result
 }

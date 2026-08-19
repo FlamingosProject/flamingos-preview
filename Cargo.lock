@@ -18,6 +18,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1033caf0b349c518623b5396bfb2cf0bddf44f0306d543a250e5743297aafd10"
 
 [[package]]
+name = "kernel-image"
+version = "1.0.0"
+
+[[package]]
 name = "kernel_test_runner"
 version = "1.0.0"
 
@@ -26,6 +30,7 @@ name = "mingo"
 version = "1.0.0"
 dependencies = [
  "aarch64-cpu",
+ "kernel-image",
  "qemu-exit",
  "tock-registers",
  "unwinding",
@@ -33,9 +38,9 @@ dependencies = [
 
 [[package]]
 name = "qemu-exit"
-version = "3.0.1"
+version = "3.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ff023245bfcc73fb890e1f8d5383825b3131cc920020a5c487d6f113dfc428a"
+checksum = "8bb0fd6580eeed0103c054e3fba2c2618ff476943762f28a645b63b8692b21c9"
 
 [[package]]
 name = "tock-registers"
@@ -50,4 +55,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b134ada16dda9e435abe2a6d76a01d497bc60707357845a15f9b0ed42dc88ce"
 dependencies = [
  "gimli",
+]
+
+[[package]]
+name = "xtask"
+version = "1.0.0"
+dependencies = [
+ "kernel-image",
 ]
