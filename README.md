@@ -33,8 +33,9 @@ target and uses the compatible RPi 3 kernel configuration. Enter a chapter direc
 example, `BSP=rpiz2 make`; the chapter README describes its concepts and available workflows.
 
 The public history was curated in August 2026 so that the tutorial progression is straightforward
-to inspect. [CLEANUP-PLAN.md](CLEANUP-PLAN.md) explains the preservation and reconstruction policy.
-The old development history remains available under `archive/2026-08-19/*` refs.
+to inspect. [REVIEWING.md](REVIEWING.md) explains how to examine the chapter sequence and the current
+validation boundary. [CLEANUP-PLAN.md](CLEANUP-PLAN.md) explains the preservation and reconstruction
+policy. The old development history remains available under `archive/2026-08-19/*` refs.
 
 ## License
 

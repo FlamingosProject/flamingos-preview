@@ -1,12 +1,12 @@
 # Curated History Mapping
 
 This report records the August 19, 2026 rewrite described in
-[CLEANUP-PLAN.md](CLEANUP-PLAN.md) and its subsequent stable-tooling cleanup. The original archive
-preserves the actual development history, while the numbered refs present the tutorial as one
-linear chain with one commit per chapter.
+[CLEANUP-PLAN.md](CLEANUP-PLAN.md) and subsequent curated maintenance. The original archive preserves
+the actual development history, while the numbered refs present the tutorial as one linear chain
+with one commit per chapter.
 
-The `main` rows map display-tree content tips. The public `main` tip is their immediate maintenance
-child, which adds this report. A commit cannot contain its own object ID, so the report commit is
+The `main` rows map display-tree content tips. Two following maintenance commits add this report and
+the reviewer guide. A commit cannot contain its own object ID, so the final maintenance tip is
 identified by `git rev-parse main` rather than embedded below.
 
 ## Original Rewrite Mapping
@@ -70,6 +70,24 @@ onward, and the associated README documentation.
 | `19-timer-callbacks` | `a93ac20f34345017aa29740fc20f8d9e45f7bee3` | `a5582d517f7f18431c717d01f722f97cc591ec81` | `fd06d6ed7e71c52ed72d60d795796ef90c0f0a26` | `f0f37ae467eed35b8ab5cc0f34659be6a1be7ae5` | PASS |
 | `20-boot-improvements` | `30b3d001dbcab7eae4df8710623bea016e3aed5e` | `19cfac2c793c752ec3c6445e139a302f1617d62d` | `d40cb16f20cba36bf86703d172350d0f11e3f093` | `3b6bd92d6e9dff5d405b6ae7bcfc2b36e273ee25` | PASS |
 | `21-second-core` | `3633947e2471dec647168e67f8679ebdd130fcb5` | `10b3adf11e8845bd19807f0e2a7719176d71c60d` | `4871ece1bf56354b73ea51780394c7d29949b94e` | `4ef61696d48ae5c88bbf146a3a636f04f90596f9` | PASS |
+
+## Additional Archived Refs
+
+Development and work-in-progress branches outside the numbered chapter set were preserved before
+their top-level names were removed. Their archive refs point to the exact former branch tips.
+
+| Former ref | Archive ref | Commit |
+| --- | --- | --- |
+| `03-hacky-hello-world` | `archive/2026-08-19/extra/03-hacky-hello-world` | `7bdfadfd381b357727fb7de7429e7acb78af2c5f` |
+| `20260331` | `archive/2026-08-19/extra/20260331` | `34b37005d3510f79cd139b71ac428a8917d5d4f1` |
+| `boot-device-tree` | `archive/2026-08-19/extra/boot-device-tree` | `917f325e5e71c60ab1e049e8aec64cfc4991a445` |
+| `elf-boot` | `archive/2026-08-19/extra/elf-boot` | `823f8316c3c5e409fd1c2d3aff1478532de45848` |
+| `full-device-tree-fail2` | `archive/2026-08-19/extra/full-device-tree-fail2` | `8629cbb60a22d2c2996b57671c4618abd9a5abd2` |
+| `move-boot-code-to-binary` | `archive/2026-08-19/extra/move-boot-code-to-binary` | `4b45dcd14053f52b7c4d98e28d882bfd9c1d8e3c` |
+| `rollforward` | `archive/2026-08-19/extra/rollforward` | `469355426e9e0554ce63c6dafc5c8f2ac18baa5f` |
+| `rust-translation_table_tool` | `archive/2026-08-19/extra/rust-translation_table_tool` | `bd704b783da20049f228d13a96f08c8593f3dff5` |
+| `unwinder-wip` | `archive/2026-08-19/extra/unwinder-wip` | `1407de2b58fa030d68add8b64092c5fc3ba894d0` |
+| `work` | `archive/2026-08-19/extra/work` | `6f93ab050d8abbd5bf621bc61e58841c78e20dd4` |
 
 ## Validation
 
