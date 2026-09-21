@@ -1,61 +1,65 @@
-# Tutorial 21 - Second Core
+# Tutorial 22 - SD Card
 
 ## tl;dr
 
-- Non-boot cores are no longer treated as immediate boot failures.
-- Early boot introduces a parking flag array that can be used to release secondary cores later.
-- A placeholder secondary-core entry point is added so the next stage of multicore bring-up has a
-  concrete target.
+- The BSP maps the Raspberry Pi SD controller (`EMMC` on Pi 3-family boards and `EMMC2` on Pi 4).
+- GPIO48-53 are routed to the Arasan controller on Pi 3 and Zero 2 W builds.
+- A new blocking, `no_std` PIO driver performs card identification and 512-byte sector reads and
+  writes.
+- The driver exposes sectors rather than filesystem operations so an exFAT implementation can be
+  layered on top without coupling the BSP to one filesystem crate.
 
-## Table of Contents
+## Implementation status
 
-- [Introduction](#introduction)
-- [Implementation](#implementation)
-  - [Core Parking State](#core-parking-state)
-  - [Secondary-Core Entry Point](#secondary-core-entry-point)
-- [Test it](#test-it)
+The first implementation slice is adapted from `joeferner/rpi-hal` 0.6.0, specifically commit
+`258c4b9d778f4598eeb05aa97682fe9994fd5a16`. Only the native SD blocking path was brought over;
+`rpi-hal`'s runtime, PAC, MMU, interrupt, DMA, and filesystem adapters are not dependencies.
 
-## Introduction
+Implemented:
 
-This revision is a small, focused step toward running code on a second CPU core. The previous boot
-path identified non-boot cores and treated their presence in the entry path as a panic condition.
-That is useful while the kernel is single-core only, but it is not enough for controlled multicore
-bring-up.
+- SDHCI register mapping through the kernel's existing MMIO allocator.
+- Pi 3/Zero 2 W GPIO mux and pull-up setup; Pi 4 uses dedicated EMMC2 pads.
+- `CMD0`/`CMD8`/`ACMD41`/`CMD2`/`CMD3`/`CMD7` card initialization.
+- Best-effort four-bit bus negotiation through `ACMD51` and `ACMD6`.
+- Blocking `CMD17` sector reads and `CMD24` sector writes.
+- Time-bounded controller polling and diagnostic command/interrupt errors.
+- VideoCore property-mailbox clock discovery, including the cache maintenance and virtual-to-
+  physical address translation required by this kernel's MMU setup.
+- SD power-domain setup and Pi 4 EMMC2 clock enablement through firmware.
 
-The developer workflows introduced earlier remain available. Use `make chainboot` to send the
-normal kernel, `CHAINLOADER=1 make` to build the persistent EL2/MMU-off loader as
-`chainloader8.img`, and `make jtagboot`, `make openocd`, `make gdb`, or `make gdb-opt0` for the
-Chapter 08 hardware-debugging workflow.
+Still required before hardware acceptance:
 
-The code now distinguishes the boot core from secondary cores and leaves the secondary cores parked
-until they are explicitly released.
+- CSD decoding so the block layer can report the card's sector count.
+- Real-hardware tests on Pi 3, Zero 2 W, and Pi 4. In particular, upstream has not yet validated its
+  Pi 3-family path on Zero 2 W hardware.
+- Multi-block transfers and, later, DMA/interrupt-driven I/O.
+- The filesystem-facing block-device adapter and exFAT dependency.
 
-## Implementation
+## Using the driver
 
-### Core Parking State
+The controller and property mailbox are registered during BSP initialization, but removable-media
+discovery is not part of kernel boot. Initialize and use the card explicitly:
 
-The AArch64 boot module adds a `BOOT_PARK` static array of `AtomicBool` values. Its size is tied to
-`MAX_CORES`, which is reduced from `64` to `16` for this early implementation.
+```rust,ignore
+let sd = bsp::driver::emmc();
+sd.initialize(bsp::driver::mailbox())?;
 
-When assembly boot code detects that the current CPU is not the boot core, it enters a `wfe` loop.
-After each wake event, it checks the corresponding parking flag. While the flag is zero, the core
-continues waiting. Once the flag is set, the core leaves the parking loop.
+let mut sector = [0_u8; 512];
+sd.read_block(0, &mut sector)?;
+```
 
-### Secondary-Core Entry Point
-
-The Rust boot module adds `_start_core(id)`, an exported placeholder entry point for a released
-secondary core. In this revision it still reports progress through the early panic/blink-code path,
-which makes it clear that the secondary-core path has not yet become a full kernel thread or
-scheduler entry.
-
-The assembly path branches to `_start_core` after a secondary core is released from the parking
-loop.
+Keeping discovery explicit means an empty or faulty SD slot does not prevent the kernel from
+booting far enough to report the error over UART.
 
 ## Test it
 
-`make clippy` checks the bare-metal kernel with the selected BSP and checks the native host tools for
-the build and test workflows under the host target.
+The driver currently has compile- and boot-level coverage:
 
-For normal single-core boot behavior, this revision should behave like the previous one. The
-secondary-core path is preparatory: it introduces the parking/release structure, but higher-level
-code to set the release flag and start useful work on the second core is still to come.
+```text
+cargo xtask build rpi3
+cargo xtask build rpi4
+make test_boot BSP=rpi3
+```
+
+The QEMU smoke test confirms the new MMIO mapping and driver registration do not regress boot. It
+does not claim that QEMU or real hardware has exercised card initialization or data transfer yet.
