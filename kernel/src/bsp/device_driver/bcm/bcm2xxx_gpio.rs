@@ -12,6 +12,8 @@ use crate::{
     synchronization,
     synchronization::IRQSafeNullLock,
 };
+#[cfg(feature = "bsp_rpi3")]
+use tock_registers::interfaces::Readable;
 use tock_registers::{
     interfaces::{ReadWriteable, Writeable},
     register_bitfields, register_structs,
@@ -101,9 +103,13 @@ register_structs! {
         (0x00 => _reserved1),
         (0x04 => GPFSEL1: ReadWrite<u32, GPFSEL1::Register>),
         (0x08 => _reserved2),
+        (0x10 => GPFSEL4: ReadWrite<u32>),
+        (0x14 => GPFSEL5: ReadWrite<u32>),
+        (0x18 => _reserved3),
         (0x94 => GPPUD: ReadWrite<u32, GPPUD::Register>),
         (0x98 => GPPUDCLK0: ReadWrite<u32, GPPUDCLK0::Register>),
-        (0x9C => _reserved3),
+        (0x9C => GPPUDCLK1: ReadWrite<u32>),
+        (0xA0 => _reserved4),
         (0xE4 => GPIO_PUP_PDN_CNTRL_REG0: ReadWrite<u32, GPIO_PUP_PDN_CNTRL_REG0::Register>),
         (0xE8 => @END),
     }
@@ -190,6 +196,43 @@ impl GPIOInner {
         #[cfg(feature = "bsp_rpi4")]
         self.disable_pud_14_15_bcm2711();
     }
+
+    /// Route GPIO48-53 to the Arasan EMMC controller used by the SD-card slot.
+    #[cfg(feature = "bsp_rpi3")]
+    fn map_emmc(&mut self) {
+        use crate::time;
+        use core::time::Duration;
+
+        const ALT3: u32 = 0b111;
+        const DELAY: Duration = Duration::from_micros(1);
+        const PINS_48_TO_53: u32 = 0b11_1111 << 16;
+
+        // GPIO48 and GPIO49 occupy fields 24 and 27 in GPFSEL4.
+        let value = self.registers.GPFSEL4.get();
+        let mask = (0b111 << 24) | (0b111 << 27);
+        self.registers
+            .GPFSEL4
+            .set((value & !mask) | (ALT3 << 24) | (ALT3 << 27));
+
+        // GPIO50-53 occupy the first four fields in GPFSEL5.
+        let value = self.registers.GPFSEL5.get();
+        let mask = 0x0fff;
+        self.registers
+            .GPFSEL5
+            .set((value & !mask) | ALT3 | (ALT3 << 3) | (ALT3 << 6) | (ALT3 << 9));
+
+        // The identification phase requires CMD and DAT0-3 to idle high.
+        self.registers.GPPUD.write(GPPUD::PUD::PullUp);
+        time::time_manager().spin_for(DELAY);
+        self.registers.GPPUDCLK1.set(PINS_48_TO_53);
+        time::time_manager().spin_for(DELAY);
+        self.registers.GPPUD.write(GPPUD::PUD::Off);
+        self.registers.GPPUDCLK1.set(0);
+    }
+
+    /// Pi 4's SD slot is connected to dedicated EMMC2 pads, not GPIO48-53.
+    #[cfg(feature = "bsp_rpi4")]
+    fn map_emmc(&mut self) {}
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -215,6 +258,11 @@ impl GPIO {
     /// Concurrency safe version of `GPIOInner.map_pl011_uart()`
     pub fn map_pl011_uart(&self) {
         self.inner.lock(|inner| inner.map_pl011_uart())
+    }
+
+    /// Route the board's SD-card pins to its EMMC controller.
+    pub fn map_emmc(&self) {
+        self.inner.lock(|inner| inner.map_emmc())
     }
 }
 
