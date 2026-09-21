@@ -106,6 +106,9 @@ fn kernel_main() -> ! {
     info!("Kernel heap:");
     memory::heap_alloc::kernel_heap_allocator().print_usage();
 
+    #[cfg(not(feature = "test_build"))]
+    sdcard_smoke_test();
+
     time::time_manager().set_timeout_once(Duration::from_secs(5), Box::new(|| info!("Once 5")));
     time::time_manager().set_timeout_once(Duration::from_secs(2), Box::new(|| info!("Once 2")));
     time::time_manager()
@@ -118,4 +121,49 @@ fn kernel_main() -> ! {
 
     #[cfg(not(feature = "test_build"))]
     cpu::wait_forever();
+}
+
+/// Initialize the card and report a compact fingerprint of its first sector.
+#[cfg(not(feature = "test_build"))]
+fn sdcard_smoke_test() {
+    info!("SD card test: initializing");
+    let sd = bsp::driver::emmc();
+
+    match sd.initialize(bsp::driver::mailbox()) {
+        Ok(()) => {}
+        Err(bsp::driver::EmmcError::NoCard) => {
+            libkernel::warn!("SD card test: no card present");
+            return;
+        }
+        Err(error) => {
+            libkernel::warn!("SD card test: initialization failed: {:?}", error);
+            return;
+        }
+    }
+
+    let mut sector = [0_u8; 512];
+    if let Err(error) = sd.read_block(0, &mut sector) {
+        libkernel::warn!("SD card test: sector 0 read failed: {:?}", error);
+        return;
+    }
+
+    info!(
+        "SD card test: sector 0 CRC-32 = {:#010x}, four-bit bus = {}",
+        crc32(&sector),
+        sd.four_bit_bus().unwrap_or(false)
+    );
+}
+
+/// IEEE CRC-32, reflected representation (`0xedb8_8320`).
+#[cfg(not(feature = "test_build"))]
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = u32::MAX;
+    for &byte in bytes {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            let mask = 0_u32.wrapping_sub(crc & 1);
+            crc = (crc >> 1) ^ (0xedb8_8320 & mask);
+        }
+    }
+    !crc
 }
