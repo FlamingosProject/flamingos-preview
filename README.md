@@ -63,3 +63,14 @@ make test_boot BSP=rpi3
 
 The QEMU smoke test confirms the new MMIO mapping and driver registration do not regress boot. It
 does not claim that QEMU or real hardware has exercised card initialization or data transfer yet.
+
+The normal hardware image also runs a sector-zero read test during boot:
+
+```text
+make BSP=rpiz2
+```
+
+The test powers and initializes the card, reads logical sector 0, and prints its IEEE CRC-32 and
+negotiated bus width over UART. An empty slot is reported as `no card present` and boot continues.
+The read is excluded only from QEMU test builds, where no VideoCore firmware property service is
+available.

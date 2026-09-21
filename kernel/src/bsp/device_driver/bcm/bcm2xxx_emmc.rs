@@ -78,6 +78,7 @@ const INT_CMD_DONE: u32 = 1 << 0;
 const INT_DATA_DONE: u32 = 1 << 1;
 const INT_WRITE_RDY: u32 = 1 << 4;
 const INT_READ_RDY: u32 = 1 << 5;
+const INT_CMD_TIMEOUT: u32 = 1 << 16;
 const INT_ERROR_MASK: u32 = 0x017e_8000;
 
 const ACMD41_ARG_HC: u32 = 0x51ff_8000;
@@ -105,6 +106,8 @@ pub enum Error {
     },
     /// The card rejected the voltage range offered by the host.
     UnsupportedVoltage,
+    /// The SD-card slot did not answer card-identification commands.
+    NoCard,
     /// No card has been initialized yet.
     NotInitialized,
     /// A byte-addressed SDSC request overflowed its 32-bit argument.
@@ -173,7 +176,9 @@ impl EMMCInner {
             four_bit_bus: false,
         };
         self.command(&card, CMD_GO_IDLE, 0)?;
-        self.command(&card, CMD_SEND_IF_COND, 0x1aa)?;
+        if let Err(error) = self.command(&card, CMD_SEND_IF_COND, 0x1aa) {
+            return Err(self.classify_missing_card(&card, error));
+        }
 
         let start = time::time_manager().uptime();
         let response = loop {
@@ -198,6 +203,13 @@ impl EMMCInner {
         card.four_bit_bus = self.negotiate_four_bit_bus(&card).unwrap_or(false);
         self.card = Some(card);
         Ok(())
+    }
+
+    fn classify_missing_card(&mut self, card: &CardState, original: Error) -> Error {
+        match self.command(card, CMD_APP_CMD, 0) {
+            Err(Error::Card { interrupt, .. }) if interrupt & INT_CMD_TIMEOUT != 0 => Error::NoCard,
+            _ => original,
+        }
     }
 
     fn read_block(&mut self, block_index: u32, block: &mut Block) -> Result<(), Error> {
