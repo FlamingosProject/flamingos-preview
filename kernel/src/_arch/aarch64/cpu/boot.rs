@@ -28,6 +28,19 @@ const BOOT_TRACE: u64 = 1;
 #[cfg(not(feature = "boot_trace"))]
 const BOOT_TRACE: u64 = 0;
 
+/// Maximum firmware device-tree size retained across the MMU transition.
+#[cfg(not(feature = "chainloader"))]
+const DEVICE_TREE_BUFFER_SIZE: usize = 256 * 1024;
+
+#[cfg(not(feature = "chainloader"))]
+#[repr(C, align(8))]
+struct DeviceTreeBuffer([u8; DEVICE_TREE_BUFFER_SIZE]);
+
+// Early assembly fills this after clearing BSS and before enabling the MMU.
+#[cfg(not(feature = "chainloader"))]
+#[no_mangle]
+static mut DEVICE_TREE_BUFFER: DeviceTreeBuffer = DeviceTreeBuffer([0; DEVICE_TREE_BUFFER_SIZE]);
+
 // Normal and chainloader builds have deliberately different early-boot contracts.
 #[cfg(not(feature = "chainloader"))]
 global_asm!(
@@ -35,6 +48,7 @@ global_asm!(
     CONST_CURRENTEL_EL2 = const 0x8,
     CONST_CORE_ID_MASK = const 0b11,
     CONST_BOOT_TRACE = const BOOT_TRACE,
+    CONST_DEVICE_TREE_BUFFER_SIZE = const DEVICE_TREE_BUFFER_SIZE,
 );
 
 #[cfg(feature = "chainloader")]

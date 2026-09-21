@@ -28,16 +28,19 @@ Chapter 08 hardware-debugging workflow.
 
 The assembly-to-Rust handoff has preserved the firmware-provided device tree pointer since Chapter
 02. The key change here is that Rust finally interprets it, storing basic core information for later
-reporting.
+reporting. Before enabling the MMU, the boot path copies the handoff into a bounded kernel-owned
+buffer so both direct firmware boot and the relocated UART chainloader use a mapped address.
 
 ## Implementation
 
 ### Device Tree Parsing
 
-The existing boot arguments already carry the incoming device tree pointer through assembly. Early
-boot converts it to an address in the mapped boot-stack region and preserves it across the MMU
-transition. The kernel crate now adds the `fdt` dependency and parses the flattened device tree once
-linked virtual code is safe to execute.
+The existing boot arguments already carry the incoming device tree pointer through assembly. The
+pointer itself is not safe to reuse after enabling virtual memory: firmware may place the tree
+outside the kernel's early mappings, and the UART chainloader keeps its copy in its relocated image
+around 32 MiB. Early boot therefore validates the FDT header and size, copies at most 256 KiB into
+kernel BSS, and passes that buffer's linked virtual address across the MMU transition. The kernel
+crate then parses the flattened device tree once linked virtual code is safe to execute.
 
 QEMU's `raspi3b` machine supplies the older `ATAG_CORE` handoff instead of a flattened device tree.
 The boot code recognizes that specific format and records the four cores provided by the supported

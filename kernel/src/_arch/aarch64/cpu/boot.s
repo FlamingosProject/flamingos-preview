@@ -86,6 +86,42 @@ _start:
 	b	.L_bss_init_loop
 
 .L_prepare_rust:
+	// QEMU passes an ATAG_CORE header, while firmware and the UART
+	// chainloader pass an FDT. Work out how many bytes must survive.
+	ldr	w4, [x19, #4]
+	movz	w5, #0x0001
+	movk	w5, #0x5441, lsl #16
+	cmp	w4, w5
+	b.ne	.L_device_tree_is_fdt
+	mov	x4, #8
+	b	.L_device_tree_size_ready
+
+.L_device_tree_is_fdt:
+	ldr	w5, [x19]
+	rev	w5, w5
+	movz	w6, #0xfeed
+	movk	w6, #0xd00d, lsl #16
+	cmp	w5, w6
+	b.ne	.L_bad_device_tree
+	rev	w4, w4
+
+.L_device_tree_size_ready:
+	cbz	x4, .L_bad_device_tree
+	mov	x5, {CONST_DEVICE_TREE_BUFFER_SIZE}
+	cmp	x4, x5
+	b.hi	.L_device_tree_too_large
+
+	// The incoming pointer may refer to firmware memory or to the
+	// chainloader's relocated copy around 32 MiB. Copy it into this
+	// kernel's own BSS so it has a known high-half mapping after MMU-on.
+	ADR_REL	x5, DEVICE_TREE_BUFFER
+	add	x6, x5, x4
+.L_device_tree_copy_loop:
+	ldrb	w7, [x19], #1
+	strb	w7, [x5], #1
+	cmp	x5, x6
+	b.lo	.L_device_tree_copy_loop
+
 	BLINK_CODE #2
 
 	// Load the base address of the kernel's translation tables.
@@ -94,11 +130,16 @@ _start:
 	// Load the kernel's linked virtual stack and entry-point addresses.
 	ADR_ABS	x1, __boot_core_stack_end_exclusive
 	ADR_ABS	x2, kernel_init
-	ADR_ABS	x3, __boot_core_stack_start
-	add	x3, x3, x19
+	ADR_ABS	x3, DEVICE_TREE_BUFFER
 
-	// Jump to Rust code. x3 is the device tree's address in the mapped boot-stack region.
+	// Jump to Rust code. x3 is the copied device tree's linked virtual address.
 	b	_start_rust
+
+.L_bad_device_tree:
+	PANIC	#0x12
+
+.L_device_tree_too_large:
+	PANIC	#0x13
 
 	// Infinitely wait for events (aka "park the core").
 .L_parking_loop:
