@@ -13,7 +13,7 @@ use libkernel::{
     symbols,
 };
 
-#[unsafe(no_mangle)]
+#[no_mangle]
 unsafe fn kernel_init() -> ! {
     memory::init();
     bsp::driver::qemu_bring_up_console();

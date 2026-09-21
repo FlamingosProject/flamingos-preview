@@ -9,21 +9,19 @@
 
 use libkernel::{bsp, cpu, exception, memory};
 
-#[unsafe(no_mangle)]
+#[no_mangle]
 unsafe fn kernel_init() -> ! {
-    unsafe {
-        memory::init();
-        bsp::driver::qemu_bring_up_console();
+    memory::init();
+    bsp::driver::qemu_bring_up_console();
 
-        exception::handling_init();
-        exception::asynchronous::local_irq_unmask();
+    exception::handling_init();
+    exception::asynchronous::local_irq_unmask();
 
-        local_irq_mask_works();
-        local_irq_unmask_works();
-        local_irq_mask_save_works();
+    local_irq_mask_works();
+    local_irq_unmask_works();
+    local_irq_mask_save_works();
 
-        cpu::qemu_exit_success()
-    }
+    cpu::qemu_exit_success()
 }
 
 /// Check that IRQ masking works.
