@@ -9,17 +9,15 @@
 
 use libkernel::{bsp, cpu, exception, info, memory, test};
 
-#[unsafe(no_mangle)]
+#[no_mangle]
 unsafe fn kernel_init() -> ! {
-    unsafe {
-        exception::handling_init();
-        memory::init();
-        bsp::driver::qemu_bring_up_console();
+    exception::handling_init();
+    memory::init();
+    bsp::driver::qemu_bring_up_console();
 
-        info!("Causing a page fault by reading address 9 GiB");
-        test::expect_panic();
-        core::ptr::read_volatile((9_usize * 1024 * 1024 * 1024) as *const u64);
+    info!("Causing a page fault by reading address 9 GiB");
+    test::expect_panic();
+    core::ptr::read_volatile((9_usize * 1024 * 1024 * 1024) as *const u64);
 
-        cpu::qemu_exit_failure()
-    }
+    cpu::qemu_exit_failure()
 }

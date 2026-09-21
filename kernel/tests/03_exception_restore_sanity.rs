@@ -24,20 +24,18 @@ fn nested_system_call() {
     }
 }
 
-#[unsafe(no_mangle)]
+#[no_mangle]
 unsafe fn kernel_init() -> ! {
-    unsafe {
-        exception::handling_init();
-        memory::init();
-        bsp::driver::qemu_bring_up_console();
+    exception::handling_init();
+    memory::init();
+    bsp::driver::qemu_bring_up_console();
 
-        info!("Making a dummy system call");
+    info!("Making a dummy system call");
 
-        // Calling this inside a function indirectly tests if the link register is restored properly.
-        nested_system_call();
+    // Calling this inside a function indirectly tests if the link register is restored properly.
+    nested_system_call();
 
-        info!("Back from system call!");
+    info!("Back from system call!");
 
-        cpu::qemu_exit_success()
-    }
+    cpu::qemu_exit_success()
 }
