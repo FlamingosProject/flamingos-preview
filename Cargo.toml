@@ -1,8 +1,10 @@
 [package]
 name = "mingo"
-version = "0.8.0"
+version = "1.0.0"
+description = "Hardware Debugging with JTAG — Chapter 08"
+keywords = ["hw-debug-jtag"]
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
-edition = "2021"
+edition = "2024"
 
 [profile.release]
 lto = true
