@@ -1,8 +1,10 @@
 [package]
 name = "mingo"
-version = "0.2.0"
+version = "1.0.0"
+description = "Runtime Initialization — Chapter 02"
+keywords = ["runtime-init"]
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
-edition = "2021"
+edition = "2024"
 
 [profile.release]
 lto = true
