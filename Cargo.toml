@@ -1,8 +1,8 @@
 [package]
 name = "mingo"
 version = "1.0.0"
-description = "Hello World — Chapter 03"
-keywords = ["hello-world"]
+description = "Safe Globals — Chapter 04"
+keywords = ["safe-globals"]
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
 edition = "2024"
 
