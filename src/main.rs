@@ -154,7 +154,7 @@ unsafe fn kernel_init() -> ! {
 /// The main function running after the early init.
 #[cfg(not(feature = "chainloader"))]
 fn kernel_main() -> ! {
-    use console::{console, set_input_policy, EchoPolicy, InputPolicy};
+    use console::{EchoPolicy, InputPolicy, console, set_input_policy};
     use core::time::Duration;
 
     info!(
