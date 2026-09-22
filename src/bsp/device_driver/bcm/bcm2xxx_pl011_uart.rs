@@ -193,10 +193,12 @@ impl PL011UartInner {
     ///
     /// - The user must ensure to provide a correct MMIO start address.
     pub const unsafe fn new(mmio_start_addr: usize) -> Self {
-        Self {
-            registers: Registers::new(mmio_start_addr),
-            bytes_written: 0,
-            bytes_read: 0,
+        unsafe {
+            Self {
+                registers: Registers::new(mmio_start_addr),
+                bytes_written: 0,
+                bytes_read: 0,
+            }
         }
     }
 
@@ -331,8 +333,10 @@ impl PL011Uart {
     ///
     /// - The user must ensure to provide a correct MMIO start address.
     pub const unsafe fn new(mmio_start_addr: usize) -> Self {
-        Self {
-            inner: NullLock::new(PL011UartInner::new(mmio_start_addr)),
+        unsafe {
+            Self {
+                inner: NullLock::new(PL011UartInner::new(mmio_start_addr)),
+            }
         }
     }
 }

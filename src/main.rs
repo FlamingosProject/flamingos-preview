@@ -128,27 +128,30 @@ mod synchronization;
 /// - Only a single core must be active and running this function.
 /// - The init calls in this function must appear in the correct order.
 unsafe fn kernel_init() -> ! {
-    // Initialize the BSP driver subsystem.
-    if let Err(x) = bsp::driver::init() {
-        panic!("Error initializing BSP driver subsystem: {}", x);
+    unsafe {
+        // Initialize the BSP driver subsystem.
+        if let Err(x) = bsp::driver::init() {
+            panic!("Error initializing BSP driver subsystem: {}", x);
+        }
+
+        // Initialize all device drivers.
+        driver::driver_manager().init_drivers();
+        // The UART console is active and early buffered output has been replayed.
+
+        // Transition from unsafe to safe.
+        kernel_main()
     }
-
-    // Initialize all device drivers.
-    driver::driver_manager().init_drivers();
-    // The UART console is active and early buffered output has been replayed.
-
-    // Transition from unsafe to safe.
-    kernel_main()
 }
 
 /// The main function running after the early init.
 fn kernel_main() -> ! {
-    use console::{console, set_input_policy, EchoPolicy, InputPolicy};
+    use console::{EchoPolicy, InputPolicy, console, set_input_policy};
 
     println!(
-        "[0] {} version {}",
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_VERSION")
+        "[0] Flamingos kernel {}\n{}\nrev {}",
+        env!("CARGO_PKG_VERSION"),
+        env!("CARGO_PKG_DESCRIPTION"),
+        env!("FLAMINGOS_REVISION")
     );
     println!("[1] Booting on: {}", bsp::board_name());
 
