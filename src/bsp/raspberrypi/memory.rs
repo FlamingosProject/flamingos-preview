@@ -38,7 +38,7 @@ use core::cell::UnsafeCell;
 //--------------------------------------------------------------------------------------------------
 
 // Symbols from the linker script.
-extern "Rust" {
+unsafe extern "Rust" {
     static __code_start: UnsafeCell<()>;
     static __code_end_exclusive: UnsafeCell<()>;
 }
@@ -116,7 +116,7 @@ fn code_end_exclusive() -> usize {
 
 /// Exclusive end address of the physical address space.
 #[inline(always)]
-pub fn phys_addr_space_end_exclusive_addr(
-) -> crate::memory::mmu::PageAddress<crate::memory::Physical> {
+pub fn phys_addr_space_end_exclusive_addr()
+-> crate::memory::mmu::PageAddress<crate::memory::Physical> {
     crate::memory::mmu::PageAddress::from(map::END_INCLUSIVE + 1)
 }
