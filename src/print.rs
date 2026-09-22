@@ -40,10 +40,10 @@ macro_rules! println {
 /// Prints a warning with a newline.
 #[macro_export]
 macro_rules! warn {
-    ($string:expr) => {{
+    ($string:expr_2021) => {{
         $crate::println!(concat!("[W] ", $string));
     }};
-    ($format_string:expr, $($arg:tt)*) => {{
+    ($format_string:expr_2021, $($arg:tt)*) => {{
         $crate::println!(concat!("[W] ", $format_string), $($arg)*);
     }};
 }

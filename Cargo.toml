@@ -1,8 +1,10 @@
 [package]
 name = "mingo"
-version = "1.3.0"
+version = "1.0.0"
+description = "Hello World — Chapter 03"
+keywords = ["hello-world"]
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
-edition = "2021"
+edition = "2024"
 
 [profile.release]
 lto = true
