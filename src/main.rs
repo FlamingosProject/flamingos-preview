@@ -128,17 +128,19 @@ mod synchronization;
 /// - Only a single core must be active and running this function.
 /// - The init calls in this function must appear in the correct order.
 unsafe fn kernel_init() -> ! {
-    // Initialize the BSP driver subsystem.
-    if let Err(x) = bsp::driver::init() {
-        panic!("Error initializing BSP driver subsystem: {}", x);
+    unsafe {
+        // Initialize the BSP driver subsystem.
+        if let Err(x) = bsp::driver::init() {
+            panic!("Error initializing BSP driver subsystem: {}", x);
+        }
+
+        // Initialize all device drivers.
+        driver::driver_manager().init_drivers();
+        // The UART console is active and early buffered output has been replayed.
+
+        // Transition from unsafe to safe.
+        kernel_main()
     }
-
-    // Initialize all device drivers.
-    driver::driver_manager().init_drivers();
-    // The UART console is active and early buffered output has been replayed.
-
-    // Transition from unsafe to safe.
-    kernel_main()
 }
 
 const MINILOAD_LOGO: &str = r#"
@@ -150,6 +152,10 @@ const MINILOAD_LOGO: &str = r#"
 
 fn display_logo() {
     print!("{MINILOAD_LOGO}");
+    println!("Flamingos chainloader {}", env!("CARGO_PKG_VERSION"));
+    println!("{}", env!("CARGO_PKG_DESCRIPTION"));
+    println!("rev {}", env!("FLAMINGOS_REVISION"));
+    println!();
 }
 
 /// The main function running after the early init.
@@ -200,7 +206,7 @@ fn kernel_main() -> ! {
     let kernel: fn(*const u32) -> ! = unsafe { core::mem::transmute(kernel_addr) };
 
     // Jump to loaded kernel!
-    extern "C" {
+    unsafe extern "C" {
         static __device_tree_start: u32;
     }
     unsafe {

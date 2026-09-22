@@ -1,8 +1,8 @@
 [package]
 name = "mingo"
 version = "1.0.0"
-description = "GPIO and UART Drivers — Chapter 05"
-keywords = ["drivers-gpio-uart"]
+description = "UART Chainloader — Chapter 06"
+keywords = ["uart-chainloader"]
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
 edition = "2024"
 
