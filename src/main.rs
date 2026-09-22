@@ -135,17 +135,19 @@ mod time;
 /// - The init calls in this function must appear in the correct order.
 #[cfg(not(feature = "chainloader"))]
 unsafe fn kernel_init() -> ! {
-    // Initialize the BSP driver subsystem.
-    if let Err(x) = bsp::driver::init() {
-        panic!("Error initializing BSP driver subsystem: {}", x);
+    unsafe {
+        // Initialize the BSP driver subsystem.
+        if let Err(x) = bsp::driver::init() {
+            panic!("Error initializing BSP driver subsystem: {}", x);
+        }
+
+        // Initialize all device drivers.
+        driver::driver_manager().init_drivers();
+        // The UART console is active and early buffered output has been replayed.
+
+        // Transition from unsafe to safe.
+        kernel_main()
     }
-
-    // Initialize all device drivers.
-    driver::driver_manager().init_drivers();
-    // The UART console is active and early buffered output has been replayed.
-
-    // Transition from unsafe to safe.
-    kernel_main()
 }
 
 /// The main function running after the early init.
@@ -154,9 +156,10 @@ fn kernel_main() -> ! {
     use core::time::Duration;
 
     info!(
-        "{} version {}",
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_VERSION")
+        "Flamingos kernel {}\n{}\nrev {}",
+        env!("CARGO_PKG_VERSION"),
+        env!("CARGO_PKG_DESCRIPTION"),
+        env!("FLAMINGOS_REVISION")
     );
     info!("Booting on: {}", bsp::board_name());
 

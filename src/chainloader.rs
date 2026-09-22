@@ -113,10 +113,28 @@ fn flush() {
     }
 }
 
+const MINILOAD_BANNER: &str = concat!(
+    r#"
+ __  __ _      _ _                 _
+|  \/  (_)_ _ (_) |   ___  __ _ __| |
+| |\/| | | ' \| | |__/ _ \/ _` / _` |
+|_|  |_|_|_||_|_|____\___/\__,_\__,_|
+
+"#,
+    "Flamingos chainloader ",
+    env!("CARGO_PKG_VERSION"),
+    "\n",
+    env!("CARGO_PKG_DESCRIPTION"),
+    "\nrev ",
+    env!("FLAMINGOS_REVISION"),
+    "\n\n",
+);
+
 /// Receive a kernel at the firmware load address and enter it with the preserved device tree.
 pub fn run() -> ! {
     init_uart();
-    write_str("\nMiniLoad\n\n[ML] Requesting binary\n");
+    write_str(MINILOAD_BANNER);
+    write_str("[ML] Requesting binary\n");
     clear_rx();
     for _ in 0..3 {
         write_byte(3);
