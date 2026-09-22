@@ -45,7 +45,15 @@ export KERNEL_SYMBOLS_RS
 GET_SYMBOLS_SECTION_VIRT_ADDR = $(KERNEL_SYMBOLS_TOOL) \
     --get_symbols_section_virt_addr $(KERNEL_SYMBOLS_OUTPUT_ELF)
 
-RUSTFLAGS = -C link-arg=--script=$(KERNEL_SYMBOLS_LINKER_SCRIPT) \
+# This crate is a data-blob generator, not a runnable program. It is nevertheless linked as an ELF
+# executable so that the linker resolves the Rust references from each Symbol record to its name
+# string after placing .rodata at the final kernel virtual address. The resulting loadable bytes are
+# extracted and copied directly into the kernel's .kernel_symbols section.
+#
+# Give the ELF an explicit zero entry address because it intentionally has no _start. Adding a dummy
+# _start would make executable code live and risk including it in the raw blob produced by objcopy.
+RUSTFLAGS = -C link-arg=--entry=0 \
+    -C link-arg=--script=$(KERNEL_SYMBOLS_LINKER_SCRIPT) \
     -C link-arg=--section-start=.rodata=$$($(GET_SYMBOLS_SECTION_VIRT_ADDR))
 
 RUSTFLAGS_PEDANTIC = $(RUSTFLAGS) \
