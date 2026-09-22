@@ -66,17 +66,17 @@ fn default_exception_handler(exc: &ExceptionContext) {
 // Current, EL0
 //------------------------------------------------------------------------------
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn current_el0_synchronous(_e: &mut ExceptionContext) {
     panic!("Should not be here. Use of SP_EL0 in EL1 is not supported.")
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn current_el0_irq(_e: &mut ExceptionContext) {
     panic!("Should not be here. Use of SP_EL0 in EL1 is not supported.")
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn current_el0_serror(_e: &mut ExceptionContext) {
     panic!("Should not be here. Use of SP_EL0 in EL1 is not supported.")
 }
@@ -85,7 +85,7 @@ extern "C" fn current_el0_serror(_e: &mut ExceptionContext) {
 // Current, ELx
 //------------------------------------------------------------------------------
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn current_elx_synchronous(e: &mut ExceptionContext) {
     if e.fault_address_valid() {
         let far_el1 = FAR_EL1.get();
@@ -102,12 +102,12 @@ extern "C" fn current_elx_synchronous(e: &mut ExceptionContext) {
     default_exception_handler(e);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn current_elx_irq(e: &mut ExceptionContext) {
     default_exception_handler(e);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn current_elx_serror(e: &mut ExceptionContext) {
     default_exception_handler(e);
 }
@@ -116,17 +116,17 @@ extern "C" fn current_elx_serror(e: &mut ExceptionContext) {
 // Lower, AArch64
 //------------------------------------------------------------------------------
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn lower_aarch64_synchronous(e: &mut ExceptionContext) {
     default_exception_handler(e);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn lower_aarch64_irq(e: &mut ExceptionContext) {
     default_exception_handler(e);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn lower_aarch64_serror(e: &mut ExceptionContext) {
     default_exception_handler(e);
 }
@@ -135,17 +135,17 @@ extern "C" fn lower_aarch64_serror(e: &mut ExceptionContext) {
 // Lower, AArch32
 //------------------------------------------------------------------------------
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn lower_aarch32_synchronous(e: &mut ExceptionContext) {
     default_exception_handler(e);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn lower_aarch32_irq(e: &mut ExceptionContext) {
     default_exception_handler(e);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn lower_aarch32_serror(e: &mut ExceptionContext) {
     default_exception_handler(e);
 }
@@ -253,7 +253,7 @@ impl fmt::Display for ExceptionContext {
 
         writeln!(f, "{}", self.spsr_el1)?;
         writeln!(f, "ELR_EL1: {:#018x}", self.elr_el1)?;
-        writeln!(f, "")?;
+        writeln!(f)?;
         writeln!(f, "General purpose register:")?;
 
         #[rustfmt::skip]
@@ -294,13 +294,15 @@ pub fn current_privilege_level() -> (PrivilegeLevel, &'static str) {
 ///   adhere to the alignment and size constraints demanded by the ARMv8-A Architecture Reference
 ///   Manual.
 pub unsafe fn handling_init() {
-    // Provided by exception.S.
-    extern "Rust" {
-        static __exception_vector_start: UnsafeCell<()>;
+    unsafe {
+        // Provided by exception.S.
+        unsafe extern "Rust" {
+            static __exception_vector_start: UnsafeCell<()>;
+        }
+
+        VBAR_EL1.set(__exception_vector_start.get() as u64);
+
+        // Force VBAR update to complete before next instruction.
+        barrier::isb(barrier::SY);
     }
-
-    VBAR_EL1.set(__exception_vector_start.get() as u64);
-
-    // Force VBAR update to complete before next instruction.
-    barrier::isb(barrier::SY);
 }

@@ -142,37 +142,40 @@ mod time;
 ///       NullLocks instead of spinlocks), will fail to work (properly) on the RPi SoCs.
 #[cfg(not(feature = "chainloader"))]
 unsafe fn kernel_init() -> ! {
-    use memory::mmu::interface::MMU;
+    unsafe {
+        use memory::mmu::interface::MMU;
 
-    exception::handling_init();
+        exception::handling_init();
 
-    if let Err(string) = memory::mmu::mmu().enable_mmu_and_caching() {
-        panic!("MMU: {}", string);
+        if let Err(string) = memory::mmu::mmu().enable_mmu_and_caching() {
+            panic!("MMU: {}", string);
+        }
+
+        // Initialize the BSP driver subsystem.
+        if let Err(x) = bsp::driver::init() {
+            panic!("Error initializing BSP driver subsystem: {}", x);
+        }
+
+        // Initialize all device drivers.
+        driver::driver_manager().init_drivers();
+        // The UART console is active and early buffered output has been replayed.
+
+        // Transition from unsafe to safe.
+        kernel_main()
     }
-
-    // Initialize the BSP driver subsystem.
-    if let Err(x) = bsp::driver::init() {
-        panic!("Error initializing BSP driver subsystem: {}", x);
-    }
-
-    // Initialize all device drivers.
-    driver::driver_manager().init_drivers();
-    // The UART console is active and early buffered output has been replayed.
-
-    // Transition from unsafe to safe.
-    kernel_main()
 }
 
 /// The main function running after the early init.
 #[cfg(not(feature = "chainloader"))]
 fn kernel_main() -> ! {
-    use console::{console, set_input_policy, EchoPolicy, InputPolicy};
+    use console::{EchoPolicy, InputPolicy, console, set_input_policy};
     use core::time::Duration;
 
     info!(
-        "{} version {}",
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_VERSION")
+        "Flamingos kernel {}\n{}\nrev {}",
+        env!("CARGO_PKG_VERSION"),
+        env!("CARGO_PKG_DESCRIPTION"),
+        env!("FLAMINGOS_REVISION")
     );
     info!("Booting on: {}", bsp::board_name());
 
