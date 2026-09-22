@@ -91,10 +91,10 @@ extern "C" fn current_elx_synchronous(e: &mut ExceptionContext) {
     {
         const TEST_SVC_ID: u64 = 0x1337;
 
-        if let Some(ESR_EL1::EC::Value::SVC64) = e.esr_el1.exception_class() {
-            if e.esr_el1.iss() == TEST_SVC_ID {
-                return;
-            }
+        if let Some(ESR_EL1::EC::Value::SVC64) = e.esr_el1.exception_class()
+            && e.esr_el1.iss() == TEST_SVC_ID
+        {
+            return;
         }
     }
 

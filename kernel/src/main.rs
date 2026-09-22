@@ -11,7 +11,7 @@
 #![no_main]
 #![no_std]
 
-use libkernel::{bsp, console, cpu, driver, exception, info, memory, time};
+use libkernel::{bsp, console, driver, exception, info, memory, time};
 
 /// Early init code.
 ///
@@ -22,32 +22,34 @@ use libkernel::{bsp, console, cpu, driver, exception, info, memory, time};
 ///     - MMU + Data caching must be activated at the earliest. Without it, any atomic operations,
 ///       e.g. the yet-to-be-introduced spinlocks in the device drivers (which currently employ
 ///       NullLocks instead of spinlocks), will fail to work (properly) on the RPi SoCs.
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe fn kernel_init() -> ! {
-    use memory::mmu::interface::MMU;
+    unsafe {
+        use memory::mmu::interface::MMU;
 
-    exception::handling_init();
+        exception::handling_init();
 
-    if let Err(string) = memory::mmu::mmu().enable_mmu_and_caching() {
-        panic!("MMU: {}", string);
+        if let Err(string) = memory::mmu::mmu().enable_mmu_and_caching() {
+            panic!("MMU: {}", string);
+        }
+
+        // Initialize the BSP driver subsystem.
+        if let Err(x) = bsp::driver::init() {
+            panic!("Error initializing BSP driver subsystem: {}", x);
+        }
+
+        // Initialize all device drivers.
+        driver::driver_manager().init_drivers();
+        // The UART console is active and early buffered output has been replayed.
+
+        // Transition from unsafe to safe.
+        kernel_main()
     }
-
-    // Initialize the BSP driver subsystem.
-    if let Err(x) = bsp::driver::init() {
-        panic!("Error initializing BSP driver subsystem: {}", x);
-    }
-
-    // Initialize all device drivers.
-    driver::driver_manager().init_drivers();
-    // The UART console is active and early buffered output has been replayed.
-
-    // Transition from unsafe to safe.
-    kernel_main()
 }
 
 /// The main function running after the early init.
 fn kernel_main() -> ! {
-    use console::{console, set_input_policy, EchoPolicy, InputPolicy};
+    use console::{EchoPolicy, InputPolicy, console, set_input_policy};
 
     info!("{}", libkernel::version());
     info!("Booting on: {}", bsp::board_name());

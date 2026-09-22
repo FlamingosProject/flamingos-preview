@@ -14,7 +14,7 @@ use core::panic::PanicInfo;
 //--------------------------------------------------------------------------------------------------
 
 /// The point of exit for `libkernel`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 fn _panic_exit() -> ! {
     #[cfg(not(feature = "test_build"))]
     {

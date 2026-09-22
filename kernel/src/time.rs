@@ -55,3 +55,9 @@ impl TimeManager {
         arch_time::spin_for(duration)
     }
 }
+
+impl Default for TimeManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}

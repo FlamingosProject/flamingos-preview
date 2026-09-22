@@ -155,7 +155,7 @@ pub fn run() -> ! {
     write_str("\n[ML] Loaded! Executing the payload now\n\n");
     flush();
 
-    extern "C" {
+    unsafe extern "C" {
         static __device_tree_start: u8;
     }
     let kernel: extern "C" fn(*const u8) -> ! = unsafe { core::mem::transmute(PAYLOAD_LOAD_ADDR) };

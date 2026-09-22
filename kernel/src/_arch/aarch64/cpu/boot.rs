@@ -13,8 +13,10 @@
 
 mod led_debug;
 
+#[cfg(not(feature = "chainloader"))]
 use aarch64_cpu::{asm, registers::*};
 use core::arch::global_asm;
+#[cfg(not(feature = "chainloader"))]
 use tock_registers::interfaces::Writeable;
 
 #[cfg(feature = "boot_trace")]
@@ -120,7 +122,7 @@ pub unsafe extern "C" fn _start_rust(
 }
 
 /// Enter the relocated chainloader without changing exception level or architectural state.
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[cfg(feature = "chainloader")]
 pub unsafe extern "C" fn _start_rust(_device_tree: *const u8) -> ! {
     #[cfg(feature = "boot_trace")]
