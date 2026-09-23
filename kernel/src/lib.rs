@@ -147,9 +147,12 @@ pub mod time;
 /// Version string.
 pub fn version() -> &'static str {
     concat!(
-        env!("CARGO_PKG_NAME"),
-        " version ",
-        env!("CARGO_PKG_VERSION")
+        "Flamingos kernel ",
+        env!("CARGO_PKG_VERSION"),
+        "\n",
+        env!("CARGO_PKG_DESCRIPTION"),
+        "\nrev ",
+        env!("FLAMINGOS_REVISION")
     )
 }
 

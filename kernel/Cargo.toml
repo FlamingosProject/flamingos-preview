@@ -1,8 +1,10 @@
 [package]
 name = "mingo"
-version = "0.16.0"
+version = "1.0.0"
+description = "Virtual Memory, Part 4 — Chapter 16"
+keywords = ["virtual-mem-part4"]
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
-edition = "2021"
+edition = "2024"
 
 [features]
 default = []

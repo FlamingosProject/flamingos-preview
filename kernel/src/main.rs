@@ -21,29 +21,31 @@ use libkernel::{bsp, cpu, driver, exception, info, memory, state, time};
 ///
 /// - Only a single core must be active and running this function.
 /// - Printing will not work until the respective driver's MMIO is remapped.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe fn kernel_init() -> ! {
-    exception::handling_init();
-    memory::init();
+    unsafe {
+        exception::handling_init();
+        memory::init();
 
-    // Initialize the BSP driver subsystem.
-    if let Err(x) = bsp::driver::init() {
-        panic!("Error initializing BSP driver subsystem: {}", x);
+        // Initialize the BSP driver subsystem.
+        if let Err(x) = bsp::driver::init() {
+            panic!("Error initializing BSP driver subsystem: {}", x);
+        }
+
+        // Initialize all device drivers.
+        driver::driver_manager().init_drivers_and_irqs();
+
+        bsp::memory::mmu::kernel_add_mapping_records_for_precomputed();
+
+        // Unmask interrupts on the boot CPU core.
+        exception::asynchronous::local_irq_unmask();
+
+        // Announce conclusion of the kernel_init() phase.
+        state::state_manager().transition_to_single_core_main();
+
+        // Transition from unsafe to safe.
+        kernel_main()
     }
-
-    // Initialize all device drivers.
-    driver::driver_manager().init_drivers_and_irqs();
-
-    bsp::memory::mmu::kernel_add_mapping_records_for_precomputed();
-
-    // Unmask interrupts on the boot CPU core.
-    exception::asynchronous::local_irq_unmask();
-
-    // Announce conclusion of the kernel_init() phase.
-    state::state_manager().transition_to_single_core_main();
-
-    // Transition from unsafe to safe.
-    kernel_main()
 }
 
 /// The main function running after the early init.

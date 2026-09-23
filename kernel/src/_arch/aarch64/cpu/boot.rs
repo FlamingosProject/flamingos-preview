@@ -13,9 +13,12 @@
 
 mod led_debug;
 
+#[cfg(not(feature = "chainloader"))]
 use crate::{memory, memory::Address};
+#[cfg(not(feature = "chainloader"))]
 use aarch64_cpu::{asm, registers::*};
 use core::arch::global_asm;
+#[cfg(not(feature = "chainloader"))]
 use tock_registers::interfaces::Writeable;
 
 #[cfg(feature = "boot_trace")]
@@ -90,10 +93,12 @@ unsafe fn prepare_el2_to_el1_transition(
 
 /// Blink a fatal early-boot error code forever.
 #[inline(never)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn _panic_code(code: usize) -> ! {
-    loop {
-        led_debug::_blink_code(code, true);
+    unsafe {
+        loop {
+            led_debug::_blink_code(code, true);
+        }
     }
 }
 
@@ -104,7 +109,7 @@ pub unsafe extern "C" fn _panic_code(code: usize) -> ! {
 /// # Safety
 ///
 /// - Exception return from EL2 must must continue execution in EL1 with `kernel_init()`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[cfg(not(feature = "chainloader"))]
 pub unsafe extern "C" fn _start_rust(
     phys_kernel_tables_base_addr: u64,
@@ -112,25 +117,27 @@ pub unsafe extern "C" fn _start_rust(
     virt_kernel_init_addr: u64,
     _device_tree: *const u8,
 ) -> ! {
-    #[cfg(feature = "boot_trace")]
-    led_debug::_blink_code(3, true);
+    unsafe {
+        #[cfg(feature = "boot_trace")]
+        led_debug::_blink_code(3, true);
 
-    prepare_el2_to_el1_transition(
-        virt_boot_core_stack_end_exclusive_addr,
-        virt_kernel_init_addr,
-    );
+        prepare_el2_to_el1_transition(
+            virt_boot_core_stack_end_exclusive_addr,
+            virt_kernel_init_addr,
+        );
 
-    // Turn on the MMU for EL1.
-    let addr = Address::new(phys_kernel_tables_base_addr as usize);
-    memory::mmu::enable_mmu_and_caching(addr).unwrap();
+        // Turn on the MMU for EL1.
+        let addr = Address::new(phys_kernel_tables_base_addr as usize);
+        memory::mmu::enable_mmu_and_caching(addr).unwrap();
 
-    // Use `eret` to "return" to EL1. Since virtual memory will already be enabled, this results in
-    // execution of kernel_init() in EL1 from its _virtual address_.
-    asm::eret()
+        // Use `eret` to "return" to EL1. Since virtual memory will already be enabled, this results in
+        // execution of kernel_init() in EL1 from its _virtual address_.
+        asm::eret()
+    }
 }
 
 /// Enter the relocated chainloader without changing exception level or architectural state.
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[cfg(feature = "chainloader")]
 pub unsafe extern "C" fn _start_rust(_device_tree: *const u8) -> ! {
     #[cfg(feature = "boot_trace")]
