@@ -1,8 +1,10 @@
 [package]
 name = "mingo"
-version = "0.13.0"
+version = "1.0.0"
+description = "Exceptions, Part 2 — Chapter 13"
+keywords = ["exceptions-part2"]
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
-edition = "2021"
+edition = "2024"
 
 [features]
 default = []

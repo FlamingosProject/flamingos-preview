@@ -19,11 +19,11 @@ checksum = "1033caf0b349c518623b5396bfb2cf0bddf44f0306d543a250e5743297aafd10"
 
 [[package]]
 name = "kernel_test_runner"
-version = "0.1.0"
+version = "1.0.0"
 
 [[package]]
 name = "mingo"
-version = "0.13.0"
+version = "1.0.0"
 dependencies = [
  "aarch64-cpu",
  "qemu-exit",

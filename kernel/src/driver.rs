@@ -6,7 +6,7 @@
 
 use crate::{
     exception, info,
-    synchronization::{interface::ReadWriteEx, InitStateLock},
+    synchronization::{InitStateLock, interface::ReadWriteEx},
 };
 use core::fmt;
 
@@ -169,35 +169,36 @@ where
     ///
     /// - During init, drivers might do stuff with system-wide impact.
     pub unsafe fn init_drivers_and_irqs(&self) {
-        self.for_each_descriptor(|descriptor| {
-            // 1. Initialize driver.
-            if let Err(x) = descriptor.device_driver.init() {
-                panic!(
-                    "Error initializing driver: {}: {}",
-                    descriptor.device_driver.compatible(),
-                    x
-                );
-            }
+        unsafe {
+            self.for_each_descriptor(|descriptor| {
+                // 1. Initialize driver.
+                if let Err(x) = descriptor.device_driver.init() {
+                    panic!(
+                        "Error initializing driver: {}: {}",
+                        descriptor.device_driver.compatible(),
+                        x
+                    );
+                }
 
-            // 2. Call corresponding post init callback.
-            if let Some(callback) = &descriptor.post_init_callback {
-                if let Err(x) = callback() {
+                // 2. Call corresponding post init callback.
+                if let Some(callback) = &descriptor.post_init_callback
+                    && let Err(x) = callback()
+                {
                     panic!(
                         "Error during driver post-init callback: {}: {}",
                         descriptor.device_driver.compatible(),
                         x
                     );
                 }
-            }
-        });
+            });
 
-        // 3. After all post-init callbacks were done, the interrupt controller should be
-        //    registered and functional. So let drivers register with it now.
-        self.for_each_descriptor(|descriptor| {
-            if let Some(irq_number) = &descriptor.irq_number {
-                if let Err(x) = descriptor
-                    .device_driver
-                    .register_and_enable_irq_handler(irq_number)
+            // 3. After all post-init callbacks were done, the interrupt controller should be
+            //    registered and functional. So let drivers register with it now.
+            self.for_each_descriptor(|descriptor| {
+                if let Some(irq_number) = &descriptor.irq_number
+                    && let Err(x) = descriptor
+                        .device_driver
+                        .register_and_enable_irq_handler(irq_number)
                 {
                     panic!(
                         "Error during driver interrupt handler registration: {}: {}",
@@ -205,8 +206,8 @@ where
                         x
                     );
                 }
-            }
-        });
+            });
+        }
     }
 
     /// Enumerate all registered device drivers.
@@ -217,5 +218,14 @@ where
 
             i += 1;
         });
+    }
+}
+
+impl<T> Default for DriverManager<T>
+where
+    T: fmt::Display + Copy,
+{
+    fn default() -> Self {
+        Self::new()
     }
 }

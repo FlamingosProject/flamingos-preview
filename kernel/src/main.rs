@@ -22,32 +22,34 @@ use libkernel::{bsp, cpu, driver, exception, info, memory, state, time};
 ///     - MMU + Data caching must be activated at the earliest. Without it, any atomic operations,
 ///       e.g. the yet-to-be-introduced spinlocks in the device drivers (which currently employ
 ///       IRQSafeNullLocks instead of spinlocks), will fail to work (properly) on the RPi SoCs.
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe fn kernel_init() -> ! {
-    use memory::mmu::interface::MMU;
+    unsafe {
+        use memory::mmu::interface::MMU;
 
-    exception::handling_init();
+        exception::handling_init();
 
-    if let Err(string) = memory::mmu::mmu().enable_mmu_and_caching() {
-        panic!("MMU: {}", string);
+        if let Err(string) = memory::mmu::mmu().enable_mmu_and_caching() {
+            panic!("MMU: {}", string);
+        }
+
+        // Initialize the BSP driver subsystem.
+        if let Err(x) = bsp::driver::init() {
+            panic!("Error initializing BSP driver subsystem: {}", x);
+        }
+
+        // Initialize all device drivers.
+        driver::driver_manager().init_drivers_and_irqs();
+
+        // Unmask interrupts on the boot CPU core.
+        exception::asynchronous::local_irq_unmask();
+
+        // Announce conclusion of the kernel_init() phase.
+        state::state_manager().transition_to_single_core_main();
+
+        // Transition from unsafe to safe.
+        kernel_main()
     }
-
-    // Initialize the BSP driver subsystem.
-    if let Err(x) = bsp::driver::init() {
-        panic!("Error initializing BSP driver subsystem: {}", x);
-    }
-
-    // Initialize all device drivers.
-    driver::driver_manager().init_drivers_and_irqs();
-
-    // Unmask interrupts on the boot CPU core.
-    exception::asynchronous::local_irq_unmask();
-
-    // Announce conclusion of the kernel_init() phase.
-    state::state_manager().transition_to_single_core_main();
-
-    // Transition from unsafe to safe.
-    kernel_main()
 }
 
 /// The main function running after the early init.

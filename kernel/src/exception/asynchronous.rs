@@ -110,7 +110,7 @@ static CUR_IRQ_MANAGER: InitStateLock<
 //--------------------------------------------------------------------------------------------------
 // Public Code
 //--------------------------------------------------------------------------------------------------
-use synchronization::{interface::ReadWriteEx, InitStateLock};
+use synchronization::{InitStateLock, interface::ReadWriteEx};
 
 impl<T> IRQHandlerDescriptor<T>
 where
