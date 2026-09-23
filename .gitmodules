@@ -82,3 +82,7 @@
 	path = 21-second-core
 	url = https://github.com/FlamingosProject/flamingos-preview.git
 	branch = 21-second-core
+[submodule "22-sdcard"]
+	path = 22-sdcard
+	url = https://github.com/FlamingosProject/flamingos-preview.git
+	branch = 22-sdcard
