@@ -23,45 +23,47 @@ use libkernel::{bsp, cpu, driver, exception, info, memory, state, time};
 ///
 /// - Only a single core must be active and running this function.
 /// - Printing will not work until the respective driver's MMIO is remapped.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe fn kernel_init() -> ! {
-    // The device tree is mapped now, so its parser can safely execute linked virtual code.
-    #[cfg(not(feature = "chainloader"))]
-    cpu::boot::arch_boot::process_device_tree();
+    unsafe {
+        // The device tree is mapped now, so its parser can safely execute linked virtual code.
+        #[cfg(not(feature = "chainloader"))]
+        cpu::boot::arch_boot::process_device_tree();
 
-    // Set up exception handlers.
-    exception::handling_init();
+        // Set up exception handlers.
+        exception::handling_init();
 
-    // Initialize memory subsystem, in particular memory
-    // allocators.
-    memory::init();
+        // Initialize memory subsystem, in particular memory
+        // allocators.
+        memory::init();
 
-    // Initialize the timer subsystem.
-    if let Err(x) = time::init() {
-        panic!("Error initializing timer subsystem: {}", x);
+        // Initialize the timer subsystem.
+        if let Err(x) = time::init() {
+            panic!("Error initializing timer subsystem: {}", x);
+        }
+
+        // Initialize the BSP driver subsystem.
+        if let Err(x) = bsp::driver::init() {
+            panic!("Error initializing BSP driver subsystem: {}", x);
+        }
+
+        // Initialize all device drivers.
+        driver::driver_manager().init_drivers_and_irqs();
+
+        // Add records of how we mapped the kernel for later
+        // logging once everything is up. Not currently used
+        // otherwise.
+        bsp::memory::mmu::kernel_add_mapping_records_for_precomputed();
+
+        // Unmask interrupts on the boot CPU core.
+        exception::asynchronous::local_irq_unmask();
+
+        // Announce conclusion of the kernel_init() phase.
+        state::state_manager().transition_to_single_core_main();
+
+        // Transition from unsafe to safe.
+        kernel_main()
     }
-
-    // Initialize the BSP driver subsystem.
-    if let Err(x) = bsp::driver::init() {
-        panic!("Error initializing BSP driver subsystem: {}", x);
-    }
-
-    // Initialize all device drivers.
-    driver::driver_manager().init_drivers_and_irqs();
-
-    // Add records of how we mapped the kernel for later
-    // logging once everything is up. Not currently used
-    // otherwise.
-    bsp::memory::mmu::kernel_add_mapping_records_for_precomputed();
-
-    // Unmask interrupts on the boot CPU core.
-    exception::asynchronous::local_irq_unmask();
-
-    // Announce conclusion of the kernel_init() phase.
-    state::state_manager().transition_to_single_core_main();
-
-    // Transition from unsafe to safe.
-    kernel_main()
 }
 
 /// The main function running after the early init.

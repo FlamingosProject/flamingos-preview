@@ -1,8 +1,8 @@
 [package]
 name = "mingo"
 version = "1.0.0"
-description = "Timer Callbacks — Chapter 19"
-keywords = ["timer-callbacks"]
+description = "Boot Improvements — Chapter 20"
+keywords = ["boot-improvements"]
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
 edition = "2024"
 

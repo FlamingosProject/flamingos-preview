@@ -38,7 +38,7 @@ struct DeviceTreeBuffer([u8; DEVICE_TREE_BUFFER_SIZE]);
 
 // Early assembly fills this after clearing BSS and before enabling the MMU.
 #[cfg(not(feature = "chainloader"))]
-#[no_mangle]
+#[unsafe(no_mangle)]
 static mut DEVICE_TREE_BUFFER: DeviceTreeBuffer = DeviceTreeBuffer([0; DEVICE_TREE_BUFFER_SIZE]);
 
 // Normal and chainloader builds have deliberately different early-boot contracts.
@@ -141,47 +141,55 @@ pub static mut CORES_INFO: CoresInfo = CoresInfo {
 /// - The firmware-provided pointer must identify a valid flattened device tree.
 #[cfg(not(feature = "chainloader"))]
 pub unsafe fn process_device_tree() {
-    let device_tree = TPIDR_EL1.get() as *const u8;
-    TPIDR_EL1.set(0);
+    unsafe {
+        let device_tree = TPIDR_EL1.get() as *const u8;
+        TPIDR_EL1.set(0);
 
-    // QEMU's raspi3b machine still supplies a legacy ATAG_CORE handoff instead of an FDT. Both
-    // Raspberry Pi BSPs supported here have four cores, so retain the QEMU workflow explicitly.
-    const ATAG_CORE: u32 = 0x5441_0001;
-    const LEGACY_RPI_CORE_COUNT: usize = 4;
-    let words = device_tree.cast::<u32>();
-    if words.add(1).read_unaligned() == ATAG_CORE {
-        let cores_info = core::ptr::addr_of_mut!(CORES_INFO);
-        (*cores_info).num_cores = LEGACY_RPI_CORE_COUNT;
-        for (id, slot) in (&mut (*cores_info).core_ids)[..LEGACY_RPI_CORE_COUNT]
-            .iter_mut()
-            .enumerate()
-        {
-            *slot = id;
+        // QEMU's raspi3b machine still supplies a legacy ATAG_CORE handoff instead of an FDT. Both
+        // Raspberry Pi BSPs supported here have four cores, so retain the QEMU workflow explicitly.
+        const ATAG_CORE: u32 = 0x5441_0001;
+        const LEGACY_RPI_CORE_COUNT: usize = 4;
+        let words = device_tree.cast::<u32>();
+        if words.add(1).read_unaligned() == ATAG_CORE {
+            let cores_info = core::ptr::addr_of_mut!(CORES_INFO);
+            (*cores_info).num_cores = LEGACY_RPI_CORE_COUNT;
+            for (id, slot) in (&mut (*cores_info).core_ids)[..LEGACY_RPI_CORE_COUNT]
+                .iter_mut()
+                .enumerate()
+            {
+                *slot = id;
+            }
+            return;
         }
-        return;
-    }
 
-    let fdt = Fdt::from_ptr(device_tree).unwrap();
-    let num_cores = fdt.cpus().count();
-    if num_cores > MAX_CORES {
-        panic!();
-    }
-    let cores_info = core::ptr::addr_of_mut!(CORES_INFO);
-    for (cid, cpu) in (*cores_info).core_ids.iter_mut().zip(fdt.cpus()) {
-        if cpu.ids().all().count() != 1 {
+        let fdt = Fdt::from_ptr(device_tree).unwrap();
+        let num_cores = fdt.cpus().count();
+        if num_cores > MAX_CORES {
             panic!();
         }
-        *cid = cpu.ids().first();
+        let cores_info = core::ptr::addr_of_mut!(CORES_INFO);
+        for (cid, cpu) in (*cores_info).core_ids.iter_mut().zip(fdt.cpus()) {
+            if cpu.ids().all().count() != 1 {
+                panic!();
+            }
+            *cid = cpu.ids().first();
+        }
+        CORES_INFO.num_cores = num_cores;
     }
-    CORES_INFO.num_cores = num_cores;
 }
 
 /// Blink a fatal early-boot error code forever.
+///
+/// # Safety
+///
+/// Directly accesses GPIO hardware before the normal driver stack is available.
 #[inline(never)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn _panic_code(code: usize) -> ! {
-    loop {
-        led_debug::_blink_code(code, true);
+    unsafe {
+        loop {
+            led_debug::_blink_code(code, true);
+        }
     }
 }
 
@@ -193,7 +201,7 @@ pub unsafe extern "C" fn _panic_code(code: usize) -> ! {
 ///
 /// - Exception return from EL2 must must continue execution in EL1 with `kernel_init()`.
 #[inline(never)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[cfg(not(feature = "chainloader"))]
 pub unsafe extern "C" fn _start_rust(
     phys_kernel_tables_base_addr: u64,
@@ -201,26 +209,28 @@ pub unsafe extern "C" fn _start_rust(
     virt_kernel_init_addr: u64,
     device_tree: *const u8,
 ) -> ! {
-    #[cfg(feature = "boot_trace")]
-    led_debug::_blink_code(3, true);
+    unsafe {
+        #[cfg(feature = "boot_trace")]
+        led_debug::_blink_code(3, true);
 
-    prepare_el2_to_el1_transition(
-        virt_boot_core_stack_end_exclusive_addr,
-        virt_kernel_init_addr,
-        device_tree as u64,
-    );
+        prepare_el2_to_el1_transition(
+            virt_boot_core_stack_end_exclusive_addr,
+            virt_kernel_init_addr,
+            device_tree as u64,
+        );
 
-    // Turn on the MMU for EL1.
-    let addr = Address::new(phys_kernel_tables_base_addr as usize);
-    memory::mmu::enable_mmu_and_caching(addr).unwrap();
+        // Turn on the MMU for EL1.
+        let addr = Address::new(phys_kernel_tables_base_addr as usize);
+        memory::mmu::enable_mmu_and_caching(addr).unwrap();
 
-    // Use `eret` to "return" to EL1. Since virtual memory will already be enabled, this results in
-    // execution of kernel_init() in EL1 from its _virtual address_.
-    asm::eret()
+        // Use `eret` to "return" to EL1. Since virtual memory will already be enabled, this results in
+        // execution of kernel_init() in EL1 from its _virtual address_.
+        asm::eret()
+    }
 }
 
 /// Enter the relocated chainloader without changing exception level or architectural state.
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[cfg(feature = "chainloader")]
 pub unsafe extern "C" fn _start_rust(_device_tree: *const u8) -> ! {
     #[cfg(feature = "boot_trace")]
