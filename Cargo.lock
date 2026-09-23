@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "debug-symbol-types"
-version = "0.1.0"
+version = "1.0.0"
 
 [[package]]
 name = "gimli"
@@ -167,14 +167,14 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
 name = "kernel_symbols"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "debug-symbol-types",
 ]
 
 [[package]]
 name = "kernel_symbols_tool"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "goblin",
@@ -183,7 +183,7 @@ dependencies = [
 
 [[package]]
 name = "kernel_test_runner"
-version = "0.1.0"
+version = "1.0.0"
 
 [[package]]
 name = "lazy_static"
@@ -205,7 +205,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "mingo"
-version = "0.17.0"
+version = "1.0.0"
 dependencies = [
  "aarch64-cpu",
  "debug-symbol-types",
@@ -341,7 +341,7 @@ checksum = "2b9e2fdb3a1e862c0661768b7ed25390811df1947a8acbfbefe09b47078d93c4"
 
 [[package]]
 name = "translation_table_tool"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -461,4 +461,4 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "1.0.0"

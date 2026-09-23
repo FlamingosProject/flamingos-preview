@@ -6,7 +6,7 @@
 mod commands;
 mod kernel_elf;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use kernel_elf::KernelELF;
 use std::env;
 

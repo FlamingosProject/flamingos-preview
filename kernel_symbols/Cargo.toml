@@ -1,7 +1,7 @@
 [package]
 name = "kernel_symbols"
-version = "0.1.0"
-edition = "2021"
+version = "1.0.0"
+edition = "2024"
 
 [features]
 default = []
@@ -13,3 +13,11 @@ generated_symbols_available = []
 
 [dependencies]
 debug-symbol-types = { path = "../libraries/debug-symbol-types" }
+
+# This target is linked only to produce the data blob that is patched into the kernel ELF. It is
+# neither runnable nor compatible with Rust's standard test and benchmark harnesses.
+[[bin]]
+name = "kernel_symbols"
+path = "src/main.rs"
+test = false
+bench = false

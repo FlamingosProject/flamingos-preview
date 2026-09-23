@@ -2,7 +2,7 @@
 //
 // Copyright (c) 2021-2023 Andre Richter <andre.o.richter@gmail.com>
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use goblin::elf::Elf;
 use std::fs;
 

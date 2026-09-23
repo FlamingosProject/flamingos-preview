@@ -1,8 +1,10 @@
 [package]
 name = "mingo"
-version = "0.17.0"
+version = "1.0.0"
+description = "Kernel Symbols — Chapter 17"
+keywords = ["kernel-symbols"]
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
-edition = "2021"
+edition = "2024"
 
 [features]
 default = []

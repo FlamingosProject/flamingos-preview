@@ -26,8 +26,8 @@ pub fn generate_symbols(kernel_elf: &KernelELF, output_file: &str) -> Result<()>
     // Write header
     writeln!(file, "use debug_symbol_types::Symbol;")?;
     writeln!(file)?;
-    writeln!(file, "# [no_mangle]")?;
-    writeln!(file, "# [link_section = \".rodata.symbol_desc\"]")?;
+    writeln!(file, "# [unsafe(no_mangle)]")?;
+    writeln!(file, "# [unsafe(link_section = \".rodata.symbol_desc\")]")?;
     writeln!(file, "static KERNEL_SYMBOLS: [Symbol; {}] = [", num_symbols)?;
 
     // Write each symbol

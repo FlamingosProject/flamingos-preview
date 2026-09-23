@@ -1,7 +1,7 @@
 [package]
 name = "kernel_symbols_tool"
-version = "0.1.0"
-edition = "2021"
+version = "1.0.0"
+edition = "2024"
 
 # SPDX-License-Identifier: MIT OR Apache-2.0
 # Copyright (c) 2022-2023 Andre Richter <andre.o.richter@gmail.com>
