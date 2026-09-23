@@ -136,7 +136,7 @@ pub static mut CORES_INFO: CoresInfo = CoresInfo {
 };
 
 /// Per-core release flags used by the assembly parking loop.
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[cfg(not(feature = "chainloader"))]
 pub static mut BOOT_PARK: [AtomicBool; MAX_CORES] = [const { AtomicBool::new(false) }; MAX_CORES];
 
@@ -207,9 +207,9 @@ pub unsafe extern "C" fn _panic_code(code: usize) -> ! {
 /// - The caller must provide the current core's firmware ID.
 /// - The core must have a valid stack and must be released exactly once.
 #[inline(never)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn _start_core(_id: usize) -> ! {
-    _panic_code(17)
+    unsafe { _panic_code(17) }
 }
 
 /// The Rust entry of the `kernel` binary.
