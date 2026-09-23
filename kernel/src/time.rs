@@ -85,7 +85,7 @@ impl OrderedTimeoutQueue {
         // Note reverse compare order so that earliest expiring item is at end of vec. We do this so
         // that we can use Vec::pop below to retrieve the item that is next due.
         self.inner
-            .sort_by_key(|callback| core::cmp::Reverse(callback.due_time));
+            .sort_by_key(|timeout| core::cmp::Reverse(timeout.due_time));
     }
 
     pub fn peek_next_due_time(&self) -> Option<Duration> {
@@ -165,6 +165,12 @@ impl TimeManager {
         };
 
         self.set_timeout(timeout);
+    }
+}
+
+impl Default for TimeManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -260,11 +266,5 @@ impl exception::asynchronous::interface::IRQHandler for TimeManager {
         });
 
         Ok(())
-    }
-}
-
-impl Default for TimeManager {
-    fn default() -> Self {
-        Self::new()
     }
 }

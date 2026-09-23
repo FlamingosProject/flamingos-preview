@@ -1,7 +1,7 @@
-use std::{env, fs, path::PathBuf};
+use std::{env, fs, path::PathBuf, process::Command};
 
 fn git_output(args: &[&str]) -> Option<String> {
-    let output = std::process::Command::new("git")
+    let output = Command::new("git")
         .args(args)
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
@@ -17,7 +17,7 @@ fn export_git_revision() {
         .filter(|revision| !revision.is_empty())
         .unwrap_or_else(|| "unknown".to_owned());
 
-    let dirty = std::process::Command::new("git")
+    let dirty = Command::new("git")
         .args(["status", "--porcelain", "--untracked-files=no"])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()

@@ -10,22 +10,24 @@
 use core::time::Duration;
 use libkernel::{bsp, cpu, exception, memory, time};
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe fn kernel_init() -> ! {
-    exception::handling_init();
-    memory::init();
-    bsp::driver::qemu_bring_up_console();
+    unsafe {
+        exception::handling_init();
+        memory::init();
+        bsp::driver::qemu_bring_up_console();
 
-    assert!(time::time_manager().uptime().as_nanos() > 0);
+        assert!(time::time_manager().uptime().as_nanos() > 0);
 
-    let resolution = time::time_manager().resolution().as_nanos();
-    assert!(resolution > 0);
-    assert!(resolution < 100);
+        let resolution = time::time_manager().resolution().as_nanos();
+        assert!(resolution > 0);
+        assert!(resolution < 100);
 
-    let before = time::time_manager().uptime();
-    time::time_manager().spin_for(Duration::from_secs(1));
-    let after = time::time_manager().uptime();
-    assert_eq!((after - before).as_secs(), 1);
+        let before = time::time_manager().uptime();
+        time::time_manager().spin_for(Duration::from_secs(1));
+        let after = time::time_manager().uptime();
+        assert_eq!((after - before).as_secs(), 1);
 
-    cpu::qemu_exit_success()
+        cpu::qemu_exit_success()
+    }
 }

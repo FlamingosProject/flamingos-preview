@@ -14,7 +14,7 @@ use crate::{
     driver,
     exception::asynchronous::IRQNumber,
     memory::{self, Address, Virtual},
-    synchronization::{interface::Mutex, IRQSafeNullLock},
+    synchronization::{IRQSafeNullLock, interface::Mutex},
 };
 use aarch64_cpu::asm::barrier;
 use core::{
@@ -93,8 +93,10 @@ pub struct Mailbox {
 
 impl MailboxInner {
     const unsafe fn new(mmio_start_addr: Address<Virtual>) -> Self {
-        Self {
-            registers: Registers::new(mmio_start_addr),
+        unsafe {
+            Self {
+                registers: Registers::new(mmio_start_addr),
+            }
         }
     }
 
@@ -182,8 +184,10 @@ impl Mailbox {
     ///
     /// `mmio_start_addr` must name the exclusively owned mailbox registers.
     pub const unsafe fn new(mmio_start_addr: Address<Virtual>) -> Self {
-        Self {
-            inner: IRQSafeNullLock::new(MailboxInner::new(mmio_start_addr)),
+        unsafe {
+            Self {
+                inner: IRQSafeNullLock::new(MailboxInner::new(mmio_start_addr)),
+            }
         }
     }
 
