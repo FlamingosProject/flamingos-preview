@@ -95,6 +95,12 @@ impl HeapAllocator {
     }
 }
 
+impl Default for HeapAllocator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 unsafe impl GlobalAlloc for HeapAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let result = KERNEL_HEAP_ALLOCATOR
@@ -114,11 +120,13 @@ unsafe impl GlobalAlloc for HeapAllocator {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        KERNEL_HEAP_ALLOCATOR
-            .inner
-            .lock(|inner| inner.deallocate(core::ptr::NonNull::new_unchecked(ptr), layout));
+        unsafe {
+            KERNEL_HEAP_ALLOCATOR
+                .inner
+                .lock(|inner| inner.deallocate(core::ptr::NonNull::new_unchecked(ptr), layout));
 
-        debug_print_alloc_dealloc("Free", ptr, layout);
+            debug_print_alloc_dealloc("Free", ptr, layout);
+        }
     }
 }
 

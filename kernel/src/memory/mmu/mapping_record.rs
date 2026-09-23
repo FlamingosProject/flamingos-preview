@@ -162,9 +162,9 @@ impl MappingRecord {
 
             for k in &i.users[1..] {
                 info!(
-                        "                                                                                                            | {}",
-                        k
-                    );
+                    "                                                                                                            | {}",
+                    k
+                );
             }
         }
 
