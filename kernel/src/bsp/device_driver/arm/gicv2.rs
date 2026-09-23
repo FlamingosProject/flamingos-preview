@@ -131,10 +131,12 @@ impl GICv2 {
         gicd_mmio_start_addr: Address<Virtual>,
         gicc_mmio_start_addr: Address<Virtual>,
     ) -> Self {
-        Self {
-            gicd: gicd::GICD::new(gicd_mmio_start_addr),
-            gicc: gicc::GICC::new(gicc_mmio_start_addr),
-            handler_table: InitStateLock::new([None; IRQNumber::MAX_INCLUSIVE + 1]),
+        unsafe {
+            Self {
+                gicd: gicd::GICD::new(gicd_mmio_start_addr),
+                gicc: gicc::GICC::new(gicc_mmio_start_addr),
+                handler_table: InitStateLock::new([None; IRQNumber::MAX_INCLUSIVE + 1]),
+            }
         }
     }
 }
