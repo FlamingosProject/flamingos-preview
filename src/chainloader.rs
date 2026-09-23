@@ -36,6 +36,7 @@ fn write32(addr: usize, value: u32) {
     unsafe { core::ptr::write_volatile(addr as *mut u32, value) }
 }
 
+#[cfg(feature = "bsp_rpi3")]
 fn short_delay() {
     for _ in 0..150 {
         core::hint::spin_loop();
