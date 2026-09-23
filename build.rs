@@ -29,11 +29,13 @@ fn export_git_revision() {
 
     println!("cargo:rustc-env=FLAMINGOS_REVISION={revision}");
 
+    // A commit changes the worktree's HEAD file without changing any kernel source. Watch both HEAD
+    // and its branch ref so a rebuild refreshes the embedded revision in linked and detached states.
     if let Some(head) = git_output(&["rev-parse", "--git-path", "HEAD"]) {
         println!("cargo:rerun-if-changed={head}");
     }
-    if let Some(path) = git_output(&["symbolic-ref", "-q", "HEAD"])
-        .and_then(|reference| git_output(&["rev-parse", "--git-path", &reference]))
+    if let Some(reference) = git_output(&["symbolic-ref", "-q", "HEAD"])
+        && let Some(path) = git_output(&["rev-parse", "--git-path", &reference])
     {
         println!("cargo:rerun-if-changed={path}");
     }
