@@ -16,7 +16,7 @@ mod arch_time;
 use crate::{
     driver, exception,
     exception::asynchronous::IRQNumber,
-    synchronization::{interface::Mutex, IRQSafeNullLock},
+    synchronization::{IRQSafeNullLock, interface::Mutex},
     warn,
 };
 use alloc::{boxed::Box, vec::Vec};
@@ -84,7 +84,8 @@ impl OrderedTimeoutQueue {
 
         // Note reverse compare order so that earliest expiring item is at end of vec. We do this so
         // that we can use Vec::pop below to retrieve the item that is next due.
-        self.inner.sort_by(|a, b| b.due_time.cmp(&a.due_time));
+        self.inner
+            .sort_by_key(|callback| core::cmp::Reverse(callback.due_time));
     }
 
     pub fn peek_next_due_time(&self) -> Option<Duration> {
@@ -197,7 +198,7 @@ impl driver::interface::DeviceDriver for TimeManager {
         &'static self,
         irq_number: &Self::IRQNumberType,
     ) -> Result<(), &'static str> {
-        use exception::asynchronous::{irq_manager, IRQHandlerDescriptor};
+        use exception::asynchronous::{IRQHandlerDescriptor, irq_manager};
 
         let descriptor = IRQHandlerDescriptor::new(*irq_number, Self::COMPATIBLE, self);
 

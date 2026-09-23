@@ -98,9 +98,11 @@ impl InterruptController {
         local_mmio_start_addr: Address<Virtual>,
         periph_mmio_start_addr: Address<Virtual>,
     ) -> Self {
-        Self {
-            local: local_ic::LocalIC::new(local_mmio_start_addr),
-            periph: peripheral_ic::PeripheralIC::new(periph_mmio_start_addr),
+        unsafe {
+            Self {
+                local: local_ic::LocalIC::new(local_mmio_start_addr),
+                periph: peripheral_ic::PeripheralIC::new(periph_mmio_start_addr),
+            }
         }
     }
 }
