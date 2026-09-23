@@ -91,12 +91,14 @@ unsafe fn kernel_map_at_unchecked(
     phys_region: &MemoryRegion<Physical>,
     attr: &AttributeFields,
 ) -> Result<(), &'static str> {
-    bsp::memory::mmu::kernel_translation_tables()
-        .write(|tables| tables.map_at(virt_region, phys_region, attr))?;
+    unsafe {
+        bsp::memory::mmu::kernel_translation_tables()
+            .write(|tables| tables.map_at(virt_region, phys_region, attr))?;
 
-    kernel_add_mapping_record(name, virt_region, phys_region, attr);
+        kernel_add_mapping_record(name, virt_region, phys_region, attr);
 
-    Ok(())
+        Ok(())
+    }
 }
 
 /// Try to translate a kernel virtual address to a physical address.
@@ -187,39 +189,41 @@ pub unsafe fn kernel_map_mmio(
     name: &'static str,
     mmio_descriptor: &MMIODescriptor,
 ) -> Result<Address<Virtual>, &'static str> {
-    let phys_region = MemoryRegion::from(*mmio_descriptor);
-    let offset_into_start_page = mmio_descriptor.start_addr().offset_into_page();
+    unsafe {
+        let phys_region = MemoryRegion::from(*mmio_descriptor);
+        let offset_into_start_page = mmio_descriptor.start_addr().offset_into_page();
 
-    // Check if an identical region has been mapped for another driver. If so, reuse it.
-    let virt_addr = if let Some(addr) =
-        mapping_record::kernel_find_and_insert_mmio_duplicate(mmio_descriptor, name)
-    {
-        addr
-    // Otherwise, allocate a new region and map it.
-    } else {
-        let num_pages = match NonZeroUsize::new(phys_region.num_pages()) {
-            None => return Err("Requested 0 pages"),
-            Some(x) => x,
+        // Check if an identical region has been mapped for another driver. If so, reuse it.
+        let virt_addr = if let Some(addr) =
+            mapping_record::kernel_find_and_insert_mmio_duplicate(mmio_descriptor, name)
+        {
+            addr
+        // Otherwise, allocate a new region and map it.
+        } else {
+            let num_pages = match NonZeroUsize::new(phys_region.num_pages()) {
+                None => return Err("Requested 0 pages"),
+                Some(x) => x,
+            };
+
+            let virt_region = page_alloc::kernel_mmio_va_allocator()
+                .lock(|allocator| allocator.alloc(num_pages))?;
+
+            kernel_map_at_unchecked(
+                name,
+                &virt_region,
+                &phys_region,
+                &AttributeFields {
+                    mem_attributes: MemAttributes::Device,
+                    acc_perms: AccessPermissions::ReadWrite,
+                    execute_never: true,
+                },
+            )?;
+
+            virt_region.start_addr()
         };
 
-        let virt_region =
-            page_alloc::kernel_mmio_va_allocator().lock(|allocator| allocator.alloc(num_pages))?;
-
-        kernel_map_at_unchecked(
-            name,
-            &virt_region,
-            &phys_region,
-            &AttributeFields {
-                mem_attributes: MemAttributes::Device,
-                acc_perms: AccessPermissions::ReadWrite,
-                execute_never: true,
-            },
-        )?;
-
-        virt_region.start_addr()
-    };
-
-    Ok(virt_addr + offset_into_start_page)
+        Ok(virt_addr + offset_into_start_page)
+    }
 }
 
 /// Try to translate a kernel virtual page address to a physical page address.
@@ -256,5 +260,5 @@ pub fn kernel_print_mappings() {
 pub unsafe fn enable_mmu_and_caching(
     phys_tables_base_addr: Address<Physical>,
 ) -> Result<(), MMUEnableError> {
-    arch_mmu::mmu().enable_mmu_and_caching(phys_tables_base_addr)
+    unsafe { arch_mmu::mmu().enable_mmu_and_caching(phys_tables_base_addr) }
 }

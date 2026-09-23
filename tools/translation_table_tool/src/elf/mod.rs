@@ -117,13 +117,10 @@ impl KernelELF {
     }
 
     pub fn segment_get_acc_perms(&self, segment: &ProgramHeader) -> AccessPermissions {
-        let readable = (segment.p_flags & goblin::elf::program_header::PF_R) != 0;
         let writable = (segment.p_flags & goblin::elf::program_header::PF_W) != 0;
 
-        if readable && writable {
+        if writable && (segment.p_flags & goblin::elf::program_header::PF_R) != 0 {
             AccessPermissions::ReadWrite
-        } else if readable {
-            AccessPermissions::ReadOnly
         } else {
             AccessPermissions::ReadOnly // Default to readonly for safety
         }

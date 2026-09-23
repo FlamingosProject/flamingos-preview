@@ -9,7 +9,7 @@ pub struct MemoryRegion {
 
 impl MemoryRegion {
     pub fn new(start_addr: u64, size: usize, granule_size: usize) -> Result<Self> {
-        if !start_addr.is_aligned(granule_size as u64) {
+        if !start_addr.aligned_to(granule_size as u64) {
             return Err(anyhow!("Start address not aligned to granule size"));
         }
 
@@ -17,7 +17,7 @@ impl MemoryRegion {
             return Err(anyhow!("Size must be positive"));
         }
 
-        if size % granule_size != 0 {
+        if !size.is_multiple_of(granule_size) {
             return Err(anyhow!("Size must be aligned to granule size"));
         }
 

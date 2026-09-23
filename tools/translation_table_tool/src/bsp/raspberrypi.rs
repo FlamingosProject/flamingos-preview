@@ -4,6 +4,7 @@ use crate::memory::GRANULE_64KIB_SIZE;
 use anyhow::anyhow;
 use regex::Regex;
 use std::fs;
+use std::str::FromStr;
 
 #[derive(Debug, Clone, Copy)]
 pub enum BspType {
@@ -11,8 +12,10 @@ pub enum BspType {
     Rpi4,
 }
 
-impl BspType {
-    pub fn from_str(s: &str) -> Result<Self> {
+impl FromStr for BspType {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
         match s {
             "rpi3" => Ok(BspType::Rpi3),
             "rpi4" => Ok(BspType::Rpi4),

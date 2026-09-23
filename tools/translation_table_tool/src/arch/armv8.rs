@@ -36,6 +36,12 @@ impl Stage1TableDescriptor {
     }
 }
 
+impl Default for Stage1TableDescriptor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum TableType {
     Block = 0,
@@ -103,6 +109,12 @@ impl Stage1PageDescriptor {
     }
 }
 
+impl Default for Stage1PageDescriptor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum SharabilityField {
     InnerShareable = 0b11,
@@ -134,7 +146,7 @@ impl TranslationTable {
         phys_addr_of_kernel_tables: u64,
     ) -> Result<Self> {
         // Sanity checks
-        if (kernel_virt_addr_space_size % (512 * 1024 * 1024)) != 0 {
+        if !kernel_virt_addr_space_size.is_multiple_of(512 * 1024 * 1024) {
             return Err(anyhow!(
                 "Kernel virtual address space size must be aligned to 512 MiB"
             ));

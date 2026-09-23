@@ -25,7 +25,7 @@ fn main() -> Result<()> {
     let start = Instant::now();
 
     // Parse BSP type
-    let bsp_type = BspType::from_str(&args.bsp_type)?;
+    let bsp_type = args.bsp_type.parse::<BspType>()?;
 
     // Load kernel ELF
     let kernel_elf = KernelELF::new(&args.kernel_elf_path)?;
