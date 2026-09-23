@@ -9,11 +9,11 @@
 //! 512-byte logical sectors suitable for a small adapter to an exFAT crate.
 
 use crate::{
-    bsp::device_driver::{common::MMIODerefWrapper, ClockId, Mailbox},
+    bsp::device_driver::{ClockId, Mailbox, common::MMIODerefWrapper},
     driver,
     exception::asynchronous::IRQNumber,
     memory::{Address, Virtual},
-    synchronization::{interface::Mutex, IRQSafeNullLock},
+    synchronization::{IRQSafeNullLock, interface::Mutex},
     time,
 };
 use core::time::Duration;
@@ -133,9 +133,11 @@ pub struct EMMC {
 
 impl EMMCInner {
     const unsafe fn new(mmio_start_addr: Address<Virtual>) -> Self {
-        Self {
-            registers: Registers::new(mmio_start_addr),
-            card: None,
+        unsafe {
+            Self {
+                registers: Registers::new(mmio_start_addr),
+                card: None,
+            }
         }
     }
 
@@ -216,7 +218,7 @@ impl EMMCInner {
         let card = self.card.ok_or(Error::NotInitialized)?;
         self.start_transfer(&card, CMD_READ_SINGLE, block_index)?;
         self.wait_interrupt(INT_READ_RDY, CMD_READ_SINGLE)?;
-        for chunk in block.chunks_exact_mut(4) {
+        for chunk in block.as_chunks_mut::<4>().0 {
             chunk.copy_from_slice(&self.registers.DATA.get().to_le_bytes());
         }
         Ok(())
@@ -226,10 +228,8 @@ impl EMMCInner {
         let card = self.card.ok_or(Error::NotInitialized)?;
         self.start_transfer(&card, CMD_WRITE_SINGLE, block_index)?;
         self.wait_interrupt(INT_WRITE_RDY, CMD_WRITE_SINGLE)?;
-        for chunk in block.chunks_exact(4) {
-            self.registers
-                .DATA
-                .set(u32::from_le_bytes(chunk.try_into().unwrap()));
+        for chunk in block.as_chunks::<4>().0 {
+            self.registers.DATA.set(u32::from_le_bytes(*chunk));
         }
         self.wait_interrupt(INT_DATA_DONE, CMD_WRITE_SINGLE)?;
         Ok(())
@@ -337,8 +337,10 @@ impl EMMC {
     ///
     /// `mmio_start_addr` must name an exclusively owned EMMC register block.
     pub const unsafe fn new(mmio_start_addr: Address<Virtual>) -> Self {
-        Self {
-            inner: IRQSafeNullLock::new(EMMCInner::new(mmio_start_addr)),
+        unsafe {
+            Self {
+                inner: IRQSafeNullLock::new(EMMCInner::new(mmio_start_addr)),
+            }
         }
     }
 
