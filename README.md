@@ -3,7 +3,7 @@
 Flamingos is a hands-on bare-metal operating system tutorial for 64-bit Arm Raspberry Pis. Its
 lineage begins with [Zoltan Baldaszti's bare-metal Raspberry Pi 3 tutorial in
 C](https://github.com/bztsrc/raspi3-tutorial), which [Andre
-Richter](https://github.com/andre-richter) adapted into Rust. Flamingos grew from Andre's Rust
+Richter](https://github.com/andre-richter) took as a baseline, adapted into Rust and extended on the content and capabilities. Flamingos grew from Andre's Rust
 Raspberry Pi OS tutorials through joint work by Philipp Oppermann and Bart Massey, with an emphasis
 on stable Rust, practical hardware bring-up, and development tools that remain useful as the kernel
 becomes more capable.
