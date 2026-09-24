@@ -148,7 +148,8 @@ fn sdcard_smoke_test() {
     }
 
     info!(
-        "SD card test: sector 0 CRC-32 = {:#010x}, four-bit bus = {}",
+        "SD card test: {} sectors, sector 0 CRC-32 = {:#010x}, four-bit bus = {}",
+        sd.sector_count().unwrap_or(0),
         crc32(&sector),
         sd.four_bit_bus().unwrap_or(false)
     );
