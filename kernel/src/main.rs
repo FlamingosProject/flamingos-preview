@@ -13,6 +13,10 @@
 
 extern crate alloc;
 
+#[cfg(not(feature = "test_build"))]
+use exfat_embedded::{FileSystem, Scratch};
+#[cfg(not(feature = "test_build"))]
+use libkernel::storage;
 use libkernel::{bsp, cpu, driver, exception, info, memory, state, time};
 
 /// Early init code.
@@ -123,7 +127,11 @@ fn kernel_main() -> ! {
     cpu::wait_forever();
 }
 
-/// Initialize the card and report a compact fingerprint of its first sector.
+/// Exercise the Chapter 22 storage stack without making media mandatory.
+///
+/// The raw sector CRC checks the controller path independently. The second
+/// half mounts the first exFAT partition and verifies a known root-directory
+/// file, covering partition discovery, directory lookup, and file reads.
 #[cfg(not(feature = "test_build"))]
 fn sdcard_smoke_test() {
     info!("SD card test: initializing");
@@ -141,6 +149,8 @@ fn sdcard_smoke_test() {
         }
     }
 
+    // Sector zero belongs to the whole disk (normally its MBR), not to the
+    // exFAT volume within partition 2.
     let mut sector = [0_u8; 512];
     if let Err(error) = sd.read_block(0, &mut sector) {
         libkernel::warn!("SD card test: sector 0 read failed: {:?}", error);
@@ -153,6 +163,54 @@ fn sdcard_smoke_test() {
         crc32(&sector),
         sd.four_bit_bus().unwrap_or(false)
     );
+
+    // Hand the whole-disk block device to exfat-embedded. Its mount operation
+    // discovers the partition before interpreting the exFAT boot region.
+    let device = match storage::SdCardBlockDevice::new(sd) {
+        Ok(device) => device,
+        Err(error) => {
+            libkernel::warn!("exFAT test: block-device setup failed: {:?}", error);
+            return;
+        }
+    };
+    // One caller-owned sector is enough workspace for mounting, directory
+    // traversal, and this small file read; no allocation is required.
+    let mut scratch_bytes = [0_u8; 512];
+    let mut scratch = Scratch::new(&mut scratch_bytes);
+    let mut filesystem = match FileSystem::mount(device, &mut scratch) {
+        Ok(filesystem) => filesystem,
+        Err(error) => {
+            libkernel::warn!("exFAT test: mount failed: {:?}", error);
+            return;
+        }
+    };
+    let partition = filesystem.geometry().partition;
+    info!(
+        "exFAT test: mounted partition at LBA {} ({} sectors)",
+        partition.first_lba, partition.sector_count
+    );
+    let mut file = match filesystem.open("123.txt", &mut scratch) {
+        Ok(file) => file,
+        Err(error) => {
+            libkernel::warn!("exFAT test: opening 123.txt failed: {:?}", error);
+            return;
+        }
+    };
+    if file.len() != 4 {
+        libkernel::warn!("exFAT test: 123.txt has unexpected size {}", file.len());
+        return;
+    }
+
+    let mut contents = [0_u8; 4];
+    match filesystem.read(&mut file, &mut contents, &mut scratch) {
+        Ok(4) if contents == *b"123\n" => info!("exFAT test: 123.txt contains expected data"),
+        Ok(bytes_read) => libkernel::warn!(
+            "exFAT test: unexpected 123.txt contents (CRC-32 {:#010x}, {} bytes)",
+            crc32(&contents[..bytes_read]),
+            bytes_read
+        ),
+        Err(error) => libkernel::warn!("exFAT test: reading 123.txt failed: {:?}", error),
+    }
 }
 
 /// IEEE CRC-32, reflected representation (`0xedb8_8320`).
