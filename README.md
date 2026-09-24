@@ -20,6 +20,7 @@ Implemented:
 - SDHCI register mapping through the kernel's existing MMIO allocator.
 - Pi 3/Zero 2 W GPIO mux and pull-up setup; Pi 4 uses dedicated EMMC2 pads.
 - `CMD0`/`CMD8`/`ACMD41`/`CMD2`/`CMD3`/`CMD7` card initialization.
+- CSD v1/v2 capacity decoding and 512-byte logical-sector counts.
 - Best-effort four-bit bus negotiation through `ACMD51` and `ACMD6`.
 - Blocking `CMD17` sector reads and `CMD24` sector writes.
 - Time-bounded controller polling and diagnostic command/interrupt errors.
@@ -29,7 +30,6 @@ Implemented:
 
 Still required before hardware acceptance:
 
-- CSD decoding so the block layer can report the card's sector count.
 - Real-hardware tests on Pi 3, Zero 2 W, and Pi 4. In particular, upstream has not yet validated its
   Pi 3-family path on Zero 2 W hardware.
 - Multi-block transfers and, later, DMA/interrupt-driven I/O.

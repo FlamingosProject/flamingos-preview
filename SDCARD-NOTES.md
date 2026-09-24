@@ -17,8 +17,8 @@ the complete HAL.
 
 The hardware driver intentionally deals in 512-byte sectors. Filesystem partition discovery,
 allocation, directory parsing, and file handles belong above this layer. The intended next boundary
-is a kernel-owned block-device trait that can be adapted to `exfat-embedded::BlockDevice` without
-making the hardware driver depend on the filesystem.
+is an implementation of `exfat-embedded::BlockDevice`; that crate performs its own MBR/GPT
+discovery, so the kernel does not need a second partition-table dependency.
 
 ## Hardware caveats
 

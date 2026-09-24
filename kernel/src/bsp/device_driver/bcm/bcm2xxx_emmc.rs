@@ -57,6 +57,8 @@ const CMD_ALL_SEND_CID: u32 = 0x0201_0000;
 const CMD_SEND_REL_ADDR: u32 = 0x0302_0000;
 const CMD_CARD_SELECT: u32 = 0x0703_0000;
 const CMD_SEND_IF_COND: u32 = 0x0802_0000;
+const CMD_SEND_CSD: u32 = 0x0901_0000;
+const CMD_SET_BLOCKLEN: u32 = 0x1002_0000;
 const CMD_READ_SINGLE: u32 = 0x1122_0010;
 const CMD_WRITE_SINGLE: u32 = 0x1822_0000;
 const CMD_APP_CMD: u32 = 0x370a_0000;
@@ -112,6 +114,10 @@ pub enum Error {
     NotInitialized,
     /// A byte-addressed SDSC request overflowed its 32-bit argument.
     AddressOverflow,
+    /// The card reported a CSD layout this driver does not support.
+    UnsupportedCsdVersion(u8),
+    /// The card's CSD described an invalid or unrepresentable capacity.
+    InvalidCsd,
 }
 
 #[derive(Clone, Copy)]
@@ -119,6 +125,7 @@ struct CardState {
     relative_address: u32,
     high_capacity: bool,
     four_bit_bus: bool,
+    sector_count: u64,
 }
 
 struct EMMCInner {
@@ -176,6 +183,7 @@ impl EMMCInner {
             relative_address: 0,
             high_capacity: false,
             four_bit_bus: false,
+            sector_count: 0,
         };
         self.command(&card, CMD_GO_IDLE, 0)?;
         if let Err(error) = self.command(&card, CMD_SEND_IF_COND, 0x1aa) {
@@ -200,8 +208,13 @@ impl EMMCInner {
 
         self.command(&card, CMD_ALL_SEND_CID, 0)?;
         card.relative_address = self.command(&card, CMD_SEND_REL_ADDR, 0)? & 0xffff_0000;
+        let csd = self.command_response_136(CMD_SEND_CSD, card.relative_address)?;
+        card.sector_count = decode_csd_sector_count(csd)?;
         self.set_clock(base_clock_hz, TRANSFER_CLOCK_HZ)?;
         self.command(&card, CMD_CARD_SELECT, card.relative_address)?;
+        if !card.high_capacity {
+            self.command(&card, CMD_SET_BLOCKLEN, BLOCK_SIZE as u32)?;
+        }
         card.four_bit_bus = self.negotiate_four_bit_bus(&card).unwrap_or(false);
         self.card = Some(card);
         Ok(())
@@ -289,6 +302,30 @@ impl EMMCInner {
         Ok(self.registers.RESP0.get())
     }
 
+    fn command_response_136(&mut self, code: u32, argument: u32) -> Result<[u32; 4], Error> {
+        wait_for(100_000, || {
+            self.registers.STATUS.get() & STATUS_CMD_INHIBIT == 0
+        })?;
+        self.registers.INTERRUPT.set(self.registers.INTERRUPT.get());
+        self.registers.ARG1.set(argument);
+        self.registers.CMDTM.set(code);
+        self.wait_interrupt(INT_CMD_DONE, code)?;
+
+        // SDHCI drops the response's CRC/end byte and stores each successive
+        // 32-bit piece right-shifted by eight. Reassemble the CSD as four
+        // big-endian words covering CSD bits 127..0.
+        let r0 = self.registers.RESP0.get();
+        let r1 = self.registers.RESP1.get();
+        let r2 = self.registers.RESP2.get();
+        let r3 = self.registers.RESP3.get();
+        Ok([
+            (r3 << 8) | (r2 >> 24),
+            (r2 << 8) | (r1 >> 24),
+            (r1 << 8) | (r0 >> 24),
+            r0 << 8,
+        ])
+    }
+
     fn wait_interrupt(&mut self, mask: u32, command: u32) -> Result<u32, Error> {
         let start = time::time_manager().uptime();
         loop {
@@ -359,6 +396,16 @@ impl EMMC {
         })
     }
 
+    /// Return the initialized card's capacity in 512-byte logical sectors.
+    pub fn sector_count(&self) -> Result<u64, Error> {
+        self.inner.lock(|inner| {
+            inner
+                .card
+                .map(|card| card.sector_count)
+                .ok_or(Error::NotInitialized)
+        })
+    }
+
     /// Read one 512-byte logical sector.
     pub fn read_block(&self, block_index: u32, block: &mut Block) -> Result<(), Error> {
         self.inner
@@ -396,6 +443,39 @@ fn wait_for(timeout_us: u128, mut condition: impl FnMut() -> bool) -> Result<(),
         }
     }
     Ok(())
+}
+
+/// Decode CSD v1 (SDSC) or v2 (SDHC/SDXC) capacity into 512-byte sectors.
+fn decode_csd_sector_count(csd: [u32; 4]) -> Result<u64, Error> {
+    let csd_structure = (csd[0] >> 30) as u8;
+    let sector_count = match csd_structure {
+        0 => {
+            let read_block_len = (csd[1] >> 16) & 0xf;
+            let device_size = ((csd[1] & 0x3ff) << 2) | (csd[2] >> 30);
+            let size_multiplier = (csd[2] >> 15) & 0x7;
+            let block_len = 1_u64.checked_shl(read_block_len).ok_or(Error::InvalidCsd)?;
+            let block_count = u64::from(device_size + 1)
+                .checked_shl(size_multiplier + 2)
+                .ok_or(Error::InvalidCsd)?;
+            let capacity_bytes = block_count
+                .checked_mul(block_len)
+                .ok_or(Error::InvalidCsd)?;
+            if !capacity_bytes.is_multiple_of(BLOCK_SIZE as u64) {
+                return Err(Error::InvalidCsd);
+            }
+            capacity_bytes / BLOCK_SIZE as u64
+        }
+        1 => {
+            let device_size = ((csd[1] & 0x3f) << 16) | (csd[2] >> 16);
+            u64::from(device_size + 1) * 1024
+        }
+        version => return Err(Error::UnsupportedCsdVersion(version)),
+    };
+
+    if sector_count == 0 {
+        return Err(Error::InvalidCsd);
+    }
+    Ok(sector_count)
 }
 
 // Returns the 10-bit SDHCI divisor field. Ported from Circle through rpi-hal.
