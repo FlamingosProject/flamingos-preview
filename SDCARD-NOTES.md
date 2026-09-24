@@ -20,6 +20,11 @@ allocation, directory parsing, and file handles belong above this layer. The int
 is an implementation of `exfat-embedded::BlockDevice`; that crate performs its own MBR/GPT
 discovery, so the kernel does not need a second partition-table dependency.
 
+The adapter reports the capacity decoded from the card's CSD, translates the filesystem's `u64`
+LBAs to the controller's `u32` block indices, and rejects out-of-range or incorrectly sized
+requests. The filesystem mounts the first MBR type-`0x07` partition (or Microsoft Basic Data GPT
+partition) and validates that it contains an exFAT volume.
+
 ## Hardware caveats
 
 - Pi 3 and Zero 2 W use the classic controller at physical address `0x3f30_0000`, with the slot

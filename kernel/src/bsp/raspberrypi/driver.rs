@@ -22,7 +22,7 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-pub use crate::bsp::device_driver::Error as EmmcError;
+pub use crate::bsp::device_driver::{EMMC, Error as EmmcError};
 
 //--------------------------------------------------------------------------------------------------
 // Global instances

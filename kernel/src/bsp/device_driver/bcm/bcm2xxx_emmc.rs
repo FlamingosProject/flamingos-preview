@@ -5,8 +5,14 @@
 
 //! Blocking PIO driver for the Raspberry Pi SD-card host controller.
 //!
-//! This is deliberately a block driver, not a filesystem driver. It exposes
-//! 512-byte logical sectors suitable for a small adapter to an exFAT crate.
+//! Initialization uses the VideoCore property mailbox for platform-specific
+//! power and clock setup, then performs the SD card-identification sequence.
+//! The data path deliberately stops at 512-byte logical sectors: partition and
+//! filesystem policy belong in adapters above this driver.
+//!
+//! Transfers currently use synchronous, single-block programmed I/O. The
+//! controller lock therefore protects both the initialized-card state and the
+//! complete command/data transaction.
 
 use crate::{
     bsp::device_driver::{ClockId, Mailbox, common::MMIODerefWrapper},
@@ -52,6 +58,9 @@ const BLOCK_SIZE: usize = 512;
 const SETUP_CLOCK_HZ: u32 = 400_000;
 const TRANSFER_CLOCK_HZ: u32 = 25_000_000;
 
+// These packed values are written directly to SDHCI's Command and Transfer
+// Mode register. CMD_NEED_APP is our own marker; command() removes it after
+// automatically issuing CMD55 for an application-specific command.
 const CMD_GO_IDLE: u32 = 0x0000_0000;
 const CMD_ALL_SEND_CID: u32 = 0x0201_0000;
 const CMD_SEND_REL_ADDR: u32 = 0x0302_0000;
@@ -70,16 +79,22 @@ const CMD_SET_BUS_WIDTH: u32 = 0x0602_0000 | CMD_NEED_APP;
 const STATUS_CMD_INHIBIT: u32 = 1 << 0;
 const STATUS_DAT_INHIBIT: u32 = 1 << 1;
 const CONTROL0_4BIT: u32 = 1 << 1;
+// SDHCI Power Control byte: select 3.3 V and enable bus power. BCM2711's
+// EMMC2 needs this explicitly even though the classic controller does not.
+#[cfg(feature = "bsp_rpi4")]
+const CONTROL0_POWER_3V3: u32 = 0x0f00;
 const CONTROL1_CLK_INTLEN: u32 = 1 << 0;
 const CONTROL1_CLK_STABLE: u32 = 1 << 1;
 const CONTROL1_CLK_EN: u32 = 1 << 2;
 const CONTROL1_DATA_TIMEOUT_MAX: u32 = 0b1110 << 16;
 const CONTROL1_SRST_HC: u32 = 1 << 24;
+const CONTROL1_SRST_CMD: u32 = 1 << 25;
 
 const INT_CMD_DONE: u32 = 1 << 0;
 const INT_DATA_DONE: u32 = 1 << 1;
 const INT_WRITE_RDY: u32 = 1 << 4;
 const INT_READ_RDY: u32 = 1 << 5;
+const INT_ERR_SUMMARY: u32 = 1 << 15;
 const INT_CMD_TIMEOUT: u32 = 1 << 16;
 const INT_ERROR_MASK: u32 = 0x017e_8000;
 
@@ -122,12 +137,17 @@ pub enum Error {
 
 #[derive(Clone, Copy)]
 struct CardState {
+    /// Relative card address in the upper 16 bits, ready for command arguments.
     relative_address: u32,
+    /// Whether command arguments use sectors (true) or byte offsets (false).
     high_capacity: bool,
+    /// Whether both card and host were successfully switched to four-bit mode.
     four_bit_bus: bool,
+    /// Capacity decoded from the CSD, in 512-byte logical sectors.
     sector_count: u64,
 }
 
+/// Mutable controller state serialized by the public [`EMMC`] wrapper.
 struct EMMCInner {
     registers: Registers,
     card: Option<CardState>,
@@ -150,6 +170,10 @@ impl EMMCInner {
 
     fn initialize(&mut self, mailbox: &Mailbox) -> Result<(), Error> {
         self.card = None;
+
+        // Firmware owns the SoC-level power and clock gates. Asking it for the
+        // live base rate avoids making a board- or firmware-specific guess
+        // when calculating the SD clock divisor.
         mailbox.power_on_sd_card().map_err(Error::Firmware)?;
         #[cfg(feature = "bsp_rpi3")]
         let clock_id = ClockId::Emmc;
@@ -161,6 +185,7 @@ impl EMMCInner {
             .map_err(Error::Firmware)?;
         let base_clock_hz = mailbox.clock_rate_hz(clock_id).map_err(Error::Firmware)?;
 
+        // Reset the complete host circuit before programming its clocks.
         self.registers.CONTROL1.set(CONTROL1_SRST_HC);
         wait_for(100_000, || {
             self.registers.CONTROL1.get() & CONTROL1_SRST_HC == 0
@@ -169,7 +194,7 @@ impl EMMCInner {
         #[cfg(feature = "bsp_rpi4")]
         self.registers
             .CONTROL0
-            .set(self.registers.CONTROL0.get() | 0x0f00);
+            .set(self.registers.CONTROL0.get() | CONTROL0_POWER_3V3);
 
         self.registers
             .CONTROL1
@@ -179,6 +204,7 @@ impl EMMCInner {
         self.registers.IRPT_MASK.set(u32::MAX);
         self.registers.IRPT_EN.set(0);
 
+        // Begin the protocol-defined identification sequence at <= 400 kHz.
         let mut card = CardState {
             relative_address: 0,
             high_capacity: false,
@@ -206,6 +232,8 @@ impl EMMCInner {
         }
         card.high_capacity = response & ACMD41_CMD_CCS != 0;
 
+        // Obtain an address and capacity before selecting the card and raising
+        // the bus to its conservative default transfer frequency.
         self.command(&card, CMD_ALL_SEND_CID, 0)?;
         card.relative_address = self.command(&card, CMD_SEND_REL_ADDR, 0)? & 0xffff_0000;
         let csd = self.command_response_136(CMD_SEND_CSD, card.relative_address)?;
@@ -215,12 +243,38 @@ impl EMMCInner {
         if !card.high_capacity {
             self.command(&card, CMD_SET_BLOCKLEN, BLOCK_SIZE as u32)?;
         }
+        // Four-bit mode is an optimization. A failed SCR read or a card that
+        // does not advertise it leaves the standards-mandated one-bit mode.
         card.four_bit_bus = self.negotiate_four_bit_bus(&card).unwrap_or(false);
         self.card = Some(card);
         Ok(())
     }
 
     fn classify_missing_card(&mut self, card: &CardState, original: Error) -> Error {
+        // A silent CMD8 may mean either an empty slot or an old, pre-SD-2.0
+        // card. Only a bare command timeout is worth probing with CMD55,
+        // which all SD protocol versions understand.
+        let Error::Card { interrupt, .. } = original else {
+            return original;
+        };
+        if interrupt & INT_CMD_TIMEOUT == 0 || interrupt & INT_ERROR_MASK != INT_ERR_SUMMARY {
+            return original;
+        }
+
+        // SDHCI requires the command circuit to be reset after a command
+        // error. Without this, the confirming CMD55 never starts and merely
+        // reaches the driver's software timeout.
+        self.registers
+            .CONTROL1
+            .set(self.registers.CONTROL1.get() | CONTROL1_SRST_CMD);
+        if wait_for(10_000, || {
+            self.registers.CONTROL1.get() & CONTROL1_SRST_CMD == 0
+        })
+        .is_err()
+        {
+            return original;
+        }
+
         match self.command(card, CMD_APP_CMD, 0) {
             Err(Error::Card { interrupt, .. }) if interrupt & INT_CMD_TIMEOUT != 0 => Error::NoCard,
             _ => original,
@@ -231,6 +285,8 @@ impl EMMCInner {
         let card = self.card.ok_or(Error::NotInitialized)?;
         self.start_transfer(&card, CMD_READ_SINGLE, block_index)?;
         self.wait_interrupt(INT_READ_RDY, CMD_READ_SINGLE)?;
+        // The FIFO is 32 bits wide; SD sector bytes are transferred in
+        // little-endian word order by this controller.
         for chunk in block.as_chunks_mut::<4>().0 {
             chunk.copy_from_slice(&self.registers.DATA.get().to_le_bytes());
         }
@@ -241,9 +297,12 @@ impl EMMCInner {
         let card = self.card.ok_or(Error::NotInitialized)?;
         self.start_transfer(&card, CMD_WRITE_SINGLE, block_index)?;
         self.wait_interrupt(INT_WRITE_RDY, CMD_WRITE_SINGLE)?;
+        // Fill the 32-bit FIFO after the controller announces write space.
         for chunk in block.as_chunks::<4>().0 {
             self.registers.DATA.set(u32::from_le_bytes(*chunk));
         }
+        // DATA_DONE is raised after the card finishes programming, not merely
+        // after the last word enters the host FIFO.
         self.wait_interrupt(INT_DATA_DONE, CMD_WRITE_SINGLE)?;
         Ok(())
     }
@@ -258,6 +317,8 @@ impl EMMCInner {
             self.registers.STATUS.get() & STATUS_DAT_INHIBIT == 0
         })?;
         self.registers.BLKSIZECNT.set((1 << 16) | BLOCK_SIZE as u32);
+        // SDHC/SDXC commands carry an LBA; byte-addressed cards carry the
+        // corresponding byte offset.
         let argument = if card.high_capacity {
             block_index
         } else {
@@ -269,6 +330,9 @@ impl EMMCInner {
     }
 
     fn negotiate_four_bit_bus(&mut self, card: &CardState) -> Result<bool, Error> {
+        // ACMD51 returns the eight-byte SD Configuration Register as a small
+        // data transfer. ACMD6 then switches the card before we switch the
+        // matching controller bit.
         wait_for(100_000, || {
             self.registers.STATUS.get() & STATUS_DAT_INHIBIT == 0
         })?;
@@ -450,6 +514,8 @@ fn decode_csd_sector_count(csd: [u32; 4]) -> Result<u64, Error> {
     let csd_structure = (csd[0] >> 30) as u8;
     let sector_count = match csd_structure {
         0 => {
+            // CSD v1:
+            //   bytes = (C_SIZE + 1) * 2^(C_SIZE_MULT + 2) * 2^READ_BL_LEN.
             let read_block_len = (csd[1] >> 16) & 0xf;
             let device_size = ((csd[1] & 0x3ff) << 2) | (csd[2] >> 30);
             let size_multiplier = (csd[2] >> 15) & 0x7;
@@ -466,6 +532,8 @@ fn decode_csd_sector_count(csd: [u32; 4]) -> Result<u64, Error> {
             capacity_bytes / BLOCK_SIZE as u64
         }
         1 => {
+            // CSD v2 expresses C_SIZE in fixed 512-KiB units, or 1024 of
+            // the 512-byte logical sectors exposed by this driver.
             let device_size = ((csd[1] & 0x3f) << 16) | (csd[2] >> 16);
             u64::from(device_size + 1) * 1024
         }
@@ -478,7 +546,11 @@ fn decode_csd_sector_count(csd: [u32; 4]) -> Result<u64, Error> {
     Ok(sector_count)
 }
 
-// Returns the 10-bit SDHCI divisor field. Ported from Circle through rpi-hal.
+/// Return the 10-bit SDHCI divisor field for a clock no faster than `target_hz`.
+///
+/// This controller accepts power-of-two divisors. The register stores half of
+/// the effective divisor, split across two bit fields by [`EMMCInner::set_clock`].
+/// The calculation was ported from Circle through `rpi-hal`.
 fn clock_divider(base_hz: u32, target_hz: u32) -> u32 {
     let required = base_hz.saturating_add(target_hz - 1) / target_hz;
     let total_divisor = required.next_power_of_two().max(2);
