@@ -3,6 +3,7 @@ resolver="2"
 
 members = [
         "libraries/kernel-image",
+        "libraries/program-image",
         "kernel",
         "tools/kernel_test_runner",
         "xtask",

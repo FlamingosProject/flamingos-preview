@@ -137,6 +137,7 @@ pub mod driver;
 pub mod exception;
 pub mod memory;
 pub mod print;
+pub use program_image as program;
 pub mod state;
 pub mod storage;
 pub mod symbols;
