@@ -86,3 +86,7 @@
 	path = 22-sdcard
 	url = https://github.com/FlamingosProject/flamingos-preview.git
 	branch = 22-sdcard
+[submodule "23-load-elf"]
+	path = 23-load-elf
+	url = https://github.com/FlamingosProject/flamingos-preview.git
+	branch = 23-load-elf
