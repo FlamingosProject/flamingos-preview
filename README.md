@@ -64,29 +64,49 @@ kernel's 16 MiB heap for its other users.
 
 ## Try it
 
-Build a small static ELF fixture using Python's standard library:
+Build the chapter's standalone Rust `init` program:
 
 ```sh
-python3 tools/make-init-elf.py
-cargo run -p program-image --example inspect -- target/init.elf
+cd init
+cargo build --release --features bsp_rpi3
+cd ..
+cargo run -p program-image --example inspect -- \
+  init/target/aarch64-unknown-none-softfloat/release/init
 ```
 
-The fixture has a single looping AArch64 instruction, a read-only
-executable segment, and a writable segment with initialized data
-and a zero-filled tail. It has no libraries or relocations. The
-host inspection should report entry `0x100b0` and two segments.
+`init` is a minimal `no_std` Rust executable whose entry loops
+forever. It is excluded from the kernel workspace so its bare-metal
+target and compiler wrapper do not affect host tools. Build from
+its directory to apply its local Cargo configuration. Use
+`bsp_rpi3` for Pi 3 and Zero 2 W, or `bsp_rpi4` for Pi 4. Without a
+BSP feature, the compiler uses the generic AArch64 target CPU.
 
-Copy `target/init.elf` into the root of the card's existing exFAT
-partition, then build and boot the normal kernel:
+Copy `init/target/aarch64-unknown-none-softfloat/release/init` into
+the root of the card's existing exFAT partition as `init.elf`, then
+build and boot the normal kernel:
 
 ```sh
 cargo xtask build rpiz2
 make chainboot BSP=rpiz2
 ```
 
-Boot should print `ELF loader: init.elf entry 0x100b0, 2 segments`.
+Boot prints the executable's entry address and loaded segments.
+The current release build reports entry `0x2101a0` and two segments;
+addresses and sizes can change with the compiler and build options.
 The program is loaded but execution is deferred to process creation.
 The Pi 3 and Pi 4 build selectors remain available.
+
+For a separate fixture exercising writable data and BSS zeroing:
+
+```sh
+python3 tools/make-loader-fixture.py
+cargo run -p program-image --example inspect -- \
+  target/loader-fixture.elf
+```
+
+This hand-encoded ELF has a looping AArch64 instruction, an
+executable segment, and a writable segment with initialized data
+and a zero-filled tail. It reports entry `0x100b0` and two segments.
 
 ## Validation and remaining work
 

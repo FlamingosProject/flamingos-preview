@@ -1,0 +1,8 @@
+[build]
+target = "aarch64-unknown-none-softfloat"
+rustc-workspace-wrapper = ".cargo/bsp-rustc"
+
+# BSP features choose the CPU through the compiler wrapper.
+# Without a BSP feature, rustc uses the generic target CPU.
+[target.aarch64-unknown-none-softfloat]
+linker = "rust-lld"

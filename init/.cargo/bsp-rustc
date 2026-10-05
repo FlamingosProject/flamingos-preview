@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Select the CPU from the BSP cfg flags Cargo passes to rustc.
+set -euo pipefail
+
+target=""
+bsp_rpi3=false
+bsp_rpi4=false
+previous=""
+for argument in "$@"; do
+    if [[ "$previous" == "--target" ]]; then
+        target="$argument"
+    fi
+    case "$argument" in
+        --target=*) target="${argument#--target=}" ;;
+        'feature="bsp_rpi3"'|'--cfg=feature="bsp_rpi3"') bsp_rpi3=true ;;
+        'feature="bsp_rpi4"'|'--cfg=feature="bsp_rpi4"') bsp_rpi4=true ;;
+    esac
+    previous="$argument"
+done
+
+if [[ "$target" == "aarch64-unknown-none-softfloat" ]]; then
+    if $bsp_rpi3 && $bsp_rpi4; then
+        echo "error: select only one BSP feature: bsp_rpi3 or bsp_rpi4" >&2
+        exit 1
+    elif $bsp_rpi3; then
+        exec "$@" -C target-cpu=cortex-a53
+    elif $bsp_rpi4; then
+        exec "$@" -C target-cpu=cortex-a72
+    fi
+fi
+
+exec "$@"
