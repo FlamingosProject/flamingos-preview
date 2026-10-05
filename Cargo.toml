@@ -2,6 +2,7 @@
 resolver="2"
 
 members = [
+        "libraries/program-image",
         "kernel",
         "kernel_symbols",
         "tools/kernel_test_runner",
