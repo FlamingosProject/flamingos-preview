@@ -1,0 +1,11 @@
+[package]
+name = "init"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = []
+bsp_rpi3 = []
+bsp_rpi4 = []
+
+[dependencies]

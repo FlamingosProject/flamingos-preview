@@ -3,7 +3,7 @@
 import pathlib
 import struct
 
-output = pathlib.Path("target/init.elf")
+output = pathlib.Path("target/loader-fixture.elf")
 output.parent.mkdir(parents=True, exist_ok=True)
 ident = b"\x7fELF\x02\x01\x01" + bytes(9)
 header_size = 64
