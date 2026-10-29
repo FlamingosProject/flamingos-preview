@@ -28,5 +28,7 @@ jobs:
                   rustup target add aarch64-unknown-none-softfloat
                   rustup component add llvm-tools
                   cargo install cargo-binutils
+            - name: Run host ELF loader tests
+              run: cargo test --locked -p program-image
             - name: Run stable kernel tests
               run: BSP=rpi3 make test

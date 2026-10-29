@@ -120,7 +120,13 @@ make test BSP=rpi3
 Host tests cover truncated input, unsupported executable formats,
 invalid ranges and alignment, segment overlap, entry validation,
 allocation limits, owned buffers, zero filling, and read-only exFAT
-loading. QEMU tests exclude the boot SD-card path because QEMU lacks
+loading. The filesystem test generates a temporary executable on
+a fresh in-memory exFAT card and removes it afterward, including
+during assertion unwinding. It verifies removal and that the
+loaded image survives both deletion and unmounting. Host loader
+tests run in CI without a prebuilt ELF or physical SD card.
+
+QEMU tests exclude the boot SD-card path because QEMU lacks
 the VideoCore mailbox service used by card initialization.
 
 Process creation must choose page-level mapping policy, compose or
