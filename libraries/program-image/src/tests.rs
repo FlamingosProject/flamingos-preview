@@ -1,4 +1,4 @@
-//! Exercise malformed ELF boundaries and loading through a real in-memory exFAT mount.
+//! Exercise malformed ELF boundaries and temporary files on an in-memory exFAT card.
 
 use super::*;
 use alloc::{rc::Rc, vec};
@@ -219,6 +219,29 @@ impl BlockDevice for MemoryDisk {
     }
 }
 
+const TEMP_EXECUTABLE: &str = "loader-test.elf";
+
+/// Remove the generated executable even if a test assertion unwinds.
+struct TemporaryExecutable<'fs, 'scratch> {
+    filesystem: &'fs mut FileSystem<MemoryDisk>,
+    scratch: &'fs mut Scratch<'scratch>,
+    read_only: &'fs Cell<bool>,
+    fail_reads: &'fs Cell<bool>,
+    cleanup_result: &'fs mut Option<Result<(), exfat_embedded::Error<()>>>,
+}
+
+impl Drop for TemporaryExecutable<'_, '_> {
+    fn drop(&mut self) {
+        self.read_only.set(false);
+        self.fail_reads.set(false);
+        let result = self
+            .filesystem
+            .remove(TEMP_EXECUTABLE, self.scratch)
+            .and_then(|()| self.filesystem.flush(self.scratch));
+        *self.cleanup_result = Some(result);
+    }
+}
+
 #[test]
 fn loads_from_exfat_read_only_and_retains_image_after_unmount() {
     let read_only = Rc::new(Cell::new(false));
@@ -232,18 +255,37 @@ fn loads_from_exfat_read_only_and_retains_image_after_unmount() {
     let mut scratch = Scratch::new(&mut buffer);
     exfat_embedded::format_exfat(&mut disk, &mut scratch).unwrap();
     let mut fs = FileSystem::mount(disk, &mut scratch).unwrap();
-    let mut file = fs.create("init.elf", &mut scratch).unwrap();
-    fs.append(&mut file, &executable(), &mut scratch).unwrap();
-    read_only.set(true);
-    let image = load(&mut fs, "init.elf", &mut scratch).unwrap();
+    let mut cleanup_result = None;
+    let image;
+    {
+        let mut file = fs.create(TEMP_EXECUTABLE, &mut scratch).unwrap();
+        let temporary = TemporaryExecutable {
+            filesystem: &mut fs,
+            scratch: &mut scratch,
+            read_only: &read_only,
+            fail_reads: &fail_reads,
+            cleanup_result: &mut cleanup_result,
+        };
+        temporary
+            .filesystem
+            .append(&mut file, &executable(), temporary.scratch)
+            .unwrap();
+        read_only.set(true);
+        image = load(temporary.filesystem, TEMP_EXECUTABLE, temporary.scratch).unwrap();
+        assert!(matches!(
+            load(temporary.filesystem, "missing.elf", temporary.scratch),
+            Err(LoadError::Filesystem(exfat_embedded::Error::PathNotFound))
+        ));
+        fail_reads.set(true);
+        assert!(matches!(
+            load(temporary.filesystem, TEMP_EXECUTABLE, temporary.scratch),
+            Err(LoadError::Filesystem(exfat_embedded::Error::Device(())))
+        ));
+    }
+    assert_eq!(cleanup_result, Some(Ok(())));
     assert!(matches!(
-        load(&mut fs, "missing.elf", &mut scratch),
-        Err(LoadError::Filesystem(_))
-    ));
-    fail_reads.set(true);
-    assert!(matches!(
-        load(&mut fs, "init.elf", &mut scratch),
-        Err(LoadError::Filesystem(exfat_embedded::Error::Device(())))
+        fs.open(TEMP_EXECUTABLE, &mut scratch),
+        Err(exfat_embedded::Error::PathNotFound)
     ));
     drop(fs);
     assert_eq!(image.entry, 0x1_0200);
