@@ -3,11 +3,72 @@
 This report records the August 19, 2026 rewrite described in
 [CLEANUP-PLAN.md](CLEANUP-PLAN.md) and subsequent curated maintenance. The original archive preserves
 the actual development history, while the numbered refs present the tutorial as one linear chain
-with one commit per chapter.
+with one commit per completed chapter through Chapter 21.
 
 The `main` rows map display-tree content tips. Two following maintenance commits add this report and
 the reviewer guide. A commit cannot contain its own object ID, so the final maintenance tip is
 identified by `git rev-parse main` rather than embedded below.
+
+## October 29, 2026 Recuration
+
+This local maintenance folds the follow-up fixes at Chapters 01–21
+into one commit per chapter. It uses the latest local branch tips,
+not the older display pins, as the canonical content snapshots.
+Chapters 22–23 retain their five and two development commits and
+are reparented onto the condensed chain.
+
+CI differences remove the inherited `master` filters, replace
+obsolete early Ruby jobs with supported boot checks where available,
+and align early build setup with later chapters.
+
+Executable checks also exposed pre-existing regressions in the
+canonical tips. Chapter 12 now qualifies its boot-test CPU helper.
+Chapters 14–21 update existing kernel-test exports and explicit
+unsafe blocks for Rust 2024, with user approval and no new unsafe
+operations. These repairs are folded into the affected chapter
+commits. No host loader test, fixture, or dependency was changed.
+
+All pre-maintenance branch tips, plus `main`, are preserved locally
+under `archive/2026-10-29-pre-recuration/*`. A verified pre-rewrite
+bundle is stored at `.git/recuration-2026-10-29/before.bundle`.
+Neither those archive refs nor the new chapter refs have been
+pushed. Remote-tracking refs remain unchanged.
+
+The following table records the recuration snapshot and supersedes
+the older tip mappings at that point. Chapters beyond 21 may
+accumulate later development commits without another squash;
+`STATUS.md` and the display pins identify their current tips.
+Outside the listed CI and kernel-test repairs, every chapter
+matches its pre-maintenance tip. Source-scope and parent-chain
+checks passed at every tip;
+post-rewrite execution checks are recorded in `STATUS.md`.
+
+| Chapter | Previous tip | New tip | Previous tree | New tree | Commits after previous chapter |
+| --- | --- | --- | --- | --- | --- |
+| `01-wait-forever` | `55fc3a2c610313586c17d2921fc6f3b149c9302e` | `5e295bd4fc3eecd1918cd79ee4491d731621cb70` | `dce5c39c7c6679afdbba6590b869aba362e37ef7` | `55691969986d36ad331a4536813f3c55cb36e78b` | 1 |
+| `02-runtime-init` | `218cf7f43b3ae3c09b4dafb634b60761384a33e7` | `c0c14f07ae18de49052f065d8c5a850750ce8bca` | `473794095ece3c4f24c993ffcfd710c9a099d034` | `205d21c995311737c24e7ba9f062d05da7f0d9c8` | 1 |
+| `03-hello-world` | `e891debb85b1eee62b9962f8b49adeef14dde121` | `e817d782ea02630ae36f5464640b5001efddd4bc` | `74f554b9ceb7c13bb46be6e3f773137b209a2d59` | `0f78fb9288c638fcedd21188bc0b10d2379eab00` | 1 |
+| `04-safe-globals` | `c32f9089234f007e7fe6f9094a05ce2a21f012b1` | `27f88c9f25f5d0ee2672d07d0de74580772858a2` | `299ad04ae343e5eed5a5aeb4da13aa95019b943a` | `4c459cfb65999b5f1382f6e86c3a46a7f3190832` | 1 |
+| `05-drivers-gpio-uart` | `4f42bdcc4b4a0be47a512c6f05e070953c6c76dd` | `5822306e9d5417ba43755764ba444e79fc8f6f95` | `6c9a0e16cbf49aa67ffba9ba233675dc440ea781` | `125a4806999d62489d78eb9980c16cde92b3779c` | 1 |
+| `06-uart-chainloader` | `b10625437ef488cbbd77fdb62060d2d13f8b17fb` | `dad31e1c425e82516a15c4838d7a9cb5bfd39065` | `1ddc29ea9812d2daec399df28c72b432e0d7bb3a` | `d845f806f92e64546f18bb8cf6122a7ede4982a4` | 1 |
+| `07-timestamps` | `0b5cec603e409e94013f7fa639979219c623f35a` | `468d5b13057cee9bc01c445feddfe35d780c0b5f` | `cba3cc5ed6611ef120ce2ac8c221f08a31464b05` | `e92168081c307655da4f86dc597ef49f81dd40c0` | 1 |
+| `08-hw-debug-jtag` | `9138fc7bb1ed16176fe9aa041fe4e02443603fe6` | `97ce1de26cac733ae0e2c80ac24a5b758f4463bb` | `e63a8f5eb56d63ce56d0270f2c7f05b74fb49ca9` | `104a24e7fef37b29ccb6095dc81577f2e86b1848` | 1 |
+| `09-privilege-level` | `1a73218a950a1fa56338eb3f916b3ac6216bb9bd` | `acf894911da5840be7469c682ae0df0d9788411a` | `e515eac5b72323b28aedcb63f0be3f7a95fff177` | `1304e972aad94cd32ff76eba3d8040d5aa22eb65` | 1 |
+| `10-virtual-mem-part1` | `94f8efce0d9a2c5d39edc33ef61c5dffaf32bc33` | `dfc28db7db96cc37b932d30706ffea9d4a0ab2a9` | `5518fc57699f55d9808b82fcc6966bbb25d8ca52` | `606ad3887333de78e8ce1c4bd4255a40c63d7251` | 1 |
+| `11-exceptions-part1` | `e18cb4b1fcc22421d8ac2caa5859bea61ddd502d` | `c1dbaf7f377621f0d642d4b9d08a87ff81826023` | `623a481f21b60cc209db90bbc90559153976d11f` | `f2f94286f329065628e680182ff8d5a82d8ccf62` | 1 |
+| `12-integrated-testing` | `dffefe6f6794535730a2dcf781c267a33466e178` | `14253a08f143e270ab3a70f9c23d67571a3e5a01` | `44fc3ff3fe65a6c61836ae825af2fcdaac50fe2d` | `3e08b7c8c1544801e8e44e18d5968dd9d9cd6403` | 1 |
+| `13-exceptions-part2` | `c9c30ecf89c530fff34f6dc5dfe95b31bac245da` | `5161571cea4a4f56cd0b2eaf277aac97ccd19796` | `7bc753f4dc853f89cfacdde7b79abab1e20adc9c` | `7644aa29815c40be849ff7233e2909d1be5b111d` | 1 |
+| `14-virtual-mem-part2` | `8fae6879f07e323f33aa3115e22495d4a451a2c3` | `2c41b28f0d0bf6a2cbb75a1e67af3a70bffc7c5d` | `ee9b424ac7ea693d400d5eeaaac17da625980636` | `3a1e7d20c6528999e99f1171313162fc2bcf7f59` | 1 |
+| `15-virtual-mem-part3` | `2ab3ad96c83fe85f53769577d4dafc02e163b0cd` | `dd92906deec2153220519703c8adf9ceb1a1e690` | `1bde78b735cdc5859c751630a10b0c984e5dcb49` | `83cb1c96b1957e87de58ba80bea17eaaadd6819d` | 1 |
+| `16-virtual-mem-part4` | `a1d56945d949e5b38ba74a52413193e4ac59c7d3` | `f472f5eee8a105f9ad6f0771749bcba6c58a95f9` | `e1b5499b94d094b6402e76dc79fdd331b585b4f8` | `51af94876ca7967a400f6a8b3589f5ea56fee7ad` | 1 |
+| `17-kernel-symbols` | `e2b2db225c0f868d2e1ef068c86985c688f6c9a3` | `72c0843cb498b9812beac25819d8d900c1c206fe` | `4a5828280856ebb5d7026821af840ce0c01edace` | `17bb54cfae9423c672a2af9f0f291589e52f6a0a` | 1 |
+| `18-kernel-heap` | `6093fe179607becefe6fa709272ff21140d432a7` | `2ca262a99f471d4bf5fc6260780194037286d58a` | `25348886b2d12383241f6ce5b79713800bde7351` | `1163be560422e6b15530e4dd83b7a675de6962b3` | 1 |
+| `19-timer-callbacks` | `87325845ee2bb105778887708a68719df3a81fa3` | `3e2da17187d4a4ddc447025b78cb7c71697a86ce` | `1c2325ef15f190e92943bcc82ee927fc99e810bb` | `7b4aa1130c9fb4bb83190f4aa5d882c0bab07c1d` | 1 |
+| `20-boot-improvements` | `547272371743c8229979bd8db6c2733e1ec5f800` | `339b272d701a13955692f5faae811fa58572dfec` | `4adba83cd4847ee4788aecb1d61d59500e7252e0` | `74d9699b80264e5e42c4faaf1df4bbecb08bd265` | 1 |
+| `21-second-core` | `e8d1825e8c102931665f08125486cced23b0d98f` | `a92711bc4df72b4e65e2b5bb71a0fff1268f5ee2` | `1760a5b30b22d58e42737c3c1ecd8748c17ce3eb` | `845062781781d5eadaba95374d111c83eda92de5` | 1 |
+| `22-sdcard` | `0bf0e9b235c146f4f20974ae1fe4ad87ec498019` | `f092179a09b3d5a940c50fedae66becd6724d08f` | `40486eca4392af73bf3c6fb6775d027a43181842` | `484966a2febce07b2a8aa83549f30166c2512154` | 5 |
+| `23-load-elf` | `f434b2b1a2dca7175de9f39da79c131fe9a50eda` | `b2ede80c75f93926f65bd10e49d2d70ffbe2b7a5` | `4b1826d01abce4e04f30804804f9b8a2524f024d` | `ce8031b7ed960dbb7d44f683462692737a367d6d` | 2 |
+
 
 ## Original Rewrite Mapping
 
@@ -39,9 +100,9 @@ The first curated version was content-identical to the frozen chapter snapshots 
 | `20-boot-improvements` | `efe935bc6338784483c965d3039766153207ff38` | `30b3d001dbcab7eae4df8710623bea016e3aed5e` | `d40cb16f20cba36bf86703d172350d0f11e3f093` | `d40cb16f20cba36bf86703d172350d0f11e3f093` | PASS |
 | `21-second-core` | `c3c508b71ea18a37a097ca68eea1de97f8c4d873` | `3633947e2471dec647168e67f8679ebdd130fcb5` | `4871ece1bf56354b73ea51780394c7d29949b94e` | `4871ece1bf56354b73ea51780394c7d29949b94e` | PASS |
 
-## Current Curated Mapping
+## August Maintenance Mapping
 
-The current version includes the stable-tooling cleanup, Raspberry Pi Zero 2 W board selection, and
+The August version included the stable-tooling cleanup, Raspberry Pi Zero 2 W board selection, and
 the isolated symbol-test target-directory fix. The scope check confirms that every tree difference
 from curated v1 is confined to formatter output, `Makefile`, `kernel_symbols.mk` from Chapter 17
 onward, and the associated README documentation.
@@ -89,9 +150,9 @@ their top-level names were removed. Their archive refs point to the exact former
 | `unwinder-wip` | `archive/2026-08-19/extra/unwinder-wip` | `1407de2b58fa030d68add8b64092c5fc3ba894d0` |
 | `work` | `archive/2026-08-19/extra/work` | `6f93ab050d8abbd5bf621bc61e58841c78e20dd4` |
 
-## Validation
+## August Validation
 
-The branch chain contains exactly 21 post-boundary commits, and every chapter tip is the direct
+At the August curated tips, the branch chain contained exactly 21 post-boundary commits, and every chapter tip is the direct
 parent of the next chapter's single commit. The original cleanup matrix recorded 228 passing checks
 and no audit-only failures. It covered change-scope checks, strict stable formatting, Raspberry Pi 3
 and 4 builds and Clippy targets, early QEMU smoke or boot tests, stable integration tests from
