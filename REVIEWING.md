@@ -51,9 +51,9 @@ The October 29 maintenance folded chapter follow-up fixes into
 the 21 curated commits and reparented Chapters 22–23. Its
 previous tips are preserved locally under
 `archive/2026-10-29-pre-recuration/`. The mapping report
-distinguishes historical and current revisions. Until
-publication, use local chapter refs for the current chain; the
-remote-tracking refs still describe the published history.
+distinguishes historical and current revisions. The user has
+published the rewritten chapter tips; local and recorded `origin`
+chapter refs now agree. `STATUS.md` records the current handoff.
 
 ## Validation Boundary
 

@@ -9,6 +9,43 @@ The `main` rows map display-tree content tips. Two following maintenance commits
 the reviewer guide. A commit cannot contain its own object ID, so the final maintenance tip is
 identified by `git rev-parse main` rather than embedded below.
 
+## Documentation Backport, October 29, 2026
+
+The documentation command is introduced with `xtask` in Chapter 15
+and propagated through Chapters 16–23. Chapters 01–14 retain their
+exact previous commits, display pins, and contents.
+
+Each changed snapshot differs only in `Makefile`, `README.md`,
+`xtask/src/main.rs`, and the MMU tracking-issue rustdoc URL.
+`cargo xtask doc [board]` selects the bare-metal kernel and optional
+browser opening without changing Cargo build defaults. `make doc`
+delegates to it and no longer cleans build artifacts.
+
+Chapters 15–21 remain single commits. The five Chapter 22 and three
+Chapter 23 development commits are reparented, retaining their
+separate changes. Chapter 23's previously uncommitted doc feature
+is now inherited from Chapter 15 rather than added a second time.
+Its pre-backport working diff is preserved in
+`.git/doc-backport/work-before.patch`.
+
+Previous tips, including `main`, are preserved locally under
+`archive/2026-10-29-pre-doc-backport/*`; the verified recovery
+bundle is `.git/doc-backport/before.bundle`. The user subsequently
+published the chapter tips. Validation and current publication
+state are recorded in `STATUS.md`.
+
+| Chapter | Previous tip | New tip | Previous tree | New tree |
+| --- | --- | --- | --- | --- |
+| `15-virtual-mem-part3` | `dd92906deec2153220519703c8adf9ceb1a1e690` | `e0bbaef2dc5add56245f20376e894d0af0425842` | `83cb1c96b1957e87de58ba80bea17eaaadd6819d` | `d213bc0d5a658b6b4938525ee39de92e4cb13b1c` |
+| `16-virtual-mem-part4` | `f472f5eee8a105f9ad6f0771749bcba6c58a95f9` | `7a48d2094872e31999388b75c0a81ac7c2c47b52` | `51af94876ca7967a400f6a8b3589f5ea56fee7ad` | `1c6b2a119d90368eefd6c8c38679896b95f693af` |
+| `17-kernel-symbols` | `72c0843cb498b9812beac25819d8d900c1c206fe` | `564447f99d51f9578c3b72c3f5d232233524ab0b` | `17bb54cfae9423c672a2af9f0f291589e52f6a0a` | `5ca73b571b7c7b4a097f8b7d5f9890708ca45f00` |
+| `18-kernel-heap` | `2ca262a99f471d4bf5fc6260780194037286d58a` | `c88dda0e39654c17c5660c3e74097cee96c76386` | `1163be560422e6b15530e4dd83b7a675de6962b3` | `5452b08f5b6d3ab48b08184222235691fabc8533` |
+| `19-timer-callbacks` | `3e2da17187d4a4ddc447025b78cb7c71697a86ce` | `0ef84f0c791dbbc9ab883021a596e78a66f04d57` | `7b4aa1130c9fb4bb83190f4aa5d882c0bab07c1d` | `d9e1ebbbee8ebb7a7e15c23a7299f129034dfd4c` |
+| `20-boot-improvements` | `339b272d701a13955692f5faae811fa58572dfec` | `b47980243aa8836c6886c7bab70fbcab345642a3` | `74d9699b80264e5e42c4faaf1df4bbecb08bd265` | `debcb47f5ea68530f71871643ab18d2a443cbbbe` |
+| `21-second-core` | `a92711bc4df72b4e65e2b5bb71a0fff1268f5ee2` | `a1baa57c2922c96be1c0542db0f3c24998c1a462` | `845062781781d5eadaba95374d111c83eda92de5` | `9f74c344c7f040cb5fd58d416ff644bf20c3659b` |
+| `22-sdcard` | `f092179a09b3d5a940c50fedae66becd6724d08f` | `815e935efa8a3772fdbe5abf5adca4ba86bf11d9` | `484966a2febce07b2a8aa83549f30166c2512154` | `7c18539641013dd3c001c76a360a698e55a5b777` |
+| `23-load-elf` | `cbfcfc67d44283adef356703f5e1cf176a1012c2` | `4e8d82ef135d0e39e6e18f8e3047a43c6d2ca28f` | `8a5277b5614480953971f524b9dc7e0a5ba4546f` | `c13b023b8bdfcca7e88e6b6271ddbf77d695a4cc` |
+
 ## October 29, 2026 Recuration
 
 This local maintenance folds the follow-up fixes at Chapters 01–21
@@ -31,8 +68,8 @@ commits. No host loader test, fixture, or dependency was changed.
 All pre-maintenance branch tips, plus `main`, are preserved locally
 under `archive/2026-10-29-pre-recuration/*`. A verified pre-rewrite
 bundle is stored at `.git/recuration-2026-10-29/before.bundle`.
-Neither those archive refs nor the new chapter refs have been
-pushed. Remote-tracking refs remain unchanged.
+The user subsequently published the rewritten chapter tips;
+`STATUS.md` records the current publication state.
 
 The following table records the recuration snapshot and supersedes
 the older tip mappings at that point. Chapters beyond 21 may

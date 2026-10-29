@@ -11,19 +11,18 @@ snapshots.
 - The repository root is the `main` display worktree. Numbered
   directories are detached submodule checkouts, pinned to chapters.
 - `work/` is the linked development worktree, currently on
-  `23-load-elf` at `cbfcfc67`.
+  `23-load-elf` at `4e8d82ef`.
 - Chapters 01–21 now contain exactly one commit per chapter after
   the preserved upstream boundary, `644474cc`. Chapter 21 ends at
-  `a92711bc`.
-- Chapter 22, `f092179a`, retains five development commits after
+  `a1baa57c`.
+- Chapter 22, `815e935e`, retains five development commits after
   Chapter 21. Chapter 23 now has three after Chapter 22. The
   branches remain one linear sequence. Chapters beyond 21 may
   accumulate commits and can be squashed later.
 - All 23 display pins and submodule checkouts match local chapter
-  tips. The display tree records the history maintenance, policy,
-  and current project handoff.
-- The rewrite is local. Remote-tracking refs still identify the
-  published history. Nothing has been pushed.
+  tips and the recorded `origin` chapter refs.
+- The user published the rewritten chapter branches. This display
+  update records their matching pins and current handoff.
 - `work/ELF-RESEARCH.md` remains an untracked research note.
 
 Develop in `work/`, rather than in a detached chapter submodule.
@@ -176,9 +175,34 @@ tests. Obsolete early Ruby jobs were removed. Chapter 23 also runs
 `cargo test --locked -p program-image`, using its generated,
 temporary in-memory exFAT executable.
 
-`make doc` still needs a kernel-only package selection so the
-bare-metal target is not applied to host tools. A known bare-URL
-rustdoc warning also remains.
+From Chapter 15, where `xtask` is introduced, use
+`cargo xtask doc [board] [cargo doc args]`. The command has been
+backported to Chapters 15–22; Chapter 23 inherits the same support.
+Chapters 01–14 are unchanged.
+
+The command defaults to Pi 3/Zero 2 W, selects `mingo` and the
+AArch64 target, includes private items, and skips dependency docs.
+Pass `--open` to open the docs. `make doc BSP=...` delegates to
+that command with `--open`; additional features and Cargo arguments
+are forwarded. Build artifacts and normal Cargo defaults are
+preserved. The bare-URL warning is fixed from Chapter 15 onward.
+
+The backport is folded into the Chapter 15 commit and propagated
+through the later snapshots. Chapters 15–21 still each have one
+commit; Chapters 22 and 23 retain five and three development
+commits. Their rewritten tips are recorded in `HISTORY-MAP.md`.
+
+All eight backported chapters passed six checks apiece: xtask
+tests, strict Clippy, workspace formatting, default docs, Zero 2 W
+docs, and Pi 4 docs through `make doc`. Rustdoc warnings were denied
+and both browser-opening paths were verified at each chapter.
+Earlier chapter refs, pins, and contents were checked unchanged;
+the snapshot diffs are limited to the four documentation files.
+
+Previous tips are preserved locally under
+`archive/2026-10-29-pre-doc-backport/*`, with a verified bundle at
+`.git/doc-backport/before.bundle`. The user subsequently published
+the chapter tips; their recorded `origin` refs match locally.
 
 ## Kernel test unsafe investigation
 
@@ -209,8 +233,8 @@ verified recovery bundle and the original handoff note are in
 checkout; the earlier independent recovery artifacts remain
 documented in `HISTORY-MAP.md`.
 
-- Never push without explicit permission. Publishing this rewrite
-  requires coordinated chapter updates before publishing pins.
+- Never push without explicit permission. For future history
+  rewrites, publish chapter updates before publishing their pins.
 - Never commit unrelated work without an explicit request.
 - Agent commit subjects start with a lowercase past-tense verb
   and include AI attribution.
