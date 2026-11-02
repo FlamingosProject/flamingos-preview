@@ -13,6 +13,7 @@ include common/operating_system.mk
 BSP ?= rpi3
 DEV_SERIAL ?= /dev/ttyUSB0
 SCIP ?= scip
+EMBEDDED_FS ?= $(if $(CHAINLOADER),0,1)
 CHAINBOOT_PAYLOAD ?= kernel8.img
 OPENOCD ?= openocd
 GDB ?= gdb-multiarch
@@ -68,7 +69,7 @@ KERNEL_MANIFEST      = kernel/Cargo.toml
 CHAINLOADER_BIN      = chainloader8.img
 KERNEL_BIN           = $(if $(CHAINLOADER),$(CHAINLOADER_BIN),$(NORMAL_KERNEL_BIN))
 BUILD_MODE           = $(if $(CHAINLOADER),chainloader,kernel)
-LAST_BUILD_CONFIG    = target/$(BSP).$(BUILD_MODE).$(DEBUG_PRINTS).build_config
+LAST_BUILD_CONFIG    = target/$(BSP).$(BUILD_MODE).$(DEBUG_PRINTS).fs$(EMBEDDED_FS).build_config
 
 KERNEL_ELF_RAW = target/$(TARGET)/release/kernel
 JTAG_TARGET_DIR = target/jtag/$(BSP)
@@ -144,6 +145,14 @@ endif
 ifdef CHAINLOADER
     KERNEL_FEATURES := $(KERNEL_FEATURES),chainloader
 endif
+ifeq ($(EMBEDDED_FS),1)
+ifdef CHAINLOADER
+$(error EMBEDDED_FS belongs to the kernel, not the chainloader)
+endif
+    KERNEL_FEATURES := $(KERNEL_FEATURES),embedded-fs
+    TEST_KERNEL_FEATURES := $(TEST_KERNEL_FEATURES),embedded-fs
+EMBEDDED_IMAGE = target/bootfs/$(BSP_FAMILY)/init.sparse
+endif
 FEATURES      = --features $(KERNEL_FEATURES)
 TEST_FEATURES = --no-default-features --features $(TEST_KERNEL_FEATURES)
 COMPILER_ARGS = --target=$(TARGET) \
@@ -160,7 +169,8 @@ TEST_CMD = cargo test                            \
     --release                                    \
     --manifest-path $(KERNEL_MANIFEST)           \
     $(TEST_SELECTION)
-DOC_CMD     = cargo xtask doc $(BSP) $(FEATURES)
+XTASK_SOURCE = $(if $(filter 0,$(EMBEDDED_FS)),--sd-card,)
+DOC_CMD     = cargo xtask doc $(BSP) $(XTASK_SOURCE) $(FEATURES)
 HOST_CLIPPY_PACKAGES = kernel_test_runner translation_table_tool kernel_symbols_tool xtask
 CLIPPY_KERNEL_CMD = cargo clippy $(COMPILER_ARGS) --manifest-path $(KERNEL_MANIFEST)
 CLIPPY_HOST_CMD = cargo clippy --release --target=$(HOST_TARGET) \
@@ -181,6 +191,15 @@ EXEC_KERNEL_SYMBOLS_TOOL = target/release/kernel-elf-symbol
 .PHONY: all chainboot jtagboot openocd gdb gdb-opt0 doc qemu test test_boot test_integration clippy clippy_kernel clippy_host clean readelf objdump nm check FORCE
 
 all: $(KERNEL_BIN)
+
+ifeq ($(EMBEDDED_FS),1)
+$(EMBEDDED_IMAGE): FORCE
+	@cargo xtask boot-image $(BSP)
+$(KERNEL_ELF_RAW): $(EMBEDDED_IMAGE)
+clippy_kernel: $(EMBEDDED_IMAGE)
+test_integration: $(EMBEDDED_IMAGE)
+doc: $(EMBEDDED_IMAGE)
+endif
 
 ##------------------------------------------------------------------------------
 ## Send a payload to a chainloader already running on the target
@@ -323,7 +342,7 @@ else # QEMU is supported.
 test_boot:
 	$(call color_header, "Building QEMU boot test")
 	@mkdir -p $(TEST_BUILD_DIR)
-	@CARGO_TARGET_DIR=$(TEST_BUILD_DIR) cargo xtask build $(BSP) --features=test_build
+	@CARGO_TARGET_DIR=$(TEST_BUILD_DIR) cargo xtask build $(BSP) $(XTASK_SOURCE) --features=$(TEST_KERNEL_FEATURES)
 	@mv $(KERNEL_BIN) $(TEST_KERNEL_BIN)
 	$(call color_header, "Running QEMU boot test")
 	$(EXEC_QEMU) $(QEMU_TEST_ARGS) -kernel $(TEST_KERNEL_BIN)

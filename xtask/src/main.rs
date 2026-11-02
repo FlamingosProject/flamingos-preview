@@ -9,8 +9,14 @@ fn kernel_cargo_args(args: &[String], bsp: &str) -> (String, Vec<String>) {
     let mut features = vec![bsp.to_owned()];
     let mut forwarded = Vec::new();
     let mut i = 0;
+    let mut sd_card = false;
 
     while i < args.len() {
+        if args[i] == "--sd-card" {
+            sd_card = true;
+            i += 1;
+            continue;
+        }
         let feature_value = if args[i] == "--features" {
             i += 1;
             let value = args.get(i).unwrap_or_else(|| {
@@ -38,6 +44,17 @@ fn kernel_cargo_args(args: &[String], bsp: &str) -> (String, Vec<String>) {
         i += 1;
     }
 
+    if sd_card && features.iter().any(|feature| feature == "embedded-fs") {
+        eprintln!("--sd-card cannot be combined with embedded-fs");
+        exit(1);
+    }
+    if !sd_card
+        && !features
+            .iter()
+            .any(|feature| feature == "chainloader" || feature == "embedded-fs")
+    {
+        features.push("embedded-fs".to_owned());
+    }
     (format!("--features={}", features.join(",")), forwarded)
 }
 
@@ -62,17 +79,54 @@ fn bsp_family(board: &str) -> &'static str {
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    match args.get(1).map(|s| s.as_str()) {
-        Some("build") => {
-            build(args);
-        }
+    match args.get(1).map(String::as_str) {
+        Some("build") => build(args),
         Some("doc") => doc(&args[2..]),
+        Some("boot-image") => build_boot_image(args.get(2).map(String::as_str).unwrap_or("rpi3")),
         _ => {
-            println!("usage: cargo xtask build <board> [cargo args]");
-            println!("       cargo xtask doc [board] [cargo doc args]");
+            eprintln!("usage: cargo xtask build <board> [--sd-card] [cargo args]");
+            eprintln!("       cargo xtask doc [board] [--sd-card] [cargo doc args]");
+            eprintln!("       cargo xtask boot-image [board]");
             exit(1);
         }
     }
+}
+
+fn build_boot_image(board: &str) {
+    let family = bsp_family(board);
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap();
+    let target = root.join("target/init-embedded").join(family);
+    run(
+        Command::new("cargo")
+            .current_dir(root.join("init"))
+            .env("CARGO_TARGET_DIR", &target)
+            .args([
+                "build",
+                "--locked",
+                "--release",
+                "--features",
+                &format!("bsp_{family}"),
+            ]),
+        "ERROR: Failed to build init for the boot filesystem",
+    );
+    let executable = fs::read(target.join("aarch64-unknown-none-softfloat/release/init"))
+        .expect("ERROR: Failed to read init ELF");
+    let image = boot_image::build(&executable).expect("ERROR: Failed to build sparse filesystem");
+    let logical_size = boot_image::ReadOnlyDisk::decode(&image).unwrap().byte_len();
+    let output = root.join("target/bootfs").join(family).join("init.sparse");
+    fs::create_dir_all(output.parent().unwrap())
+        .expect("ERROR: Failed to create boot-image directory");
+    if fs::read(&output).ok().as_deref() != Some(image.as_slice()) {
+        fs::write(&output, &image).expect("ERROR: Failed to write boot image");
+    }
+    println!(
+        "Boot filesystem: {} logical bytes, {} payload bytes -> {}",
+        logical_size,
+        image.len(),
+        output.display()
+    );
 }
 
 fn doc(args: &[String]) {
@@ -82,6 +136,14 @@ fn doc(args: &[String]) {
     };
     let bsp = format!("bsp_{}", bsp_family(board));
     let (features, cargo_args) = kernel_cargo_args(args, &bsp);
+
+    if features
+        .trim_start_matches("--features=")
+        .split(',')
+        .any(|feature| feature == "embedded-fs")
+    {
+        build_boot_image(board);
+    }
 
     run(
         Command::new("cargo")
@@ -113,6 +175,17 @@ fn build(args: Vec<String>) {
         .trim_start_matches("--features=")
         .split(',')
         .any(|feature| feature == "chainloader");
+    if features
+        .trim_start_matches("--features=")
+        .split(',')
+        .any(|feature| feature == "embedded-fs")
+    {
+        if chainloader {
+            eprintln!("embedded-fs is a kernel option, not a chainloader option");
+            exit(1);
+        }
+        build_boot_image(&args[2]);
+    }
     let pid = process::id();
     let copy_path = format!("target/xtask-kernel.{pid}");
     let symbols_path = format!("{copy_path}.symbols");
@@ -216,6 +289,20 @@ fn build(args: Vec<String>) {
             .expect("could not remove generated kernel symbols");
     }
 
+    // Cargo shares the raw binary path between kernel variants; Make's cached
+    // configuration cannot describe a variant just selected by xtask.
+    for entry in fs::read_dir("target")
+        .expect("could not inspect Make build markers")
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        if path
+            .extension()
+            .is_some_and(|extension| extension == "build_config")
+        {
+            fs::remove_file(path).expect("could not invalidate Make build marker");
+        }
+    }
     println!("--- build complete, kernel in {output}");
 }
 
@@ -234,7 +321,27 @@ mod tests {
 
         let (features, forwarded) = kernel_cargo_args(&args, "bsp_rpi3");
 
-        assert_eq!(features, "--features=bsp_rpi3,test_build,boot_trace,extra");
+        assert_eq!(
+            features,
+            "--features=bsp_rpi3,test_build,boot_trace,extra,embedded-fs"
+        );
         assert_eq!(forwarded, ["--locked"]);
+    }
+
+    #[test]
+    fn defaults_to_embedded_but_sd_card_is_an_explicit_override() {
+        let (features, forwarded) = kernel_cargo_args(&[], "bsp_rpi3");
+        assert_eq!(features, "--features=bsp_rpi3,embedded-fs");
+        assert!(forwarded.is_empty());
+        let (features, forwarded) =
+            kernel_cargo_args(&["--sd-card".to_owned(), "--locked".to_owned()], "bsp_rpi4");
+        assert_eq!(features, "--features=bsp_rpi4");
+        assert_eq!(forwarded, ["--locked"]);
+    }
+
+    #[test]
+    fn chainloader_keeps_its_storage_independent_bootstrap() {
+        let (features, _) = kernel_cargo_args(&["--features=chainloader".to_owned()], "bsp_rpi3");
+        assert_eq!(features, "--features=bsp_rpi3,chainloader");
     }
 }

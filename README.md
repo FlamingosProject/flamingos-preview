@@ -11,6 +11,51 @@ needed to place code and data in a future process address space;
 this chapter does not yet create page tables, a stack, a saved CPU
 context, or a runnable process.
 
+## Embedded development filesystem
+
+From this chapter onward, normal xtask and Make builds embed a
+read-only filesystem containing the matching init executable:
+
+```sh
+cargo xtask build rpiz2
+make chainboot BSP=rpiz2
+```
+
+Each command builds init as needed, generates an MBR/exFAT image,
+and embeds it in `kernel8.img`. There is no separate SD-card copy.
+The kernel mounts that image and loads `init.elf` through the
+same exFAT and ELF interfaces as the physical-card path. It logs
+the entry and segments but does not execute the program yet.
+
+Chapter 22 remains an optional SD-card hardware side-quest. To
+use that path, build with `cargo xtask build rpiz2 --sd-card` or
+set `EMBEDDED_FS=0` in Make. Boot identifies the selected source;
+there is no fallback that could silently load a stale executable.
+Chainloader builds automatically exclude embedded filesystems.
+
+The image is sparse, without a compression codec: sorted records
+hold a sector number and 512 literal bytes. All-zero sectors are
+omitted. The read-only adapter returns zeros for absent sectors,
+using binary search over the records without expanding the disk
+into RAM. It rejects malformed lengths, duplicate/out-of-order
+records, and out-of-range sectors. No new unsafe code is needed.
+
+The host builder starts at 512 KiB and grows as needed, up to
+64 MiB logically. Empty capacity does not cost upload bytes or a
+full-size RAM allocation. Occupied sectors remain literal. The
+current looping init image occupies about 146 KiB in the payload.
+
+`cargo xtask boot-image rpiz2` prepares only the image, under
+`target/bootfs/rpi3`. Its executable is built separately under
+`target/init-embedded/rpi3`. Pi 4 uses the corresponding rpi4
+paths. Direct Cargo builds with `embedded-fs` require this
+preparation first; ordinary xtask/Make builds do it automatically.
+
+The QEMU boot test mounts and loads the embedded image, while
+retaining Chapter 23's load-only behavior. Host sparse-image tests
+also cover deterministic formatting, read-only access, and zero
+capacity. The existing SD test remains available for hardware.
+
 ## Implementation
 
 `libraries/program-image` is a `no_std` library using `alloc` and
@@ -62,7 +107,7 @@ buffer is released after loading; peak storage includes both the
 file and the segment buffers. These limits leave room in the
 kernel's 16 MiB heap for its other users.
 
-## Try it
+## Optional SD-card workflow
 
 Build the chapter's standalone Rust `init` program:
 
@@ -86,8 +131,8 @@ the root of the card's existing exFAT partition as `init.elf`, then
 build and boot the normal kernel:
 
 ```sh
-cargo xtask build rpiz2
-make chainboot BSP=rpiz2
+cargo xtask build rpiz2 --sd-card
+make chainboot BSP=rpiz2 EMBEDDED_FS=0
 ```
 
 Boot prints the executable's entry address and loaded segments.
@@ -112,6 +157,7 @@ and a zero-filled tail. It reports entry `0x100b0` and two segments.
 
 ```sh
 cargo test -p program-image
+cargo test -p boot-image --all-features
 make clippy BSP=rpi3
 make clippy BSP=rpi4
 make test BSP=rpi3
@@ -126,7 +172,8 @@ during assertion unwinding. It verifies removal and that the
 loaded image survives both deletion and unmounting. Host loader
 tests run in CI without a prebuilt ELF or physical SD card.
 
-QEMU tests exclude the boot SD-card path because QEMU lacks
+QEMU tests load the embedded filesystem by default and exclude
+the optional SD-card path because QEMU lacks
 the VideoCore mailbox service used by card initialization.
 
 Process creation must choose page-level mapping policy, compose or

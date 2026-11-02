@@ -12,6 +12,7 @@ debug_prints = []
 bsp_rpi3 = ["tock-registers"]
 bsp_rpi4 = ["tock-registers"]
 test_build = ["qemu-exit"]
+embedded-fs = ["dep:boot-image"]
 boot_trace = []
 chainloader = []
 
@@ -25,6 +26,7 @@ debug-symbol-types = { path = "../libraries/debug-symbol-types" }
 linked_list_allocator = { version = "0.10.x", default-features = false, features = ["const_mut_refs"] }
 exfat-embedded = "0.1.3"
 program-image = { path = "../libraries/program-image" }
+boot-image = { path = "../libraries/boot-image", optional = true }
 
 # Optional dependencies
 tock-registers = { version = "0.9", default-features = false, features = [

@@ -44,6 +44,22 @@ fn export_git_revision() {
 fn main() {
     export_git_revision();
 
+    if env::var_os("CARGO_FEATURE_EMBEDDED_FS").is_some() {
+        let family = if env::var_os("CARGO_FEATURE_BSP_RPI4").is_some() {
+            "rpi4"
+        } else {
+            "rpi3"
+        };
+        let image = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("target/bootfs")
+            .join(family)
+            .join("init.sparse");
+        println!("cargo:rustc-env=FLAMINGOS_EMBEDDED_FS={}", image.display());
+        println!("cargo:rerun-if-changed={}", image.display());
+    }
+
     let ld_script_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/bsp/raspberrypi");
     println!(
         "cargo:rustc-env=LD_SCRIPT_PATH={}",

@@ -29,6 +29,6 @@ jobs:
                   rustup component add llvm-tools
                   cargo install cargo-binutils
             - name: Run host ELF loader tests
-              run: cargo test --locked -p program-image
+              run: cargo test --locked -p program-image -p boot-image --all-features
             - name: Run stable kernel tests
               run: BSP=rpi3 make test

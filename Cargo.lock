@@ -77,6 +77,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "boot-image"
+version = "1.0.0"
+dependencies = [
+ "exfat-embedded",
+]
+
+[[package]]
 name = "clap"
 version = "4.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -232,6 +239,7 @@ name = "mingo"
 version = "1.0.0"
 dependencies = [
  "aarch64-cpu",
+ "boot-image",
  "debug-symbol-types",
  "exfat-embedded",
  "fdt",
@@ -498,3 +506,6 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 [[package]]
 name = "xtask"
 version = "1.0.0"
+dependencies = [
+ "boot-image",
+]

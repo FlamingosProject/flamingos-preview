@@ -2,3 +2,6 @@
 name = "xtask"
 version = "1.0.0"
 edition = "2024"
+
+[dependencies]
+boot-image = { path = "../libraries/boot-image", features = ["build"] }
