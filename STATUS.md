@@ -1,6 +1,6 @@
 # Flamingos project status
 
-Updated 2026-10-29. This is the project-wide handoff, maintained
+Updated 2026-11-02. This is the project-wide handoff, maintained
 in the top-level display tree on `main`. Update it when the
 active chapter, validation evidence, or next task changes. Do not
 copy it into each chapter branch: chapter READMEs document their
@@ -10,17 +10,19 @@ snapshots.
 
 - The repository root is the `main` display worktree. Numbered
   directories are detached submodule checkouts, pinned to chapters.
-- `work/` is the linked development worktree, currently on
-  `23-load-elf` at `4e8d82ef`.
+- `work/` is the linked development worktree, on `24-run-init`
+  based on `e5a37b6e`, with uncommitted process-creation work.
+  Chapter 24 is not yet registered in the display tree.
 - Chapters 01–21 now contain exactly one commit per chapter after
   the preserved upstream boundary, `644474cc`. Chapter 21 ends at
   `a1baa57c`.
 - Chapter 22, `815e935e`, retains five development commits after
-  Chapter 21. Chapter 23 now has three after Chapter 22. The
+  Chapter 21. Chapter 23 now has four after Chapter 22. The
   branches remain one linear sequence. Chapters beyond 21 may
   accumulate commits and can be squashed later.
-- All 23 display pins and submodule checkouts match local chapter
-  tips and the recorded `origin` chapter refs.
+- All 23 display pins and checkouts match local chapter tips.
+  Chapter 23 is now `e5a37b6e`, one unpushed backport commit beyond
+  recorded `origin/23-load-elf`; Chapters 01–22 are unchanged.
 - The user published the rewritten chapter branches. This display
   update records their matching pins and current handoff.
 - `work/ELF-RESEARCH.md` remains an untracked research note.
@@ -49,7 +51,9 @@ exfat_embedded::FileSystem
 ```
 
 Chapter 23 prepares owned program images from root-level
-`init.elf`. The safe, `no_std` `program-image` library accepts
+`init.elf`, using a sparse embedded exFAT image by default.
+Chapter 22 remains an optional SD-card hardware side-quest.
+The safe, `no_std` `program-image` library accepts
 static little-endian AArch64 ELF64 `ET_EXEC` files. It validates
 loadable ranges, alignment, permissions, entry instructions, and
 allocation limits, then copies segment data and zero-fills BSS.
@@ -63,6 +67,30 @@ continues. The standalone Rust `init` contains a looping entry.
 **Programs are loaded, not executed.** There are no process page
 tables, process stack, initial CPU context, or runnable process.
 See [Chapter 23](23-load-elf/README.md).
+
+## Embedded filesystem backport
+
+Chapter 23 commit `e5a37b6e` adds a sparse, read-only embedded
+filesystem containing its original looping init. It remains a
+load-only chapter: no process mappings, context transfer, or LED
+execution were backported.
+
+`cargo xtask build rpiz2` and plain Make now package init by
+default. Select the optional SD path with xtask's `--sd-card` or
+Make's `EMBEDDED_FS=0`. Chainloader builds automatically exclude
+embedded filesystems. The sparse representation omits zero
+sectors and is read without expanding a disk into kernel RAM.
+
+The backport passed both BSP builds and Clippy, host loader and
+sparse-image tests, xtask defaults tests, QEMU boot/integration,
+and kernel docs. QEMU loads the embedded init and reports its
+entry/segments without executing it. A chainloader-to-Make cache
+invalidation repair was also tested in Chapters 23 and 24.
+
+Chapter 24 was advanced to this base without changing its working
+files. Sources, a patch, old refs, and backport validation logs are
+preserved locally in `.git/embedded-backport-2026-11-02/`.
+Chapter 24 process changes remain uncommitted. Nothing was pushed.
 
 ## Next task
 

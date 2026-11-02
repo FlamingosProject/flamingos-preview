@@ -56,6 +56,12 @@ chapter, recent validation, and the next task. It is maintained
 in the display tree as milestones change. Chapter READMEs
 describe the behavior of their individual snapshots.
 
+Chapter 22's SD-card support remains an optional hardware
+side-quest. Starting with Chapter 23, normal builds package init
+in a sparse, read-only embedded exFAT image, so development does
+not require copying executables onto a card. SD-card loading
+remains available explicitly.
+
 ## License
 
 This project is distributed under either the Apache License,
