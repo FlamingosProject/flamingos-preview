@@ -11,6 +11,38 @@ use exfat_embedded::BlockDevice;
 
 const SECTOR_SIZE: usize = 512;
 
+/// Preparing a read-only embedded boot filesystem or loading init failed.
+#[cfg(feature = "embedded-fs")]
+#[derive(Debug)]
+pub enum EmbeddedImageError {
+    /// The sparse sector table is malformed.
+    Image(boot_image::ImageError),
+    /// exFAT partition discovery or mounting failed.
+    Filesystem(exfat_embedded::Error<boot_image::DiskError>),
+    /// Opening, reading, or preparing the executable failed.
+    Program(program_image::LoadError<boot_image::DiskError>),
+}
+
+/// Mount a sparse image without expanding it, then use the ordinary ELF loader.
+///
+/// The returned program owns its data, so the mounted read-only device can be
+/// dropped immediately. Errors are explicit; this never falls back to SD media.
+#[cfg(feature = "embedded-fs")]
+pub fn load_embedded_image(blob: &[u8]) -> Result<program_image::ProgramImage, EmbeddedImageError> {
+    let device = boot_image::ReadOnlyDisk::decode(blob).map_err(EmbeddedImageError::Image)?;
+    crate::info!(
+        "Embedded filesystem: {} logical bytes, {} payload bytes",
+        device.byte_len(),
+        blob.len()
+    );
+    let mut buffer = [0; SECTOR_SIZE];
+    let mut scratch = exfat_embedded::Scratch::new(&mut buffer);
+    let mut filesystem = exfat_embedded::FileSystem::mount(device, &mut scratch)
+        .map_err(EmbeddedImageError::Filesystem)?;
+    program_image::load(&mut filesystem, "init.elf", &mut scratch)
+        .map_err(EmbeddedImageError::Program)
+}
+
 /// Errors translating filesystem block requests to the SD-card controller.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SdCardBlockDeviceError {

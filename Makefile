@@ -13,6 +13,7 @@ include common/operating_system.mk
 BSP ?= rpi3
 DEV_SERIAL ?= /dev/ttyUSB0
 SCIP ?= scip
+EMBEDDED_FS ?= $(if $(CHAINLOADER),0,1)
 CHAINBOOT_PAYLOAD ?= $(NORMAL_KERNEL_ELF)
 OPENOCD ?= openocd
 GDB ?= gdb-multiarch
@@ -99,6 +100,14 @@ endif
 ifdef CHAINLOADER
     KERNEL_FEATURES := $(KERNEL_FEATURES),chainloader
 endif
+ifeq ($(EMBEDDED_FS),1)
+ifdef CHAINLOADER
+$(error EMBEDDED_FS belongs to the kernel, not the chainloader)
+endif
+    KERNEL_FEATURES := $(KERNEL_FEATURES),embedded-fs
+    TEST_KERNEL_FEATURES := $(TEST_KERNEL_FEATURES),embedded-fs
+EMBEDDED_IMAGE = target/bootfs/$(BSP_FAMILY)/init.sparse
+endif
 FEATURES      = --features $(KERNEL_FEATURES)
 TEST_FEATURES = --no-default-features --features $(TEST_KERNEL_FEATURES)
 COMPILER_ARGS = --target=$(TARGET) \
@@ -112,7 +121,8 @@ TEST_CMD = cargo test                            \
     --release                                    \
     --manifest-path $(KERNEL_MANIFEST)           \
     $(TEST_SELECTION)
-DOC_CMD     = cargo xtask doc $(BSP) $(FEATURES)
+XTASK_SOURCE = $(if $(filter 0,$(EMBEDDED_FS)),--sd-card,)
+DOC_CMD     = cargo xtask doc $(BSP) $(XTASK_SOURCE) $(FEATURES)
 HOST_CLIPPY_PACKAGES = kernel_test_runner xtask
 CLIPPY_KERNEL_CMD = cargo clippy $(COMPILER_ARGS) --manifest-path $(KERNEL_MANIFEST)
 CLIPPY_HOST_CMD = cargo clippy --release --target=$(HOST_TARGET) \
@@ -127,6 +137,14 @@ EXEC_QEMU              = $(QEMU_BINARY) -M $(QEMU_MACHINE_TYPE)
 .PHONY: all chainboot jtagboot openocd gdb gdb-opt0 doc qemu test test_boot test_integration clippy clippy_kernel clippy_host clean readelf objdump nm check FORCE
 
 all: $(KERNEL_BIN)
+
+ifeq ($(EMBEDDED_FS),1)
+$(EMBEDDED_IMAGE): FORCE
+	@cargo xtask boot-image $(BSP)
+clippy_kernel: $(EMBEDDED_IMAGE)
+test_integration: $(EMBEDDED_IMAGE)
+doc: $(EMBEDDED_IMAGE)
+endif
 
 ifndef CHAINLOADER
 $(NORMAL_KERNEL_ELF): $(NORMAL_KERNEL_BIN)
@@ -182,7 +200,7 @@ gdb-opt0:
 ##------------------------------------------------------------------------------
 $(KERNEL_BIN): FORCE
 	$(call color_header, "Building boot artifacts - $(BSP)")
-	@$(XTASK_RUSTFLAGS) cargo xtask build $(BSP) $(FEATURES)
+	@$(XTASK_RUSTFLAGS) cargo xtask build $(BSP) $(XTASK_SOURCE) $(FEATURES)
 	$(call color_progress_prefix, "Name")
 	@echo $(KERNEL_BIN)
 	$(call color_progress_prefix, "Size")
@@ -223,7 +241,7 @@ else # QEMU is supported.
 test_boot:
 	$(call color_header, "Building QEMU boot test")
 	@$(XTASK_RUSTFLAGS) CARGO_TARGET_DIR=$(TEST_BUILD_DIR) \
-		cargo xtask build $(BSP) --out-dir $(TEST_BUILD_DIR) --features=$(TEST_KERNEL_FEATURES)
+		cargo xtask build $(BSP) --out-dir $(TEST_BUILD_DIR) $(XTASK_SOURCE) --features=$(TEST_KERNEL_FEATURES)
 	$(call color_header, "Running QEMU boot test")
 	$(EXEC_QEMU) $(QEMU_TEST_ARGS) -kernel $(TEST_KERNEL_BIN)
 endif

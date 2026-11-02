@@ -12,6 +12,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "boot-image"
+version = "1.0.0"
+dependencies = [
+ "exfat-embedded",
+]
+
+[[package]]
 name = "elf"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -54,6 +61,7 @@ name = "mingo"
 version = "1.0.0"
 dependencies = [
  "aarch64-cpu",
+ "boot-image",
  "exfat-embedded",
  "fdt",
  "kernel-image",
@@ -104,5 +112,6 @@ dependencies = [
 name = "xtask"
 version = "1.0.0"
 dependencies = [
+ "boot-image",
  "kernel-image",
 ]

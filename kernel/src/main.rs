@@ -13,10 +13,10 @@
 
 extern crate alloc;
 
-#[cfg(not(feature = "test_build"))]
+#[cfg(all(not(feature = "test_build"), not(feature = "embedded-fs")))]
 use exfat_embedded::{FileSystem, Scratch};
 use libkernel::{bsp, cpu, driver, exception, info, memory, state, time};
-#[cfg(not(feature = "test_build"))]
+#[cfg(any(not(feature = "test_build"), feature = "embedded-fs"))]
 use libkernel::{program, storage};
 
 /// Early init code.
@@ -110,7 +110,7 @@ fn kernel_main() -> ! {
     info!("Kernel heap:");
     memory::heap_alloc::kernel_heap_allocator().print_usage();
 
-    #[cfg(not(feature = "test_build"))]
+    #[cfg(any(not(feature = "test_build"), feature = "embedded-fs"))]
     // Keep the owned image alive for the eventual process-creation step.
     let _program_image = load_boot_program();
 
@@ -132,8 +132,9 @@ fn kernel_main() -> ! {
 ///
 /// The returned image owns its segment data, allowing the local mount to be
 /// dropped. Test builds skip this path because QEMU lacks the firmware mailbox.
-#[cfg(not(feature = "test_build"))]
+#[cfg(all(not(feature = "test_build"), not(feature = "embedded-fs")))]
 fn load_boot_program() -> Option<program::ProgramImage> {
+    info!("Init source: SD-card exFAT filesystem");
     let sd = bsp::driver::emmc();
     match sd.initialize(bsp::driver::mailbox()) {
         Ok(()) => {}
@@ -181,6 +182,27 @@ fn load_boot_program() -> Option<program::ProgramImage> {
         }
         Err(error) => {
             libkernel::warn!("ELF loader: init.elf failed: {:?}", error);
+            None
+        }
+    }
+}
+
+/// Load the selected embedded filesystem without SD fallback or execution.
+#[cfg(feature = "embedded-fs")]
+fn load_boot_program() -> Option<program::ProgramImage> {
+    info!("Init source: embedded sparse exFAT filesystem");
+    let blob = include_bytes!(env!("FLAMINGOS_EMBEDDED_FS"));
+    match storage::load_embedded_image(blob) {
+        Ok(image) => {
+            info!(
+                "ELF loader: init.elf entry {:#x}, {} segments",
+                image.entry,
+                image.segments.len()
+            );
+            Some(image)
+        }
+        Err(error) => {
+            libkernel::warn!("Embedded init load failed: {:?}", error);
             None
         }
     }

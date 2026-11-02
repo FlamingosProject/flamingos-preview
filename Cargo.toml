@@ -4,6 +4,7 @@ exclude = ["init"]
 
 members = [
         "libraries/kernel-image",
+        "libraries/boot-image",
         "libraries/program-image",
         "kernel",
         "tools/kernel_test_runner",
