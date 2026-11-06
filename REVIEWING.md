@@ -84,10 +84,10 @@ run on `main`.
 
 - Chapters 01–02 build both hardware families.
 - Chapters 03–11 also run their stable QEMU boot test.
-- Chapters 12–23 run stable QEMU boot and integration tests.
+- Chapters 12–24 run stable QEMU boot and integration tests.
 
 The inherited Ruby sanity/unit/extra-test jobs were removed from
 early chapters, and their build workflows use stable Rust setup.
-Chapter 23 also runs host ELF-loader tests. They generate and
+Chapters 23–24 also run host ELF-loader tests. They generate and
 remove their executable on an in-memory exFAT card, without
 requiring a prebuilt ELF or physical media.

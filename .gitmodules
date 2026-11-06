@@ -90,3 +90,7 @@
 	path = 23-load-elf
 	url = https://github.com/FlamingosProject/flamingos-preview.git
 	branch = 23-load-elf
+[submodule "24-run-init"]
+	path = 24-run-init
+	url = https://github.com/FlamingosProject/flamingos-preview.git
+	branch = 24-run-init

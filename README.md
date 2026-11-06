@@ -21,8 +21,8 @@ the low-level mechanics visible. Each numbered directory is a Git
 submodule pinned to its chapter branch. Chapters 01–21 form a
 curated chain with exactly one commit per chapter. Chapters beyond
 21 may have multiple commits as new work develops; they can be
-squashed later. Chapters 22–23 currently extend the chain with
-storage and executable loading.
+squashed later. Chapters 22–24 extend the chain with storage, executable
+loading, and privileged init execution.
 
 Clone the complete display tree with:
 
