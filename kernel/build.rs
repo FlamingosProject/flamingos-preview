@@ -44,7 +44,28 @@ fn export_git_revision() {
 fn main() {
     export_git_revision();
 
-    if env::var_os("CARGO_FEATURE_EMBEDDED_FS").is_some() {
+    if env::var_os("CARGO_FEATURE_TEST_BUILD").is_some() {
+        let family = if env::var_os("CARGO_FEATURE_BSP_RPI4").is_some() {
+            "rpi4"
+        } else {
+            "rpi3"
+        };
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("target/bootfs-qemu")
+            .join(family)
+            .join("init.sparse");
+        println!(
+            "cargo:rustc-env=FLAMINGOS_TEST_BOOT_FS={}",
+            fixture.display()
+        );
+        println!("cargo:rerun-if-changed={}", fixture.display());
+    }
+
+    if env::var_os("CARGO_FEATURE_EMBEDDED_FS").is_some()
+        && env::var_os("CARGO_FEATURE_TEST_BUILD").is_none()
+    {
         let family = if env::var_os("CARGO_FEATURE_BSP_RPI4").is_some() {
             "rpi4"
         } else {

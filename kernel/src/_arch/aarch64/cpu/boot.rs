@@ -11,6 +11,7 @@
 //!
 //! crate::cpu::boot::arch_boot
 
+pub mod led;
 mod led_debug;
 
 #[cfg(not(feature = "chainloader"))]
@@ -146,8 +147,14 @@ pub static mut BOOT_PARK: [AtomicBool; MAX_CORES] = [const { AtomicBool::new(fal
 ///
 /// - Must be called exactly once by the boot core after virtual memory is enabled.
 /// - The firmware-provided pointer must identify a valid flattened device tree.
+///
+/// # Need
+///
+/// Early boot must read firmware-owned memory and populate once-only boot state.
 #[cfg(not(feature = "chainloader"))]
 pub unsafe fn process_device_tree() {
+    // Safety: the boot contract supplies the preserved FDT and a single active core.
+    // Need: access firmware memory and publish the existing raw boot-state globals.
     unsafe {
         let device_tree = TPIDR_EL1.get() as *const u8;
         TPIDR_EL1.set(0);
@@ -170,6 +177,9 @@ pub unsafe fn process_device_tree() {
         }
 
         let fdt = Fdt::from_ptr(device_tree).unwrap();
+        for compatible in fdt.root().compatible().all() {
+            crate::bsp::record_act_led_board(compatible);
+        }
         let num_cores = fdt.cpus().count();
         if num_cores > MAX_CORES {
             panic!();

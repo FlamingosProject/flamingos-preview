@@ -79,43 +79,57 @@ fn bsp_family(board: &str) -> &'static str {
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    match args.get(1).map(String::as_str) {
-        Some("build") => build(args),
+    match args.get(1).map(|s| s.as_str()) {
+        Some("build") => {
+            build(args);
+        }
         Some("doc") => doc(&args[2..]),
-        Some("boot-image") => build_boot_image(args.get(2).map(String::as_str).unwrap_or("rpi3")),
+        Some("test-init") => build_test_init(args.get(2).map(String::as_str).unwrap_or("rpi3")),
+        Some("boot-image") => {
+            build_boot_image(args.get(2).map(String::as_str).unwrap_or("rpi3"), false)
+        }
         _ => {
-            eprintln!("usage: cargo xtask build <board> [--sd-card] [cargo args]");
-            eprintln!("       cargo xtask doc [board] [--sd-card] [cargo doc args]");
-            eprintln!("       cargo xtask boot-image [board]");
+            println!("usage: cargo xtask build <board> [--sd-card] [cargo args]");
+            println!("       cargo xtask doc [board] [--sd-card] [cargo doc args]");
+            println!("       cargo xtask test-init [board]");
+            println!("       cargo xtask boot-image [board]");
             exit(1);
         }
     }
 }
 
-fn build_boot_image(board: &str) {
+fn build_test_init(board: &str) {
+    build_boot_image(board, true);
+}
+
+fn build_boot_image(board: &str, test: bool) {
     let family = bsp_family(board);
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap();
-    let target = root.join("target/init-embedded").join(family);
+    let build_directory = if test { "init-qemu" } else { "init-embedded" };
+    let target = root.join("target").join(build_directory).join(family);
+    let features = if test {
+        format!("bsp_{family},qemu_test")
+    } else {
+        format!("bsp_{family}")
+    };
     run(
         Command::new("cargo")
             .current_dir(root.join("init"))
             .env("CARGO_TARGET_DIR", &target)
-            .args([
-                "build",
-                "--locked",
-                "--release",
-                "--features",
-                &format!("bsp_{family}"),
-            ]),
+            .args(["build", "--locked", "--release", "--features", &features]),
         "ERROR: Failed to build init for the boot filesystem",
     );
     let executable = fs::read(target.join("aarch64-unknown-none-softfloat/release/init"))
         .expect("ERROR: Failed to read init ELF");
     let image = boot_image::build(&executable).expect("ERROR: Failed to build sparse filesystem");
     let logical_size = boot_image::ReadOnlyDisk::decode(&image).unwrap().byte_len();
-    let output = root.join("target/bootfs").join(family).join("init.sparse");
+    let output = root
+        .join("target")
+        .join(if test { "bootfs-qemu" } else { "bootfs" })
+        .join(family)
+        .join("init.sparse");
     fs::create_dir_all(output.parent().unwrap())
         .expect("ERROR: Failed to create boot-image directory");
     if fs::read(&output).ok().as_deref() != Some(image.as_slice()) {
@@ -142,7 +156,7 @@ fn doc(args: &[String]) {
         .split(',')
         .any(|feature| feature == "embedded-fs")
     {
-        build_boot_image(board);
+        build_boot_image(board, false);
     }
 
     run(
@@ -171,6 +185,13 @@ fn build(args: Vec<String>) {
     let cpu = bsp_family(&args[2]);
     let bsp = format!("bsp_{cpu}");
     let (features, cargo_args) = kernel_cargo_args(&args[3..], &bsp);
+    if features
+        .trim_start_matches("--features=")
+        .split(',')
+        .any(|feature| feature == "test_build")
+    {
+        build_test_init(&args[2]);
+    }
     let chainloader = features
         .trim_start_matches("--features=")
         .split(',')
@@ -184,7 +205,13 @@ fn build(args: Vec<String>) {
             eprintln!("embedded-fs is a kernel option, not a chainloader option");
             exit(1);
         }
-        build_boot_image(&args[2]);
+        if !features
+            .trim_start_matches("--features=")
+            .split(',')
+            .any(|feature| feature == "test_build")
+        {
+            build_boot_image(&args[2], false);
+        }
     }
     let pid = process::id();
     let copy_path = format!("target/xtask-kernel.{pid}");

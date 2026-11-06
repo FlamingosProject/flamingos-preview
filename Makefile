@@ -197,7 +197,6 @@ $(EMBEDDED_IMAGE): FORCE
 	@cargo xtask boot-image $(BSP)
 $(KERNEL_ELF_RAW): $(EMBEDDED_IMAGE)
 clippy_kernel: $(EMBEDDED_IMAGE)
-test_integration: $(EMBEDDED_IMAGE)
 doc: $(EMBEDDED_IMAGE)
 endif
 
@@ -360,6 +359,7 @@ else # QEMU is supported.
 
 test_integration:
 	$(call color_header, "Building kernel test tools")
+	@cargo xtask test-init $(BSP)
 	@cargo build --package kernel_test_runner --release --target $(HOST_TARGET)
 	@cargo build --package translation_table_tool --release --target $(HOST_TARGET)
 	@cargo build --package kernel_symbols_tool --release --target $(HOST_TARGET)

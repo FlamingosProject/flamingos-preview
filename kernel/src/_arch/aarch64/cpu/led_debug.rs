@@ -6,31 +6,27 @@
 
 #[cfg(feature = "bsp_rpi3")]
 mod raw {
-    use core::ptr::{read_volatile, write_volatile};
+    use super::super::led::set_led;
 
-    /// Turn the activity LED on or off.
+    /// Turn the activity LED on or off before address translation is enabled.
     ///
     /// # Safety
     ///
-    /// Directly accesses GPIO hardware without coordinating with the GPIO driver.
+    /// The board must have direct ACT wiring on GPIO29. The physical GPIO
+    /// registers must be accessible, with no concurrent GPIO access.
+    ///
+    /// # Need
+    ///
+    /// Boot diagnostics run before the GPIO driver and virtual mapping exist.
+    // Safety: This unique symbol is called with the documented C ABI.
+    // Need: Early assembly and debug tools locate the unmangled entry.
     #[inline(never)]
     #[unsafe(no_mangle)]
     pub unsafe extern "C" fn _set_led(on: bool) {
-        unsafe {
-            const GPIO_BASE: usize = 0x3f20_0000;
-            const GPFSEL2: *mut u32 = (GPIO_BASE + 0x08) as *mut u32;
-            const GPSET0: *mut u32 = (GPIO_BASE + 0x1c) as *mut u32;
-            const GPCLR0: *mut u32 = (GPIO_BASE + 0x28) as *mut u32;
-            const PIN_BIT: u32 = 1 << 29;
-
-            let mut fsel = read_volatile(GPFSEL2);
-            fsel &= !(7 << 27);
-            fsel |= 1 << 27;
-            write_volatile(GPFSEL2, fsel);
-
-            // The activity LED signal is active-low.
-            write_volatile(if on { GPCLR0 } else { GPSET0 }, PIN_BIT);
-        }
+        // Safety: The caller guarantees the board wiring and physical mapping,
+        // with exclusive access during early boot.
+        // Need: Use the shared raw GPIO implementation before drivers exist.
+        unsafe { set_led(0x3f20_0000, 29, true, on) };
     }
 
     /// Delay for `count` arbitrary units.
@@ -47,31 +43,28 @@ mod raw {
 
 #[cfg(feature = "bsp_rpi4")]
 mod raw {
-    use core::ptr::{read_volatile, write_volatile};
+    use super::super::led::set_led;
 
-    /// Turn the activity LED on or off.
+    /// Turn the activity LED on or off before address translation is enabled.
     ///
     /// # Safety
     ///
-    /// Directly accesses GPIO hardware without coordinating with the GPIO driver.
+    /// The board must have Pi 4 Model B active-high ACT wiring on GPIO42.
+    /// The physical GPIO
+    /// registers must be accessible, with no concurrent GPIO access.
+    ///
+    /// # Need
+    ///
+    /// Boot diagnostics run before the GPIO driver and virtual mapping exist.
+    // Safety: This unique symbol is called with the documented C ABI.
+    // Need: Early assembly and debug tools locate the unmangled entry.
     #[inline(never)]
     #[unsafe(no_mangle)]
     pub unsafe extern "C" fn _set_led(on: bool) {
-        unsafe {
-            const GPIO_BASE: usize = 0xfe20_0000;
-            const GPFSEL4: *mut u32 = (GPIO_BASE + 0x10) as *mut u32;
-            const GPSET1: *mut u32 = (GPIO_BASE + 0x20) as *mut u32;
-            const GPCLR1: *mut u32 = (GPIO_BASE + 0x2c) as *mut u32;
-            const PIN_BIT: u32 = 1 << (42 - 32);
-
-            let mut fsel = read_volatile(GPFSEL4);
-            fsel &= !(7 << 6);
-            fsel |= 1 << 6;
-            write_volatile(GPFSEL4, fsel);
-
-            // The activity LED signal is active-low.
-            write_volatile(if on { GPCLR1 } else { GPSET1 }, PIN_BIT);
-        }
+        // Safety: The caller guarantees the board wiring and physical mapping,
+        // with exclusive access during early boot.
+        // Need: Use the shared raw GPIO implementation before drivers exist.
+        unsafe { set_led(0xfe20_0000, 42, false, on) };
     }
 
     /// Delay for `count` arbitrary units.

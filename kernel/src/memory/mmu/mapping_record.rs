@@ -208,3 +208,21 @@ pub fn kernel_find_and_insert_mmio_duplicate(
 pub fn kernel_print() {
     KERNEL_MAPPING_RECORD.read(|mr| mr.print());
 }
+
+/// Find an existing device mapping containing a physical register address.
+pub fn kernel_mmio_virtual_address(physical: Address<Physical>) -> Option<Address<Virtual>> {
+    KERNEL_MAPPING_RECORD.read(|record| {
+        record.inner.iter().find_map(|entry| {
+            if entry.attribute_fields.mem_attributes != MemAttributes::Device {
+                return None;
+            }
+            let offset = physical
+                .as_usize()
+                .checked_sub(entry.phys_start_addr.as_usize())?;
+            if offset >= entry.num_pages * bsp::memory::mmu::KernelGranule::SIZE {
+                return None;
+            }
+            Some(entry.virt_start_addr + offset)
+        })
+    })
+}

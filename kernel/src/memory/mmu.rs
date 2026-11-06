@@ -20,6 +20,8 @@ use crate::{
 };
 use core::{fmt, num::NonZeroUsize};
 
+pub use mapping_record::kernel_mmio_virtual_address;
+pub(crate) use translation_table::ProcessTranslationTable;
 pub use types::*;
 
 //--------------------------------------------------------------------------------------------------

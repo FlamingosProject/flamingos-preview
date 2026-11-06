@@ -23,7 +23,9 @@ use crate::{
         },
     },
 };
+use alloc::vec::Vec;
 use core::convert;
+use program_image::pages::{Page, PreparedImage, StackPages};
 use tock_registers::{
     interfaces::{Readable, Writeable},
     register_bitfields,
@@ -145,6 +147,111 @@ pub struct FixedSizeTranslationTable<const NUM_TABLES: usize, const START_FROM_T
 
     /// Have the tables been initialized?
     initialized: bool,
+}
+
+/// Privately owned lower-address tables, constructed before TTBR0 installation.
+///
+/// Keeping this wrapper separate from active kernel tables permits safe descriptor
+/// construction. After construction, only read-only inspection is exposed. The
+/// process activation guard controls installation and the lifetime of the backing.
+pub(crate) struct ProcessTranslationTable {
+    tables: Vec<ProcessTable>,
+    root: Address<Physical>,
+}
+
+type ProcessTable = FixedSizeTranslationTable<
+    { crate::process::ADDRESS_END as usize / Granule512MiB::SIZE },
+    false,
+>;
+
+impl ProcessTranslationTable {
+    /// Build a two-level table for the lower 1 GiB, translating every backing page.
+    pub(crate) fn new(image: &PreparedImage, stack: &StackPages) -> Result<Self, &'static str> {
+        use memory::mmu::translation_table::interface::TranslationTable;
+
+        // The Vec allocation is aligned by the table type and never resized after
+        // initialization, so its physical next-level pointers remain stable.
+        let mut tables = Vec::new();
+        tables
+            .try_reserve_exact(1)
+            .map_err(|_| "Cannot allocate process tables")?;
+        tables.push(ProcessTable::new_uninitialized());
+        let table = &mut tables[0];
+        table.init()?;
+        for segment in image.segments() {
+            let permissions = segment.permissions();
+            let attributes = AttributeFields {
+                mem_attributes: MemAttributes::CacheableDRAM,
+                acc_perms: if permissions.write {
+                    AccessPermissions::ReadWrite
+                } else {
+                    AccessPermissions::ReadOnly
+                },
+                execute_never: !permissions.execute,
+            };
+            Self::map_backing(table, segment.virtual_start(), segment.pages(), &attributes)?;
+        }
+        Self::map_backing(
+            table,
+            stack.virtual_start(),
+            stack.pages(),
+            &AttributeFields {
+                mem_attributes: MemAttributes::CacheableDRAM,
+                acc_perms: AccessPermissions::ReadWrite,
+                execute_never: true,
+            },
+        )?;
+        let root = memory::mmu::try_kernel_virt_addr_to_phys_addr(table.lvl2.virt_start_addr())?;
+        Ok(Self { tables, root })
+    }
+
+    /// Populate only the privately owned, uninstalled tables, never active maps.
+    fn map_backing(
+        table: &mut ProcessTable,
+        virtual_start: u64,
+        pages: &[Page],
+        attributes: &AttributeFields,
+    ) -> Result<(), &'static str> {
+        for (index, page) in pages.iter().enumerate() {
+            let virtual_page =
+                PageAddress::from(virtual_start as usize + index * Granule64KiB::SIZE);
+            let backing = Address::new(page.bytes().as_ptr() as usize);
+            let physical = memory::mmu::try_kernel_virt_addr_to_phys_addr(backing)?;
+            let physical_page = PageAddress::from(physical);
+            if physical_page
+                .checked_offset(1)
+                .is_none_or(|end| end > bsp::memory::phys_addr_space_end_exclusive_addr())
+            {
+                return Err("Process backing is outside physical address space");
+            }
+            let descriptor = PageDescriptor::from_output_page_addr(physical_page, attributes);
+            table.set_page_descriptor_from_page_addr(virtual_page, &descriptor)?;
+        }
+        Ok(())
+    }
+
+    /// Physical address of the level-2 root for owned TTBR0 activation.
+    pub(crate) fn root(&self) -> Address<Physical> {
+        self.root
+    }
+
+    /// Inspect a prepared mapping without touching the target virtual address.
+    pub(crate) fn translate(
+        &self,
+        address: Address<Virtual>,
+    ) -> Result<Address<Physical>, &'static str> {
+        use memory::mmu::translation_table::interface::TranslationTable;
+        self.tables[0].try_virt_addr_to_phys_addr(address)
+    }
+
+    /// Read a prepared page's privileged access and execution attributes.
+    pub(crate) fn attributes(
+        &self,
+        page: PageAddress<Virtual>,
+    ) -> Result<AttributeFields, &'static str> {
+        use memory::mmu::translation_table::interface::TranslationTable;
+        self.tables[0].try_page_attributes(page)
+    }
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -320,9 +427,9 @@ impl<const NUM_TABLES: usize, const START_FROM_TOP: bool>
     const START_FROM_TOP_OFFSET: Address<Virtual> =
         Address::new((usize::MAX - (Granule512MiB::SIZE * NUM_TABLES)) + 1);
 
-    /// Create an instance.
+    /// Create zeroed tables whose level-2 descriptors still need initialization.
     #[allow(clippy::assertions_on_constants)]
-    const fn _new(for_precompute: bool) -> Self {
+    const fn new_uninitialized() -> Self {
         assert!(bsp::memory::mmu::KernelGranule::SIZE == Granule64KiB::SIZE);
 
         // Can't have a zero-sized address space.
@@ -331,12 +438,15 @@ impl<const NUM_TABLES: usize, const START_FROM_TOP: bool>
         Self {
             lvl3: [[PageDescriptor::new_zeroed(); 8192]; NUM_TABLES],
             lvl2: [TableDescriptor::new_zeroed(); NUM_TABLES],
-            initialized: for_precompute,
+            initialized: false,
         }
     }
 
+    /// Create tables whose descriptors will be populated by the offline tool.
     pub const fn new_for_precompute() -> Self {
-        Self::_new(true)
+        let mut tables = Self::new_uninitialized();
+        tables.initialized = true;
+        tables
     }
 
     /// Helper to calculate the lvl2 and lvl3 indices from an address.
