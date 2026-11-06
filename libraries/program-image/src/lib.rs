@@ -12,6 +12,8 @@
 
 extern crate alloc;
 
+pub mod pages;
+
 use alloc::vec::Vec;
 use elf::{
     abi,

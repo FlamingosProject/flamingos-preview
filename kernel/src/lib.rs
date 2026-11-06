@@ -117,11 +117,11 @@
 #[cfg(all(feature = "chainloader", feature = "test_build"))]
 compile_error!("features `chainloader` and `test_build` cannot be enabled together");
 
-#[cfg(not(any(feature = "bsp_rpi3", feature = "bsp_rpi4")))]
-compile_error!("Either feature \"bsp_rpi3\" or \"bsp_rpi4\" must be enabled for this crate.",);
-
 #[cfg(all(feature = "chainloader", feature = "embedded-fs"))]
 compile_error!("embedded-fs belongs to the kernel, not the chainloader");
+
+#[cfg(not(any(feature = "bsp_rpi3", feature = "bsp_rpi4")))]
+compile_error!("Either feature \"bsp_rpi3\" or \"bsp_rpi4\" must be enabled for this crate.",);
 
 extern crate alloc;
 
@@ -140,6 +140,7 @@ pub mod driver;
 pub mod exception;
 pub mod memory;
 pub mod print;
+pub mod process;
 pub use program_image as program;
 pub mod state;
 pub mod storage;

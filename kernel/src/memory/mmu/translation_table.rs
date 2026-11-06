@@ -8,6 +8,8 @@
 #[path = "../../_arch/aarch64/memory/mmu/translation_table.rs"]
 mod arch_translation_table;
 
+pub(crate) use arch_translation_table::ProcessTranslationTable;
+
 use super::{AttributeFields, MemoryRegion};
 use crate::memory::{Address, Physical, Virtual};
 

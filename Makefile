@@ -142,7 +142,6 @@ ifeq ($(EMBEDDED_FS),1)
 $(EMBEDDED_IMAGE): FORCE
 	@cargo xtask boot-image $(BSP)
 clippy_kernel: $(EMBEDDED_IMAGE)
-test_integration: $(EMBEDDED_IMAGE)
 doc: $(EMBEDDED_IMAGE)
 endif
 
@@ -259,6 +258,7 @@ else # QEMU is supported.
 # The runner executes a prebuilt xtask while Cargo holds the test build lock.
 test_integration:
 	$(call color_header, "Building kernel test tools")
+	@cargo xtask test-init $(BSP)
 	@cargo build --package kernel_test_runner --package xtask --release --target $(HOST_TARGET)
 	$(call color_header, "Running QEMU integration tests")
 	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)"                                              \

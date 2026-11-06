@@ -11,6 +11,7 @@
 //!
 //! crate::cpu::boot::arch_boot
 
+pub mod led;
 mod led_debug;
 
 #[cfg(not(feature = "chainloader"))]
@@ -224,6 +225,9 @@ pub unsafe fn process_device_tree() {
         }
 
         let fdt = Fdt::from_ptr(device_tree).unwrap();
+        for compatible in fdt.root().compatible().all() {
+            crate::bsp::record_act_led_board(compatible);
+        }
         let num_cores = fdt.cpus().count();
         if num_cores > MAX_CORES {
             panic!();

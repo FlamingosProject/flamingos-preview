@@ -12,7 +12,7 @@ use exfat_embedded::BlockDevice;
 const SECTOR_SIZE: usize = 512;
 
 /// Preparing a read-only embedded boot filesystem or loading init failed.
-#[cfg(feature = "embedded-fs")]
+#[cfg(any(feature = "embedded-fs", feature = "test_build"))]
 #[derive(Debug)]
 pub enum EmbeddedImageError {
     /// The sparse sector table is malformed.
@@ -27,7 +27,7 @@ pub enum EmbeddedImageError {
 ///
 /// The returned program owns its data, so the mounted read-only device can be
 /// dropped immediately. Errors are explicit; this never falls back to SD media.
-#[cfg(feature = "embedded-fs")]
+#[cfg(any(feature = "embedded-fs", feature = "test_build"))]
 pub fn load_embedded_image(blob: &[u8]) -> Result<program_image::ProgramImage, EmbeddedImageError> {
     let device = boot_image::ReadOnlyDisk::decode(blob).map_err(EmbeddedImageError::Image)?;
     crate::info!(

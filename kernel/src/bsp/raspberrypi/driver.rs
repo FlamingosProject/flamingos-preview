@@ -103,11 +103,26 @@ unsafe fn instantiate_mailbox() -> Result<(), &'static str> {
     }
 }
 
-/// This must be called only after successful init of the GPIO driver.
+/// Connect peripherals and light ACT before loading init.
+///
+/// # Safety
+///
+/// The GPIO singleton must be initialized with a valid device mapping, and
+/// this callback must run once during single-core driver initialization.
+///
+/// # Need
+///
+/// Driver initialization publishes the singleton through static storage.
 unsafe fn post_init_gpio() -> Result<(), &'static str> {
+    // Safety: The driver manager calls this after GPIO construction, once on
+    // the boot core. The shared driver serializes its register accesses.
+    // Need: Access the GPIO singleton initialized by the BSP.
     unsafe {
-        GPIO.assume_init_ref().map_pl011_uart();
-        GPIO.assume_init_ref().map_emmc();
+        let gpio = GPIO.assume_init_ref();
+        gpio.map_pl011_uart();
+        gpio.map_emmc();
+        #[cfg(all(not(feature = "chainloader"), not(feature = "test_build")))]
+        diagnose_act_led();
         Ok(())
     }
 }
@@ -239,6 +254,58 @@ unsafe fn driver_interrupt_controller() -> Result<(), &'static str> {
 //--------------------------------------------------------------------------------------------------
 // Public Code
 //--------------------------------------------------------------------------------------------------
+
+/// Exercise the shared debug LED path during single-core GPIO post-init.
+#[cfg(all(not(feature = "chainloader"), not(feature = "test_build")))]
+fn diagnose_act_led() {
+    let arguments = match init_led_arguments() {
+        Ok(arguments) => arguments,
+        Err(error) => {
+            crate::warn!("Kernel ACT diagnostic skipped: {}", error);
+            return;
+        }
+    };
+    for on in [true, false, true] {
+        crate::info!(
+            "Kernel debug ACT: GPIO {}, on {}; holding 1 s",
+            arguments.pin,
+            on
+        );
+        // Safety: GPIO post-init runs once on the boot core. The BSP checks
+        // board wiring and the live GPIO alias; no other GPIO users run here.
+        // Need: Reuse boot debugging's raw LED writes after the MMU transition.
+        unsafe {
+            crate::cpu::boot::arch_boot::led::set_led(
+                arguments.gpio_base.as_usize(),
+                arguments.pin,
+                arguments.active_low,
+                on,
+            )
+        };
+        crate::time::time_manager().spin_for(core::time::Duration::from_secs(1));
+    }
+}
+
+/// Construct init's direct-LED ABI from recognized wiring and the existing GPIO alias.
+///
+/// This performs no GPIO writes. It rejects boards whose ACT LED is controlled
+/// through virtual GPIO, and requires the GPIO driver mapping to be present.
+pub fn init_led_arguments() -> Result<crate::process::InitArguments, &'static str> {
+    let (pin, active_low) =
+        super::direct_act_led().ok_or("Board has no supported direct ACT GPIO")?;
+    let gpio_base = memory::mmu::kernel_mmio_virtual_address(mmio::GPIO_START)
+        .ok_or("GPIO mapping is unavailable")?;
+    if memory::mmu::try_kernel_virt_addr_to_phys_addr(gpio_base)? != mmio::GPIO_START {
+        return Err("GPIO alias does not match the board's register block");
+    }
+    Ok(crate::process::InitArguments {
+        gpio_base,
+        pin,
+        active_low,
+        #[cfg(feature = "test_build")]
+        completion: 0,
+    })
+}
 
 /// Initialize the driver subsystem.
 ///

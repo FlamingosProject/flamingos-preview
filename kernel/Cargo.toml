@@ -1,7 +1,7 @@
 [package]
 name = "mingo"
 version = "1.0.0"
-description = "Load ELF — Chapter 23"
+description = "Run init — Chapter 24"
 keywords = ["elf", "process"]
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
 edition = "2024"
@@ -11,7 +11,7 @@ default = []
 debug_prints = []
 bsp_rpi3 = ["tock-registers"]
 bsp_rpi4 = ["tock-registers"]
-test_build = ["qemu-exit"]
+test_build = ["qemu-exit", "dep:boot-image"]
 embedded-fs = ["dep:boot-image"]
 boot_trace = []
 chainloader = []
