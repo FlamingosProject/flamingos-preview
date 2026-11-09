@@ -1,6 +1,6 @@
 # Flamingos project status
 
-Updated 2026-11-05. This is the project-wide handoff, maintained
+Updated 2026-11-09. This is the project-wide handoff, maintained
 in the top-level display tree on `main`. Update it when the
 active chapter, validation evidence, or next task changes. Do not
 copy it into each chapter branch: chapter READMEs document their
@@ -11,7 +11,7 @@ snapshots.
 - The repository root is the `main` display worktree. Numbered
   directories are detached submodule checkouts, pinned to chapters.
 - `work/` is on `24-run-init`, based on `e5a37b6e`. Chapter 24
-  is committed at `77686a38` with its display submodule.
+  is committed at `244bafdc` with its display submodule.
   The restored stash `06bc7024` remains an already-applied
   recovery copy; do not apply it again. The LED investigation
   remains open, with hardware work deferred to the user.
@@ -20,15 +20,14 @@ snapshots.
   `a1baa57c`.
 - Chapter 22, `815e935e`, retains five development commits after
   Chapter 21. Chapter 23 now has four after Chapter 22. The
-  branches remain one linear sequence. Chapter 24 adds one
-  commit after Chapter 23. Chapters beyond 21 may
+  branches remain one linear sequence. Chapter 24 adds two
+  commits after Chapter 23. Chapters beyond 21 may
   accumulate commits and can be squashed later.
 - Chapters 01–22 display pins and checkouts are unchanged.
-  Chapter 23 now points to `e5a37b6e`, one new local commit beyond
-  recorded `origin/23-load-elf`; it has not been pushed.
-- Earlier rewritten branches were published by the user. The
-  Chapter 23 backport, Chapter 24 snapshot, and display updates
-  are local until the user pushes.
+  Chapter 23 points to `e5a37b6e`.
+- The user published the earlier Chapter 23 backport, Chapter 24
+  snapshot, and display updates. The November 9 board-support
+  commit and its display pin remain local until the user pushes.
 - `work/ELF-RESEARCH.md` remains an untracked research note.
 - The user's top-level `config.txt` remains untracked; the
   reviewed card configuration is not part of the tutorial code.
@@ -99,6 +98,25 @@ The historical investigation below records observations and
 intermediate local state before this snapshot was committed.
 
 ## LED diagnostic in progress
+
+November 9: prepared a Chapter 24 kernel for Pi 3 Model A+ with
+`cargo xtask build rpi3`. The existing Pi 3 CPU/MMIO setup applies;
+added firmware recognition for its GPIO29 active-high ACT LED.
+Embedded init is included in `work/kernel8.img`.
+Early `boot_trace` is off because it assumes Zero 2 W polarity.
+The build, Clippy, and formatting checks pass.
+The user then reported `Init launch skipped: Board has no supported
+direct ACT GPIO`. Expanded detection to include the firmware's
+3B+ compatible string, also GPIO29 active-high, and rebuilt the
+normal payload. This addresses the shared device-tree identity;
+the actual firmware compatible strings have not been captured.
+The Pi 3 chainloader was also built with early tracing off and
+remains at `work/chainloader8.img`.
+The user confirmed the rebuilt payload works on the Pi 3 Model
+A+: init launches and ACT blinks. This establishes physical
+process execution and LED operation on that board. Zero 2 W LED
+behavior remains unresolved. Both board-support and display-tree
+updates are committed at the user's request; nothing was pushed.
 
 Paused November 5 at the user's request. The original January 27
 kernel also did not visibly light ACT. The microscope photo in
