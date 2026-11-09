@@ -18,6 +18,11 @@ static DIRECT_ACT_LED: AtomicU8 = AtomicU8::new(0xff);
 pub(crate) fn record_act_led_board(compatible: &str) {
     let wiring = match compatible {
         "raspberrypi,model-zero-2-w" if cfg!(feature = "bsp_rpi3") => 29 | 0x80,
+        "raspberrypi,3-model-a-plus" | "raspberrypi,3-model-b-plus"
+            if cfg!(feature = "bsp_rpi3") =>
+        {
+            29
+        }
         "raspberrypi,4-model-b" if cfg!(feature = "bsp_rpi4") => 42,
         _ => return,
     };

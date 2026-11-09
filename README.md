@@ -172,11 +172,23 @@ Firmware board identity selects the verified wiring:
 | Board | Activity LED | LED on |
 |---|---|---|
 | Zero 2 W | GPIO29 | Low |
+| Pi 3 Model A+ | GPIO29 | High |
+| Pi 3 Model B+ | GPIO29 | High |
 | Pi 4 Model B | GPIO42 | High |
 
 Sources are the official [Zero 2 W](https://github.com/raspberrypi/linux/blob/rpi-6.18.y/arch/arm/boot/dts/broadcom/bcm2710-rpi-zero-2-w.dts)
 and [Pi 4](https://github.com/raspberrypi/linux/blob/rpi-6.18.y/arch/arm/boot/dts/broadcom/bcm2711-rpi-4-b.dts)
-device trees. Pi 3 Model B uses firmware-managed virtual GPIO;
+device trees, plus the official
+[Pi 3 Model A+ tree](https://github.com/raspberrypi/linux/blob/rpi-6.12.y/arch/arm/boot/dts/broadcom/bcm2837-rpi-3-a-plus.dts).
+Build for the 3A+ with `cargo xtask build rpi3`. Leave
+`boot_trace` off: early Pi 3-family tracing assumes Zero 2 W
+polarity, while the kernel and init select polarity from firmware.
+Both the explicit 3A+ identity and the shared firmware
+[3B+ tree](https://github.com/raspberrypi/linux/blob/rpi-6.12.y/arch/arm/boot/dts/broadcom/bcm2710-rpi-3-b-plus.dts)
+select GPIO29 active-high.
+The user confirmed init's ACT blink on a Pi 3 Model A+ after
+adding the shared firmware identity match.
+Pi 3 Model B uses firmware-managed virtual GPIO;
 it does not share Zero 2's direct GPIO29 wiring. Unsupported or
 unrecognized boards skip LED launch and retain the kernel console.
 
@@ -186,15 +198,14 @@ context transfer. Init completes an on/off cycle against retained
 register-shaped RAM, then calls a kernel completion hook. The
 hook checks the process stack range/alignment, EL1 state, masked
 exceptions, output mode, and both GPIO writes before exiting QEMU.
-This proves executable transfer and MMIO-shaped writes; the
-physical LED still needs an on-board acceptance test.
+This proves executable transfer and MMIO-shaped writes. Physical
+ACT blinking is confirmed separately on the Pi 3 Model A+.
 
 The current Zero 2 W hardware test reaches the init handoff and
 reports matching GPIO function/level readbacks, but ACT has not
 visibly lit. Pre-MMU tracing and historical LED builds also fail
-to light it. The cause remains unresolved; the next checks are
-physical LED inspection/testing and another Pi. Treat QEMU's
-successful execution as separate from physical LED validation.
+to light it. The cause remains unresolved; physical LED
+inspection/testing is still pending on that board.
 
 `cargo xtask test-init rpi3` builds the test executable under
 `target/init-qemu/rpi3` and packages it into a sparse exFAT image
