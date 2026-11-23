@@ -6,10 +6,13 @@
 //!
 //! The physical memory layout.
 //!
-//! Stage 1 loads kernel ELF segments at their physical addresses. The first
-//! 64 KiB preserves firmware park code; the boot stack is 64–512 KiB. The
-//! source ELF remains reserved at 64–96 MiB for runtime diagnostics.
+//! Stage 1 loads the kernel ELF's code at 0x8_0000. The preceding region is
+//! reserved for firmware park code (first 64 KiB) and the boot core's stack.
+//! Stage 1 retains the source ELF at
+//! 64 MiB, outside the kernel heap, for runtime symbol lookup.
 //!
+//! +---------------------------------------+
+//! | Preserved firmware park code          | 0x0..0x10000
 //! +---------------------------------------+
 //! |                                       | boot_core_stack_start @ 0x10000
 //! |                                       |                                ^
