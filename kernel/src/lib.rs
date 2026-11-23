@@ -145,6 +145,7 @@ pub use program_image as program;
 pub mod state;
 pub mod storage;
 pub mod symbols;
+mod syscall;
 #[cfg(feature = "test_build")]
 pub mod test;
 pub mod time;

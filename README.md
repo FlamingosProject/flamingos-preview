@@ -1,10 +1,12 @@
-# Tutorial 24 - Run init
+# Tutorial 25 - EL1 LED syscalls
 
-This chapter loads `init.elf`, prepares its memory and stack,
-activates lower-address translation, and enters it at EL1h.
-The process directly drives the activity LED (ACT) GPIO, with
-existing kernel and hardware mappings accessible. The implementation is
-organized into four steps below; scheduling is still future work.
+This chapter builds on Chapter 24's process entry and moves ACT
+LED control behind a shared scalar syscall ABI. Init issues
+`svc #1`; the kernel validates the argument and owns GPIO access.
+Both still run at EL1h with the existing mappings accessible.
+EL0 isolation and scheduling remain future work. The inherited
+process setup is described in the four steps below, followed by
+the syscall behavior and validation limits.
 
 ## Step 1: process memory
 
@@ -60,8 +62,8 @@ no backing memory.
 The context starts with the ELF entry as PC, SP at `0x40000000`,
 and all x0–x30 registers zero. SP is the exclusive end of the
 stack, aligned to 16 bytes as required by AArch64; stack writes
-use addresses below it. Step 4 supplies scalar boot arguments in
-x0–x3; there is no argc, argv, environment, or return trampoline.
+use addresses below it. Step 4 preserves the zeroed registers;
+there is no argc, argv, environment, or return trampoline.
 The link register is zero, so `init` must never return.
 
 Saved status is `0x3c5`: EL1h uses SP_EL1, with debug, SError,
@@ -120,11 +122,10 @@ CPU context remains metadata until the explicit Step 4 launch.
 
 ## Step 4: enter init and blink the activity LED
 
-`ActiveProcess::run` supplies GPIO base, LED pin, and polarity in
-x0–x2. x3 is zero for normal hardware builds; the QEMU fixture
-uses it for a trusted completion callback. Other general registers
-remain zero, including LR. The GPIO base is the existing high
-device alias, not a physical address or new identity mapping.
+`ActiveProcess::run` enters init with all general registers zero,
+including LR. No GPIO addresses, wiring, or kernel callbacks are
+passed. Init uses the shared `flamingos-syscall` library to request
+LED state changes from the kernel.
 
 Before entering copied code, the kernel cleans its backing via
 the high data alias with DC CVAU, orders those writes, invalidates
@@ -141,11 +142,29 @@ The launch API is unsafe because trusted privileged ELF code can
 access kernel memory and hardware. Safety/Need documentation
 covers the transfer, cache maintenance, and MMIO boundaries.
 
-Boot debugging, the kernel diagnostic, and init now compile the
-same raw `set_led` helper. It uses the debug sequence: select
-GPIO output mode, then write SET/CLR. Early boot passes the
-physical GPIO base; kernel and init pass its mapped alias.
-The helper is available without enabling `boot_trace`.
+Boot debugging and the kernel LED service use the same raw
+`set_led` helper. It selects GPIO output mode, then writes SET/CLR.
+Early boot passes the physical GPIO base; the kernel service uses
+its validated mapped alias. Runtime LED access is serialized with
+IRQs masked on the sole active core. The helper is available
+without enabling `boot_trace`; init no longer includes it.
+
+The scalar syscall ABI encodes its number in SVC's 16-bit immediate,
+with one argument in x0 and a signed status returned in x0. Other
+general registers and saved processor status are restored by the
+existing exception return path. `SYS_SET_LED` is number 1 and
+accepts exactly 0 (off) or 1 (on). Results are 0 on success, -22
+for an invalid argument, -19 when no supported LED is initialized,
+and -38 for an unknown syscall number. The shared wrapper uses
+`call::<NUMBER>(argument)`, with a `u16` const-generic number;
+`set_led(on)` issues `svc #1` through `call::<SYS_SET_LED>`.
+
+The current-EL synchronous handler recognizes AArch64 SVC and
+dispatches the saved registers, then returns with `ERET`. The
+saved return PC already points after SVC. Both init and the
+handler execute at EL1h on init's process stack; there is no
+privilege change or separate kernel stack on these calls yet.
+Process mappings and interrupt masks remain unchanged.
 
 To enable the pre-MMU boot LED codes (stages 1, 2, and 3):
 
@@ -163,9 +182,9 @@ family assumes Zero 2 W wiring, not Pi 3's virtual ACT GPIO.
 
 Before loading the ELF, the kernel drives ACT on, off, then on
 for one second each, logging `Kernel debug ACT`. The final on
-state remains until init takes over. Init uses the shared helper
+state remains until init takes over. Init makes one LED syscall
 for each transition and polls the generic physical counter for
-approximately 250 ms on and 250 ms off, without kernel calls.
+approximately 250 ms on and 250 ms off.
 The delay busy-waits rather than using timer interrupts.
 Firmware board identity selects the verified wiring:
 
@@ -182,24 +201,33 @@ device trees, plus the official
 [Pi 3 Model A+ tree](https://github.com/raspberrypi/linux/blob/rpi-6.12.y/arch/arm/boot/dts/broadcom/bcm2837-rpi-3-a-plus.dts).
 Build for the 3A+ with `cargo xtask build rpi3`. Leave
 `boot_trace` off: early Pi 3-family tracing assumes Zero 2 W
-polarity, while the kernel and init select polarity from firmware.
+polarity, while the kernel service selects polarity from firmware.
 Both the explicit 3A+ identity and the shared firmware
 [3B+ tree](https://github.com/raspberrypi/linux/blob/rpi-6.12.y/arch/arm/boot/dts/broadcom/bcm2710-rpi-3-b-plus.dts)
 select GPIO29 active-high.
-The user confirmed init's ACT blink on a Pi 3 Model A+ after
-adding the shared firmware identity match.
+Chapter 24's direct-init ACT blink was confirmed on Pi 3 Model
+A+. Hardware acceptance of this chapter's syscall path is pending.
 Pi 3 Model B uses firmware-managed virtual GPIO;
 it does not share Zero 2's direct GPIO29 wiring. Unsupported or
-unrecognized boards skip LED launch and retain the kernel console.
+unrecognized boards return -19 from the LED syscall. Init still
+launches; its current panic handler spins if an LED request fails.
 
-The QEMU boot test builds a separate `qemu_test` Rust init ELF,
-loads it through the production loader, and performs the actual
-context transfer. Init completes an on/off cycle against retained
-register-shaped RAM, then calls a kernel completion hook. The
-hook checks the process stack range/alignment, EL1 state, masked
-exceptions, output mode, and both GPIO writes before exiting QEMU.
-This proves executable transfer and MMIO-shaped writes. Physical
-ACT blinking is confirmed separately on the Pi 3 Model A+.
+The callback-based QEMU init execution fixture is temporarily
+disabled. Its legacy source is excluded with `#[cfg(any())]` until
+it can be updated for the syscall ABI. QEMU boot still verifies
+process memory, stack/context preparation, mapping activation,
+and teardown, then exits without entering init.
+
+The exception-restore integration test retains its original EL1
+`svc #0x1337` check through the shared const-generic wrapper,
+expecting an unknown-syscall error, and exercises `svc #1` LED
+requests. Kernel-owned register-shaped RAM checks on/off writes,
+active-low/high wiring,
+both GPIO banks, and preservation of neighboring register fields.
+Invalid arguments and unknown numbers must return errors without
+writes; an unavailable LED must return -19. These tests do not
+execute the loaded init ELF. Hardware verification of the new
+syscall-driven blink remains separate.
 
 The current Zero 2 W hardware test reaches the init handoff and
 reports matching GPIO function/level readbacks, but ACT has not
@@ -207,12 +235,9 @@ visibly lit. Pre-MMU tracing and historical LED builds also fail
 to light it. The cause remains unresolved; physical LED
 inspection/testing is still pending on that board.
 
-`cargo xtask test-init rpi3` builds the test executable under
-`target/init-qemu/rpi3` and packages it into a sparse exFAT image
-under `target/bootfs-qemu/rpi3`. QEMU mounts that image through
-the same read-only adapter and filesystem loader as development
-boot. Test builds prepare it automatically, preserving production
-artifacts. The test fixture must not be copied to a hardware card.
+The legacy `cargo xtask test-init rpi3` image preparation command
+is retained, but test builds no longer invoke it or consume its
+image. It does not run the disabled execution fixture.
 
 ## Embedded development filesystem
 
@@ -258,18 +283,18 @@ It rejects malformed lengths, duplicate/unsorted records, and
 out-of-range sectors. No compression dependency or unsafe code
 is added.
 
-The current image is 512 KiB logically and 149,140 bytes in the
-payload, about 146 KiB. Empty capacity consumes neither upload
+The current image is 512 KiB logically and 155,848 bytes in the
+payload, about 152 KiB. Empty capacity consumes neither upload
 bytes nor a full-size RAM buffer. The host builder grows images
 by powers of two as needed, with a 64 MiB logical-size limit.
 Occupied sectors remain literal; this is zero-sector omission,
 not general compression. ELF allocation limits remain unchanged.
 
 Hardware images live under `target/bootfs/<family>` and build
-their executable in `target/init-embedded/<family>`. QEMU images
-use separate directories and the test-only completion callback.
-Both mount through the regular exFAT API and load `init.elf` with
-the existing ELF loader.
+their executable in `target/init-embedded/<family>`. Legacy QEMU
+image directories remain separate, but their execution fixture is
+disabled. Hardware boot mounts through the regular exFAT API and
+loads `init.elf` with the existing ELF loader.
 
 Boot explicitly prints either `Init source: embedded sparse exFAT
 filesystem` or `Init source: SD-card exFAT filesystem`. There is
@@ -431,10 +456,10 @@ cargo run -p program-image --example inspect -- \
   init/target/aarch64-unknown-none-softfloat/release/init
 ```
 
-`init` is a `no_std` Rust executable that directly blinks the
-activity LED forever. It is excluded from the kernel workspace so its bare-metal
-target and compiler wrapper do not affect host tools. Build from
-its directory to apply its local Cargo configuration. Use
+`init` is a `no_std` Rust executable that blinks the activity LED
+through syscalls. It is excluded from the kernel workspace so its
+bare-metal target and compiler wrapper do not affect host tools.
+Build from its directory to apply its local Cargo configuration. Use
 `bsp_rpi3` for Pi 3 and Zero 2 W, or `bsp_rpi4` for Pi 4. Without a
 BSP feature, the compiler uses the generic AArch64 target CPU.
 
@@ -448,7 +473,7 @@ make chainboot BSP=rpiz2 EMBEDDED_FS=0
 ```
 
 Boot prints the executable's entry address and loaded segments.
-The current release build reports entry `0x2101a0` and two segments;
+The current release build reports entry `0x210260` and two segments;
 addresses and sizes can change with the compiler and build options.
 Host inspection also reports the prepared image page count,
 currently two. Kernel process preparation additionally reserves
@@ -491,8 +516,10 @@ tests run in CI without a prebuilt ELF or physical SD card.
 
 Sparse-image tests cover deterministic generation, exFAT mounting,
 file contents, read-only enforcement, omitted sectors, malformed
-records, and zero-cost empty capacity. QEMU runs the compiled init
-from the sparse filesystem. Source-switching and incremental
+records, and zero-cost empty capacity. Loaded-init execution is
+temporarily disabled in this chapter's QEMU tests; the separate
+integration test exercises actual SVC entry and LED operations.
+Source-switching and incremental
 Make checks verify that init changes refresh the image and that
 each kernel includes only the selected boot source.
 

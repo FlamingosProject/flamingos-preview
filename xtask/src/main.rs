@@ -254,9 +254,7 @@ fn build(board: &str, args: &[String]) {
         eprintln!("the chainloader cannot include the boot filesystem");
         exit(1);
     }
-    if has_feature("test_build") {
-        build_test_init(board);
-    } else if has_feature("embedded-fs") {
+    if !has_feature("test_build") && has_feature("embedded-fs") {
         build_boot_image(board, false);
     }
 

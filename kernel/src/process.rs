@@ -76,7 +76,8 @@ pub enum MappingError {
     TranslationFault(u64),
 }
 
-/// Scalars passed in x0–x3 to the trusted `init` entry.
+/// Legacy callback fixture ABI, disabled during the syscall transition.
+#[cfg(any())]
 pub struct InitArguments {
     /// Already-mapped, upper-address GPIO register base.
     pub gpio_base: Address<Virtual>,
@@ -265,30 +266,20 @@ impl ActiveProcess {
     ///
     /// The old kernel stack and the consumed guard are intentionally retained:
     /// this first process has no exit, scheduler, or reclamation path. The entry
-    /// receives GPIO base, pin, polarity, and zero (or a test completion callback).
+    /// starts at EL1h with zeroed general registers and uses the syscall ABI
+    /// for LED requests. No hardware addresses or callbacks are passed.
     ///
     /// # Safety
     ///
-    /// The loaded image must be trusted code implementing this scalar entry ABI
-    /// and never returning. GPIO arguments must identify the board's valid mapped
-    /// register block/pin. No other core or driver may concurrently reconfigure
-    /// that pin. Caller must still be on the boot core's high kernel stack.
+    /// The loaded image must be trusted code implementing the init entry ABI
+    /// and never returning. Caller must still be on the boot core's high kernel
+    /// stack, and all other cores must remain parked.
     ///
     /// # Need
     ///
     /// Executing privileged ELF code with direct MMIO access cannot be made safe
     /// by validating the ELF format; the caller must trust its behavior.
-    pub unsafe fn run(mut self, arguments: InitArguments) -> ! {
-        #[cfg(feature = "test_build")]
-        let completion = arguments.completion as u64;
-        #[cfg(not(feature = "test_build"))]
-        let completion = 0;
-        self.process.context.set_arguments([
-            arguments.gpio_base.as_usize() as u64,
-            u64::from(arguments.pin),
-            u64::from(arguments.active_low),
-            completion,
-        ]);
+    pub unsafe fn run(self) -> ! {
         // Safety: the active owner retains unchanged code pages and their lower
         // aliases; no other core executes the image during synchronization.
         // Need: publish copied code to instruction fetch before its first execution.
@@ -573,11 +564,11 @@ pub fn test_process_memory() {
     );
 }
 
-/// Execute the compiled Rust init fixture and validate its GPIO writes in QEMU.
+/// Legacy init execution fixture, disabled during the syscall ABI migration.
 ///
-/// The fixture is built by `cargo xtask test-init`; its completion callback
-/// terminates QEMU after checking the low process stack and EL1 state.
-#[cfg(feature = "test_build")]
+/// The old callback contract below is retained for reference. Neither the
+/// fixture image nor its callback is built or executed by the test targets.
+#[cfg(any())] // Temporarily disabled: init no longer accepts a kernel callback.
 pub fn test_run_init() -> ! {
     use alloc::vec;
     let disk_image = include_bytes!(env!("FLAMINGOS_TEST_BOOT_FS"));
@@ -615,7 +606,7 @@ pub fn test_run_init() -> ! {
 ///
 /// The callback reads volatile register-shaped memory initialized by another
 /// executable and confirms the process used its prepared hardware context.
-#[cfg(feature = "test_build")]
+#[cfg(any())] // Restore with a syscall-based fixture when EL0 entry is added.
 unsafe extern "C" fn test_init_complete(gpio: usize) -> ! {
     use aarch64_cpu::registers::{CurrentEL, DAIF, SP};
     use tock_registers::interfaces::Readable;

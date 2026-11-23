@@ -3,5 +3,12 @@
 version = 4
 
 [[package]]
+name = "flamingos-syscall"
+version = "0.1.0"
+
+[[package]]
 name = "init"
 version = "0.1.0"
+dependencies = [
+ "flamingos-syscall",
+]

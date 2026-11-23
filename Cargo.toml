@@ -6,6 +6,7 @@ members = [
         "libraries/kernel-image",
         "libraries/boot-image",
         "libraries/program-image",
+        "libraries/syscall",
         "kernel",
         "tools/kernel_test_runner",
         "xtask",

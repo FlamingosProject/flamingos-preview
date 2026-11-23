@@ -16,6 +16,7 @@ use crate::{
     exception::{self as generic_exception},
     memory,
     memory::mmu::MMIODescriptor,
+    synchronization::{IRQSafeNullLock, interface::Mutex},
 };
 use core::{
     mem::MaybeUninit,
@@ -32,6 +33,23 @@ static mut PL011_UART: MaybeUninit<device_driver::PL011Uart> = MaybeUninit::unin
 static mut GPIO: MaybeUninit<device_driver::GPIO> = MaybeUninit::uninit();
 static mut MAILBOX: MaybeUninit<device_driver::Mailbox> = MaybeUninit::uninit();
 static mut EMMC: MaybeUninit<device_driver::EMMC> = MaybeUninit::uninit();
+
+/// Kernel-owned target; callers can request a state but cannot choose GPIOs.
+enum ActivityLed {
+    Hardware {
+        gpio_base: memory::Address<memory::Virtual>,
+        pin: u8,
+        active_low: bool,
+    },
+    #[cfg(feature = "test_build")]
+    Test {
+        registers: [u32; 64],
+        pin: u8,
+        active_low: bool,
+    },
+}
+
+static ACTIVITY_LED: IRQSafeNullLock<Option<ActivityLed>> = IRQSafeNullLock::new(None);
 
 #[cfg(feature = "bsp_rpi3")]
 static mut INTERRUPT_CONTROLLER: MaybeUninit<device_driver::InterruptController> =
@@ -121,6 +139,11 @@ unsafe fn post_init_gpio() -> Result<(), &'static str> {
         let gpio = GPIO.assume_init_ref();
         gpio.map_pl011_uart();
         gpio.map_emmc();
+
+        match activity_led_target() {
+            Ok(target) => ACTIVITY_LED.lock(|led| *led = Some(target)),
+            Err(error) => crate::warn!("ACT LED unavailable: {}", error),
+        }
         #[cfg(all(not(feature = "chainloader"), not(feature = "test_build")))]
         diagnose_act_led();
         Ok(())
@@ -258,39 +281,24 @@ unsafe fn driver_interrupt_controller() -> Result<(), &'static str> {
 /// Exercise the shared debug LED path during single-core GPIO post-init.
 #[cfg(all(not(feature = "chainloader"), not(feature = "test_build")))]
 fn diagnose_act_led() {
-    let arguments = match init_led_arguments() {
-        Ok(arguments) => arguments,
-        Err(error) => {
-            crate::warn!("Kernel ACT diagnostic skipped: {}", error);
-            return;
-        }
+    let Some((pin, _)) = super::direct_act_led() else {
+        return;
     };
     for on in [true, false, true] {
-        crate::info!(
-            "Kernel debug ACT: GPIO {}, on {}; holding 1 s",
-            arguments.pin,
-            on
-        );
-        // Safety: GPIO post-init runs once on the boot core. The BSP checks
-        // board wiring and the live GPIO alias; no other GPIO users run here.
-        // Need: Reuse boot debugging's raw LED writes after the MMU transition.
-        unsafe {
-            crate::cpu::boot::arch_boot::led::set_led(
-                arguments.gpio_base.as_usize(),
-                arguments.pin,
-                arguments.active_low,
-                on,
-            )
+        crate::info!("Kernel debug ACT: GPIO {}, on {}; holding 1 s", pin, on);
+        if let Err(error) = set_activity_led(on) {
+            crate::warn!("Kernel ACT diagnostic skipped: {}", error);
+            return;
         };
         crate::time::time_manager().spin_for(core::time::Duration::from_secs(1));
     }
 }
 
-/// Construct init's direct-LED ABI from recognized wiring and the existing GPIO alias.
+/// Validate recognized wiring and the existing GPIO alias during driver init.
 ///
 /// This performs no GPIO writes. It rejects boards whose ACT LED is controlled
 /// through virtual GPIO, and requires the GPIO driver mapping to be present.
-pub fn init_led_arguments() -> Result<crate::process::InitArguments, &'static str> {
+fn activity_led_target() -> Result<ActivityLed, &'static str> {
     let (pin, active_low) =
         super::direct_act_led().ok_or("Board has no supported direct ACT GPIO")?;
     let gpio_base = memory::mmu::kernel_mmio_virtual_address(mmio::GPIO_START)
@@ -298,13 +306,110 @@ pub fn init_led_arguments() -> Result<crate::process::InitArguments, &'static st
     if memory::mmu::try_kernel_virt_addr_to_phys_addr(gpio_base)? != mmio::GPIO_START {
         return Err("GPIO alias does not match the board's register block");
     }
-    Ok(crate::process::InitArguments {
+    Ok(ActivityLed::Hardware {
         gpio_base,
         pin,
         active_low,
-        #[cfg(feature = "test_build")]
-        completion: 0,
     })
+}
+
+/// Set the activity LED using validated, kernel-owned board wiring.
+///
+/// GPIO updates run with IRQs masked on the sole active core. The raw
+/// pre-MMU boot tracer finishes before this service is initialized.
+pub fn set_activity_led(on: bool) -> Result<(), &'static str> {
+    ACTIVITY_LED.lock(|led| {
+        let (gpio_base, pin, active_low) = match led.as_mut() {
+            Some(ActivityLed::Hardware {
+                gpio_base,
+                pin,
+                active_low,
+            }) => (gpio_base.as_usize(), *pin, *active_low),
+            #[cfg(feature = "test_build")]
+            Some(ActivityLed::Test {
+                registers,
+                pin,
+                active_low,
+            }) => (registers.as_mut_ptr() as usize, *pin, *active_low),
+            None => return Err("No supported ACT LED is initialized"),
+        };
+        // Safety: hardware targets are validated at GPIO post-init; test
+        // buffers are aligned, owned by this lock, and large enough for
+        // every valid pin. The lock masks IRQs, other cores stay parked,
+        // and no competing runtime LED writer exists.
+        // Need: the existing helper performs volatile GPIO register writes.
+        unsafe {
+            crate::cpu::boot::arch_boot::led::set_led(gpio_base, pin, active_low, on);
+        }
+        Ok(())
+    })
+}
+
+/// Exercise real EL1 SVC entry/return against kernel-owned GPIO-shaped RAM.
+#[cfg(feature = "test_build")]
+pub fn test_led_syscalls() {
+    use aarch64_cpu::registers::{CurrentEL, DAIF};
+    use flamingos_syscall::{
+        self as syscall, INVALID_ARGUMENT, NO_DEVICE, NOT_IMPLEMENTED, SUCCESS,
+    };
+    use tock_registers::interfaces::Readable;
+
+    let saved_masks = DAIF.get();
+    assert_eq!(syscall::set_led(true), NO_DEVICE);
+    for (pin, active_low) in [(29_u8, true), (42_u8, false)] {
+        let mut expected = [0xa5a5_a5a5_u32; 64];
+        ACTIVITY_LED.lock(|led| {
+            *led = Some(ActivityLed::Test {
+                registers: expected,
+                pin,
+                active_low,
+            })
+        });
+        for on in [true, false, true, false] {
+            assert_eq!(syscall::set_led(on), SUCCESS);
+            let pin = usize::from(pin);
+            let shift = (pin % 10) * 3;
+            expected[pin / 10] = (expected[pin / 10] & !(7 << shift)) | (1 << shift);
+            let offset = if on == active_low { 0x28 } else { 0x1c };
+            expected[offset / 4 + pin / 32] = 1 << (pin % 32);
+            ACTIVITY_LED.lock(|led| match led {
+                Some(ActivityLed::Test { registers, .. }) => assert_eq!(*registers, expected),
+                _ => panic!("Missing syscall GPIO fixture"),
+            });
+        }
+        for (call, argument, status) in [
+            (
+                syscall::call::<{ syscall::SYS_SET_LED }> as fn(u64) -> i64,
+                2,
+                INVALID_ARGUMENT,
+            ),
+            (
+                syscall::call::<{ syscall::SYS_SET_LED }>,
+                u64::MAX,
+                INVALID_ARGUMENT,
+            ),
+            (syscall::call::<0>, 1, NOT_IMPLEMENTED),
+            (syscall::call::<{ u16::MAX }>, 1, NOT_IMPLEMENTED),
+            (syscall::call::<0x8001>, 1, NOT_IMPLEMENTED),
+        ] {
+            // Fresh sentinel values expose even writes of the same LED bit
+            // used by the preceding successful calls.
+            expected.fill(0xa5a5_a5a5);
+            ACTIVITY_LED.lock(|led| match led {
+                Some(ActivityLed::Test { registers, .. }) => *registers = expected,
+                _ => panic!("Missing syscall GPIO fixture"),
+            });
+            assert_eq!(call(argument), status);
+            ACTIVITY_LED.lock(|led| match led {
+                Some(ActivityLed::Test { registers, .. }) => assert_eq!(*registers, expected),
+                _ => panic!("Missing syscall GPIO fixture"),
+            });
+        }
+    }
+    ACTIVITY_LED.lock(|led| *led = None);
+    assert_eq!(DAIF.get(), saved_masks);
+    assert!(CurrentEL.matches_all(CurrentEL::EL::EL1));
+    crate::info!("EL1 LED syscalls verified: on/off, polarity, banks, and error returns");
 }
 
 /// Initialize the driver subsystem.

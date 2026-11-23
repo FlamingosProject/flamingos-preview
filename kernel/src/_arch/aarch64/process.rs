@@ -16,8 +16,8 @@ use tock_registers::{
 ///
 /// EL1h selects SP_EL1. All asynchronous exceptions are initially masked;
 /// unmasking requires a later interrupt/exception contract. General registers,
-/// including the link register, start at zero; launch supplies scalar boot
-/// arguments in x0–x3. No argc, argv, environment, or callable return address
+/// including the link register, start at zero. No argc, argv,
+/// environment, hardware addresses, or callable return address
 /// is supplied by this entry convention.
 ///
 /// This is owned metadata, not a live exception frame. The entry routine uses
@@ -68,11 +68,6 @@ impl InitialContext {
     /// Initial SPSR_EL1 value restored by the exception-return-based launch.
     pub fn saved_status(&self) -> u64 {
         self.saved_status
-    }
-
-    /// Supply the four scalar boot arguments while leaving other registers zero.
-    pub(super) fn set_arguments(&mut self, arguments: [u64; 4]) {
-        self.registers[..4].copy_from_slice(&arguments);
     }
 }
 

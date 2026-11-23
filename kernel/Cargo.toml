@@ -1,8 +1,8 @@
 [package]
 name = "mingo"
 version = "1.0.0"
-description = "Run init — Chapter 24"
-keywords = ["elf", "process"]
+description = "EL1 LED syscalls — Chapter 25"
+keywords = ["syscall", "process"]
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
 edition = "2024"
 
@@ -28,6 +28,7 @@ rustc-demangle = { version = "0.1", default-features = false }
 linked_list_allocator = { version = "0.10.x", default-features = false, features = ["const_mut_refs"] }
 exfat-embedded = "0.1.3"
 program-image = { path = "../libraries/program-image" }
+flamingos-syscall = { path = "../libraries/syscall" }
 boot-image = { path = "../libraries/boot-image", optional = true }
 
 # Optional dependencies
