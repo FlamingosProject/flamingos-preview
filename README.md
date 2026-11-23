@@ -415,6 +415,10 @@ with the kernel ELF embedded; stage-2 symbols are added at their
 existing virtual addresses. No hardware debug acceptance is
 implied by a successful build or QEMU test.
 
+`make jtagboot` wraps the existing flat parking helper as an ELF
+before sending it to the new receiver. The standalone wrapper is
+`cargo xtask wrap-flat <raw-image> <output-elf>`.
+
 ## SD-card workflow
 
 Build the chapter's standalone Rust `init` program:
