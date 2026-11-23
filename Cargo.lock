@@ -162,6 +162,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "784a4df722dc6267a04af36895398f59d21d07dce47232adf31ec0ff2fa45e67"
 
 [[package]]
+name = "flamingos-syscall"
+version = "0.1.0"
+
+[[package]]
 name = "gimli"
 version = "0.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -243,6 +247,7 @@ dependencies = [
  "debug-symbol-types",
  "exfat-embedded",
  "fdt",
+ "flamingos-syscall",
  "linked_list_allocator",
  "program-image",
  "qemu-exit",

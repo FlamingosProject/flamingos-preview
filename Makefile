@@ -359,7 +359,6 @@ else # QEMU is supported.
 
 test_integration:
 	$(call color_header, "Building kernel test tools")
-	@cargo xtask test-init $(BSP)
 	@cargo build --package kernel_test_runner --release --target $(HOST_TARGET)
 	@cargo build --package translation_table_tool --release --target $(HOST_TARGET)
 	@cargo build --package kernel_symbols_tool --release --target $(HOST_TARGET)

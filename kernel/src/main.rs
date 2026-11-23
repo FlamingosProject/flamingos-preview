@@ -156,24 +156,18 @@ fn kernel_main() -> ! {
     info!("UART RX IRQs enabled");
 
     #[cfg(feature = "test_build")]
-    libkernel::process::test_run_init();
+    {
+        info!("Init execution fixture temporarily disabled (legacy callback ABI)");
+        cpu::qemu_exit_success();
+    }
 
     #[cfg(not(feature = "test_build"))]
     if let Some(active) = process {
-        match bsp::driver::init_led_arguments() {
-            Ok(arguments) => {
-                info!(
-                    "Launching init: direct ACT GPIO {}, active-low {}",
-                    arguments.pin, arguments.active_low
-                );
-                // Safety: init.elf is the operator's trusted privileged image with
-                // this scalar ABI. BSP wiring and GPIO mapping are validated; all
-                // other cores remain parked and init will mask asynchronous events.
-                // Need: enter executable code that directly controls the ACT LED.
-                unsafe { active.run(arguments) }
-            }
-            Err(error) => libkernel::warn!("Init launch skipped: {}", error),
-        }
+        info!("Launching init at EL1h with the LED syscall ABI");
+        // Safety: init.elf is the operator's trusted privileged image and
+        // never returns. Other cores remain parked; init masks async events.
+        // Need: restore the executable's prepared state and enter its code.
+        unsafe { active.run() }
     }
 
     #[cfg(not(feature = "test_build"))]

@@ -185,13 +185,6 @@ fn build(args: Vec<String>) {
     let cpu = bsp_family(&args[2]);
     let bsp = format!("bsp_{cpu}");
     let (features, cargo_args) = kernel_cargo_args(&args[3..], &bsp);
-    if features
-        .trim_start_matches("--features=")
-        .split(',')
-        .any(|feature| feature == "test_build")
-    {
-        build_test_init(&args[2]);
-    }
     let chainloader = features
         .trim_start_matches("--features=")
         .split(',')

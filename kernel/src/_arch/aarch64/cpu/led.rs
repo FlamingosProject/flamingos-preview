@@ -2,7 +2,7 @@
 //
 // Copyright (c) 2026 Bart Massey
 
-//! Raw LED output shared by boot diagnostics, the kernel, and init.
+//! Raw LED output shared by boot diagnostics and the kernel LED service.
 
 use core::ptr::{read_volatile, write_volatile};
 
@@ -22,8 +22,8 @@ use core::ptr::{read_volatile, write_volatile};
 ///
 /// # Need
 ///
-/// Early boot and the standalone init executable have no GPIO driver;
-/// hardware registers require volatile access through raw addresses.
+/// Early boot has no GPIO driver; hardware registers require volatile
+/// access through raw addresses. Init uses the kernel syscall instead.
 #[inline(never)]
 pub unsafe fn set_led(gpio_base: usize, pin: u8, active_low: bool, on: bool) {
     let pin = usize::from(pin);

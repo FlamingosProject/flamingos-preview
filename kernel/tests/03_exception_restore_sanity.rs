@@ -7,14 +7,16 @@
 #![no_main]
 #![no_std]
 
-use core::arch::asm;
 use libkernel::{bsp, cpu, exception, info, memory};
 
 #[inline(never)]
 fn nested_system_call() {
     #[cfg(target_arch = "aarch64")]
-    unsafe {
-        asm!("svc #0x1337", options(nomem, nostack, preserves_flags));
+    {
+        assert_eq!(
+            flamingos_syscall::call::<0x1337>(0),
+            flamingos_syscall::NOT_IMPLEMENTED,
+        );
     }
 
     #[cfg(not(target_arch = "aarch64"))]
@@ -37,6 +39,8 @@ unsafe fn kernel_init() -> ! {
         nested_system_call();
 
         info!("Back from system call!");
+
+        bsp::driver::test_led_syscalls();
 
         cpu::qemu_exit_success()
     }
