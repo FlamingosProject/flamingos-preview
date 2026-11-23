@@ -94,3 +94,7 @@
 	path = 24-run-init
 	url = https://github.com/FlamingosProject/flamingos-preview.git
 	branch = 24-run-init
+[submodule "25-syscall"]
+	path = 25-syscall
+	url = https://github.com/FlamingosProject/flamingos-preview.git
+	branch = 25-syscall

@@ -10,19 +10,21 @@ snapshots.
 
 - The root is the `main` display worktree. Numbered directories
   are detached submodules pinned to chapter branches.
-- Develop in `work/`, now on `24-run-init` at
-  `f0c4e9cf`. Tracked source files are clean after the ELF
-  boot cleanup/backport; `ELF-RESEARCH.md` is still an untracked
-  research note and was left untouched.
+- Develop in `work/`, now on `25-syscall` at `3c144a02`.
+  The display tree includes its matching detached submodule.
+  Tracked chapter files are clean; `ELF-RESEARCH.md` remains an
+  untracked research note and was left untouched.
 - Chapters 01–14 and their pins are unchanged. Chapters 15–24
   were rewritten together for ELF boot and runtime symbols.
   Chapters 15–21 still have one commit per chapter; Chapters
   22–24 retain their separate development commits.
 - The user confirmed the new ELF UART boot path on hardware.
   Physical OpenOCD/GDB acceptance remains unverified.
-- Nothing was pushed. Rewritten chapter branches require
-  force-with-lease publication; `main` remains a normal
-  fast-forward update. Upstream tracking is unchanged.
+- The user published the ELF backport: the recorded origin
+  refs matched `main` and Chapters 01–24 before this merge.
+  Chapter 25 and its display update are local and unpushed;
+  earlier chapter branches were not changed. Chapter 25 is set
+  to track `origin/25-syscall` once that remote branch exists.
 - Previous tips, including `main`, are preserved under
   `archive/2026-11-23-pre-elf-backport/*`. The tested source
   snapshot is retained as `24-elf-source` under that prefix.
@@ -30,6 +32,45 @@ snapshots.
   `.git/elf-backport/`; see `HISTORY-MAP.md`.
 - Stash `06bc7024` remains an already-applied recovery copy;
   do not apply it again.
+
+## Chapter 25 syscall merge
+
+Merged `origin/syscall` (`6ec8d85f`) into new branch `25-syscall`,
+starting from the updated Chapter 24 (`f0c4e9cf`). The merge is
+`3c144a02`; its second parent preserves the original syscall
+branch. Read `work/SYSCALL.md` for the source handoff and merged
+validation. The syscall branch itself was not rewritten.
+
+The source branch forked from pre-backport `244bafdc`. Its two
+new commits were merged as a delta from that known base so the
+old common ancestry did not restore retired ELF patchers.
+Conflicts were limited to Make, xtask, and the kernel build
+script. ELF packaging, runtime tables, retained ELF symbols,
+and the serial protocol remain intact.
+
+Init stays at EL1h, with scalar syscall numbers in SVC's u16
+immediate and argument/result in x0. `svc #1` requests ACT LED
+state through a kernel-owned target; invalid values, unknown
+numbers, and missing hardware return negative statuses. No
+GPIO addresses or callbacks are supplied at process launch.
+EL0, scheduling, and privilege isolation remain deferred.
+
+The user explicitly disabled the legacy loaded-init callback
+fixture in the source task. It stays disabled here, including
+its automatic image preparation. QEMU boot checks process
+memory/activation and exits without running init. The separate
+exception integration test executes real SVC entry/return and
+checks GPIO-shaped RAM, both banks/polarities, errors, and DAIF.
+
+The merged code passed host tests, the full Pi 3 QEMU suite,
+Pi 3/Pi 4 builds and Clippy, standalone syscall Clippy, and init
+Clippy for both boards. Init ELF inspection reports entry
+`0x210260`, two pages, and `svc #1` instructions. Physical
+syscall blinking remains unverified. Existing Chapter 24 ELF
+receivers are compatible; optional SD-card init must be updated
+for the new argument-free syscall ABI. Fresh default Pi 3
+artifacts are in `work/`; validation logs are
+`work/target/chapter25-*.log`.
 
 ## ELF boot cleanup and backport
 

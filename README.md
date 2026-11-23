@@ -21,8 +21,8 @@ the low-level mechanics visible. Each numbered directory is a Git
 submodule pinned to its chapter branch. Chapters 01–21 form a
 curated chain with exactly one commit per chapter. Chapters beyond
 21 may have multiple commits as new work develops; they can be
-squashed later. Chapters 22–24 extend the chain with storage, executable
-loading, and privileged init execution.
+squashed later. Chapters 22–25 extend the chain with storage, executable
+loading, privileged init execution, and EL1 LED syscalls.
 
 Clone the complete display tree with:
 
@@ -68,6 +68,13 @@ side-quest. Starting with Chapter 23, normal builds package init
 in a sparse, read-only embedded exFAT image, so development does
 not require copying executables onto a card. SD-card loading
 remains available explicitly.
+
+Chapter 25 adds a shared scalar syscall ABI: init remains at
+EL1h and requests LED changes with `svc #1`, while the kernel
+owns the GPIO target. EL0 isolation and scheduling remain future
+work. Its legacy loaded-init callback fixture is disabled;
+separate QEMU integration tests exercise SVC dispatch and LED
+operations through kernel-owned register-shaped memory.
 
 ## License
 
