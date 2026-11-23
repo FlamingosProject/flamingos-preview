@@ -23,7 +23,7 @@
 //! |                                       | code_start @ 0x8_0000 == boot_core_stack_end_exclusive
 //! | .text                                 |
 //! | .rodata                               |
-//! | .got                                  |
+//! | .eh_frame_hdr / .eh_frame              |
 //! |                                       |
 //! +---------------------------------------+
 //! |                                       | data_start == code_end_exclusive
@@ -48,7 +48,7 @@
 //! |                                       | code_start @ __kernel_virt_start_addr
 //! | .text                                 |
 //! | .rodata                               |
-//! | .got                                  |
+//! | .eh_frame_hdr / .eh_frame              |
 //! |                                       |
 //! +---------------------------------------+
 //! |                                       | data_start == code_end_exclusive

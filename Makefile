@@ -72,6 +72,7 @@ KERNEL_BIN           = $(if $(CHAINLOADER),$(CHAINLOADER_BIN),$(NORMAL_KERNEL_BI
 KERNEL_ELF           = $(if $(CHAINLOADER),target/$(TARGET)/release/kernel,$(NORMAL_KERNEL_ELF))
 JTAG_TARGET_DIR = target/jtag/$(BSP)
 JTAG_OPT0_TARGET_DIR = target/jtag-opt0/$(BSP)
+JTAG_BOOT_ELF = target/jtag-bootstrap/$(BSP)/jtag_boot.elf
 GDB_INIT = tools/jtag/kernel.gdb
 TEST_BUILD_DIR = target/test_build/$(BSP)
 TEST_KERNEL_BIN = $(TEST_BUILD_DIR)/kernel8.img
@@ -163,7 +164,8 @@ chainboot: $(if $(filter $(NORMAL_KERNEL_ELF),$(CHAINBOOT_PAYLOAD)),$(NORMAL_KER
 ##------------------------------------------------------------------------------
 jtagboot:
 	@test -f "$(JTAG_BOOT_IMAGE)"
-	$(SCIP) --binfile "$(JTAG_BOOT_IMAGE)" "$(DEV_SERIAL)" 921600 8 N 1 N
+	@cargo xtask wrap-flat "$(JTAG_BOOT_IMAGE)" "$(JTAG_BOOT_ELF)"
+	$(SCIP) --binfile "$(JTAG_BOOT_ELF)" "$(DEV_SERIAL)" 921600 8 N 1 N
 
 openocd:
 	$(OPENOCD) -f "$(OPENOCD_INTERFACE)" -f "$(OPENOCD_TARGET_CONFIG)"

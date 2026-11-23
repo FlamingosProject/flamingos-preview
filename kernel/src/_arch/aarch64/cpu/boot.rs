@@ -42,7 +42,14 @@ const DEVICE_TREE_BUFFER_SIZE: usize = 256 * 1024;
 #[repr(C, align(8))]
 struct DeviceTreeBuffer([u8; DEVICE_TREE_BUFFER_SIZE]);
 
-// Early assembly fills this after clearing BSS and before enabling the MMU.
+/// Firmware boot data copied before enabling the MMU.
+///
+/// # Safety
+/// The symbol is unique and the boot core initializes its bounded backing
+/// before any other code borrows it through the kernel's mapped address.
+///
+/// # Need
+/// Early assembly needs a stable linker-visible destination for the DTB copy.
 #[cfg(not(feature = "chainloader"))]
 #[unsafe(no_mangle)]
 static mut DEVICE_TREE_BUFFER: DeviceTreeBuffer = DeviceTreeBuffer([0; DEVICE_TREE_BUFFER_SIZE]);

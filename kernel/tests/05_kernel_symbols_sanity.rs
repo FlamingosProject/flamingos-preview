@@ -13,8 +13,38 @@ use libkernel::{
     symbols,
 };
 
-extern crate alloc;
-use alloc::format;
+use core::fmt::{self, Write};
+
+/// Capture diagnostic formatting without requiring Chapter 18's heap.
+struct SymbolName {
+    bytes: [u8; 512],
+    len: usize,
+}
+
+impl Write for SymbolName {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        let end = self.len.checked_add(text.len()).ok_or(fmt::Error)?;
+        self.bytes
+            .get_mut(self.len..end)
+            .ok_or(fmt::Error)?
+            .copy_from_slice(text.as_bytes());
+        self.len = end;
+        Ok(())
+    }
+}
+
+fn assert_name_suffix(raw: &str, suffix: &str) {
+    let mut name = SymbolName {
+        bytes: [0; 512],
+        len: 0,
+    };
+    write!(name, "{:#}", symbols::demangle(raw)).unwrap();
+    assert!(
+        core::str::from_utf8(&name.bytes[..name.len])
+            .unwrap()
+            .ends_with(suffix)
+    );
+}
 
 #[unsafe(no_mangle)]
 unsafe fn kernel_init() -> ! {
@@ -25,11 +55,11 @@ unsafe fn kernel_init() -> ! {
         libkernel::common::is_aligned as *const () as usize,
     ))
     .unwrap();
-    assert!(format!("{:#}", symbols::demangle(is_aligned.name())).ends_with("common::is_aligned"));
+    assert_name_suffix(is_aligned.name(), "common::is_aligned");
 
     let version =
         symbols::lookup_symbol(Address::new(libkernel::version as *const () as usize)).unwrap();
-    assert!(format!("{:#}", symbols::demangle(version.name())).ends_with("libkernel::version"));
+    assert_name_suffix(version.name(), "libkernel::version");
 
     cpu::qemu_exit_success()
 }

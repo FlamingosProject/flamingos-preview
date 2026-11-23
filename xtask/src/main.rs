@@ -3,13 +3,23 @@
 
 use std::env;
 use std::fs::{self, File, OpenOptions};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{self, Command, exit};
 
-use kernel_image::{ELF_STAGING_SIZE, KernelImage};
+use kernel_image::{ELF_STAGING_SIZE, KERNEL_LOAD_END, KERNEL_LOAD_START, KernelImage};
 
 const KERNEL_TARGET: &str = "aarch64-unknown-none-softfloat";
+const FLAT_ELF_OFFSET: usize = 0x1000;
+const FLAT_IMAGE_MAX_SIZE: u64 = {
+    let load_window = KERNEL_LOAD_END - KERNEL_LOAD_START;
+    let staging_space = ELF_STAGING_SIZE - FLAT_ELF_OFFSET as u64;
+    if load_window < staging_space {
+        load_window
+    } else {
+        staging_space
+    }
+};
 
 fn repo_root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()
@@ -119,6 +129,10 @@ fn main() {
             }
             _ => usage(),
         },
+        Some("wrap-flat") => match &args[2..] {
+            [raw, elf] => wrap_flat(Path::new(raw), Path::new(elf)),
+            _ => usage(),
+        },
         _ => usage(),
     }
 }
@@ -128,6 +142,7 @@ fn usage() -> ! {
     eprintln!(
         "       cargo xtask package <board> <kernel-elf> <output-image> [--bootstrap-elf <path>]"
     );
+    eprintln!("       cargo xtask wrap-flat <raw-image> <output-elf>");
     eprintln!("       cargo xtask doc [board] [--sd-card] [cargo doc args]");
     eprintln!("       cargo xtask test-init [board]");
     eprintln!("       cargo xtask boot-image [board]");
@@ -368,9 +383,126 @@ fn package(board: &str, kernel_elf: &Path, image: &Path, bootstrap_elf: Option<&
     println!("Firmware image: {}", image.display());
 }
 
+/// Build a sectionless `AArch64` executable for a flat image linked at
+/// the firmware entry. The output must fit the chainloader's staging area.
+fn flat_elf(raw: &[u8]) -> Result<Vec<u8>, String> {
+    const ELF_HEADER_SIZE: u16 = 64;
+    const PROGRAM_HEADER_SIZE: u16 = 56;
+
+    if !(4..=FLAT_IMAGE_MAX_SIZE).contains(&(raw.len() as u64)) {
+        return Err(format!(
+            "flat image must contain between 4 and {FLAT_IMAGE_MAX_SIZE} bytes"
+        ));
+    }
+
+    let mut elf = Vec::with_capacity(FLAT_ELF_OFFSET + raw.len());
+    elf.resize(FLAT_ELF_OFFSET, 0);
+    let (header, program_header) = elf.split_at_mut(usize::from(ELF_HEADER_SIZE));
+    header[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
+    header[16..18].copy_from_slice(&2_u16.to_le_bytes()); // ET_EXEC
+    header[18..20].copy_from_slice(&183_u16.to_le_bytes()); // EM_AARCH64
+    header[20..24].copy_from_slice(&1_u32.to_le_bytes()); // EV_CURRENT
+    header[24..32].copy_from_slice(&KERNEL_LOAD_START.to_le_bytes()); // e_entry
+    header[32..40].copy_from_slice(&u64::from(ELF_HEADER_SIZE).to_le_bytes()); // e_phoff
+    header[52..54].copy_from_slice(&ELF_HEADER_SIZE.to_le_bytes());
+    header[54..56].copy_from_slice(&PROGRAM_HEADER_SIZE.to_le_bytes());
+    header[56..58].copy_from_slice(&1_u16.to_le_bytes()); // e_phnum
+
+    let offset = FLAT_ELF_OFFSET as u64;
+    let size = raw.len() as u64;
+    program_header[..4].copy_from_slice(&1_u32.to_le_bytes()); // PT_LOAD
+    program_header[4..8].copy_from_slice(&5_u32.to_le_bytes()); // PF_R | PF_X
+    program_header[8..16].copy_from_slice(&offset.to_le_bytes()); // p_offset
+    program_header[16..24].copy_from_slice(&KERNEL_LOAD_START.to_le_bytes()); // p_vaddr
+    program_header[24..32].copy_from_slice(&KERNEL_LOAD_START.to_le_bytes()); // p_paddr
+    program_header[32..40].copy_from_slice(&size.to_le_bytes()); // p_filesz
+    program_header[40..48].copy_from_slice(&size.to_le_bytes()); // p_memsz
+    program_header[48..56].copy_from_slice(&offset.to_le_bytes()); // p_align
+
+    elf.extend_from_slice(raw);
+    KernelImage::parse(&elf).map_err(|error| format!("invalid generated ELF: {error:?}"))?;
+    Ok(elf)
+}
+
+/// Snapshot the helper before writing the ELF and refuse to replace an input alias.
+fn wrap_flat(raw: &Path, elf: &Path) {
+    let raw = fs::canonicalize(raw).expect("ERROR: Failed to resolve the flat image");
+    let input = File::open(&raw).expect("ERROR: Failed to open the flat image");
+    if fs::canonicalize(elf).ok().as_ref() == Some(&raw) || is_hard_link(&input, elf) {
+        eprintln!("ERROR: the flat image and ELF output must use separate paths");
+        exit(1);
+    }
+
+    let mut bytes = Vec::new();
+    input
+        .take(FLAT_IMAGE_MAX_SIZE + 1)
+        .read_to_end(&mut bytes)
+        .expect("ERROR: Failed to read the flat image");
+    let wrapped = flat_elf(&bytes).unwrap_or_else(|error| {
+        eprintln!("ERROR: Cannot wrap {}: {error}", raw.display());
+        exit(1);
+    });
+
+    if let Some(parent) = elf.parent().filter(|path| !path.as_os_str().is_empty()) {
+        fs::create_dir_all(parent).expect("ERROR: Failed to create the ELF output directory");
+    }
+    let temporary = elf.with_extension(format!("elf.{}.tmp", process::id()));
+    let mut output = File::create_new(&temporary).expect("ERROR: Failed to create temporary ELF");
+    let written = output.write_all(&wrapped);
+    drop(output);
+    if let Err(error) = written.and_then(|()| fs::rename(&temporary, elf)) {
+        let _ = fs::remove_file(&temporary);
+        eprintln!("ERROR: Failed to save {}: {error}", elf.display());
+        exit(1);
+    }
+}
+
+/// Compare file identities to catch hard links that canonical paths cannot detect.
+#[cfg(unix)]
+fn is_hard_link(input: &File, output: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+
+    input.metadata().is_ok_and(|input| {
+        fs::metadata(output)
+            .is_ok_and(|output| input.dev() == output.dev() && input.ino() == output.ino())
+    })
+}
+
+#[cfg(not(unix))]
+fn is_hard_link(_input: &File, _output: &Path) -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flat_helper_wraps_as_one_executable_load() {
+        let raw = [0xa1, 0x00, 0x38, 0xd5, 0x21, 0x04, 0x40, 0x92];
+        let elf = flat_elf(&raw).unwrap();
+        assert_eq!(&elf[0x1000..], &raw);
+        let image = KernelImage::parse(&elf).unwrap();
+        assert_eq!(image.entry(), KERNEL_LOAD_START);
+        assert!(image.symbols().unwrap().is_none());
+        let mut segments = image.segments();
+        let load = segments.next().unwrap();
+        assert_eq!(load.physical_address, KERNEL_LOAD_START);
+        assert_eq!(load.virtual_address, KERNEL_LOAD_START);
+        assert_eq!(load.flags, 5);
+        assert_eq!(load.memory_size, raw.len() as u64);
+        assert_eq!(load.file_bytes, raw);
+        assert!(segments.next().is_none());
+    }
+
+    #[test]
+    fn flat_helper_rejects_incomplete_entry_and_out_of_bounds_image() {
+        assert!(flat_elf(&[]).is_err());
+        assert!(flat_elf(&[0; 3]).is_err());
+        assert!(flat_elf(&[0; 4]).is_ok());
+        let max_size = usize::try_from(FLAT_IMAGE_MAX_SIZE).unwrap();
+        assert!(flat_elf(&vec![0; max_size + 1]).is_err());
+    }
 
     #[test]
     fn merges_feature_arguments_and_preserves_other_arguments() {
