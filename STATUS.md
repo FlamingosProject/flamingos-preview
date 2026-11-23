@@ -1,6 +1,6 @@
 # Flamingos project status
 
-Updated 2026-11-09. This is the project-wide handoff, maintained
+Updated 2026-11-23. This is the project-wide handoff, maintained
 in the top-level display tree on `main`. Update it when the
 active chapter, validation evidence, or next task changes. Do not
 copy it into each chapter branch: chapter READMEs document their
@@ -8,34 +8,72 @@ snapshots.
 
 ## Repository layout and local state
 
-- The repository root is the `main` display worktree. Numbered
-  directories are detached submodule checkouts, pinned to chapters.
-- `work/` is on `24-run-init`, based on `e5a37b6e`. Chapter 24
-  is committed at `244bafdc` with its display submodule.
-  The restored stash `06bc7024` remains an already-applied
-  recovery copy; do not apply it again. The LED investigation
-  remains open, with hardware work deferred to the user.
-- Chapters 01–21 now contain exactly one commit per chapter after
-  the preserved upstream boundary, `644474cc`. Chapter 21 ends at
-  `a1baa57c`.
-- Chapter 22, `815e935e`, retains five development commits after
-  Chapter 21. Chapter 23 now has four after Chapter 22. The
-  branches remain one linear sequence. Chapter 24 adds two
-  commits after Chapter 23. Chapters beyond 21 may
-  accumulate commits and can be squashed later.
-- Chapters 01–22 display pins and checkouts are unchanged.
-  Chapter 23 points to `e5a37b6e`.
-- The user published the earlier Chapter 23 backport, Chapter 24
-  snapshot, and display updates. The November 9 board-support
-  commit and its display pin remain local until the user pushes.
-- `work/ELF-RESEARCH.md` remains an untracked research note.
-- The user's top-level `config.txt` remains untracked; the
-  reviewed card configuration is not part of the tutorial code.
+- The root is the `main` display worktree. Numbered directories
+  are detached submodules pinned to chapter branches.
+- Develop in `work/`, now on `24-run-init` at
+  `f0c4e9cf`. Tracked source files are clean after the ELF
+  boot cleanup/backport; `ELF-RESEARCH.md` is still an untracked
+  research note and was left untouched.
+- Chapters 01–14 and their pins are unchanged. Chapters 15–24
+  were rewritten together for ELF boot and runtime symbols.
+  Chapters 15–21 still have one commit per chapter; Chapters
+  22–24 retain their separate development commits.
+- The user confirmed the new ELF UART boot path on hardware.
+  Physical OpenOCD/GDB acceptance remains unverified.
+- Nothing was pushed. Rewritten chapter branches require
+  force-with-lease publication; `main` remains a normal
+  fast-forward update. Upstream tracking is unchanged.
+- Previous tips, including `main`, are preserved under
+  `archive/2026-11-23-pre-elf-backport/*`. The tested source
+  snapshot is retained as `24-elf-source` under that prefix.
+  Verified recovery bundles and mappings are in
+  `.git/elf-backport/`; see `HISTORY-MAP.md`.
+- Stash `06bc7024` remains an already-applied recovery copy;
+  do not apply it again.
 
-Develop in `work/`, rather than in a detached chapter submodule.
-See [HISTORY-MAP.md](HISTORY-MAP.md) for the old-to-new mapping.
+## ELF boot cleanup and backport
 
-## Current milestone
+November 23: completed the ELF section of `BACKPORTS.md` and
+backported it to where the removed tools first appeared. Chapter
+15 introduces ELF kernel loading and runtime page-table
+construction with identity mappings. Chapter 16 keeps its
+higher-half transition. Chapter 17 introduces runtime symbol
+lookup. Heap, topology, secondary-core hooks, SD/exFAT, init
+loading, and process execution remain in their original chapters.
+General Make removal and a new `xtask test` command are deferred.
+
+Stage 1 validates and loads static AArch64 kernel ELF segments,
+retains the source at physical 64–96 MiB, and passes DTB/base/size
+in x0–x2. Stage 2 constructs its own tables from linker bounds,
+then maps the retained ELF read-only/XN. Diagnostics demangle
+names during formatting without allocating. The first 64 KiB
+preserves firmware parking code; the boot stack is 64–512 KiB.
+No generated symbol blob or host translation-table patcher remains
+in any affected chapter. Old generated tool executables were
+removed as part of cleanup.
+
+Normal builds produce `kernel.elf` for UART and `kernel8.img`
+with an embedded-ELF bootstrap for standalone boot/QEMU.
+`chainloader8.img` is the ELF-aware serial receiver to install
+on the card. The transfer protocol and SCIP need no changes.
+`make jtagboot` wraps the old flat parking helper as an ELF;
+GDB artifacts use a loadable bootstrap plus linked stage-2 symbols.
+
+All ten affected chapter tips passed host tests, both BSP builds,
+both kernel Clippy checks, and their QEMU boot/integration suites.
+Chapter 17's symbol check is heap-free. The source implementation
+also passed UART ELF transfer, malformed/oversize rejection, and
+hardware testing by the user. Independent review verified chapter
+boundaries, linker layouts, dependency versions, and the parent
+chain. Evidence is in `.git/elf-backport/chapter*-*.log` and the
+structural/review notes there. An earlier temporary validation
+script issue at Chapter 24 was corrected; its separate final
+validation log records all checks passing.
+
+## Earlier milestone and hardware chronology
+
+The remaining sections preserve earlier dated observations.
+The current implementation and validation state are above.
 
 Chapters 01–21 establish the bare-metal kernel foundations:
 console and drivers, virtual memory, exceptions and interrupts,
@@ -223,7 +261,7 @@ GPIO42 active-high; Zero 2 W remains GPIO29 active-low. Early
 Pi 3-family tracing assumes Zero 2 W direct wiring. Changes
 remain uncommitted.
 
-## Next task
+## Earlier Chapter 24 task breakdown
 
 The user confirmed real-hardware ELF loading on November 2.
 Chapter 24 is `24-run-init`: implement the following incrementally,

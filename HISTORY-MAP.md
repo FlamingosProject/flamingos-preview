@@ -9,6 +9,45 @@ The `main` rows map display-tree content tips. Two following maintenance commits
 the reviewer guide. A commit cannot contain its own object ID, so the final maintenance tip is
 identified by `git rev-parse main` rather than embedded below.
 
+## ELF Boot Backport, November 23, 2026
+
+Replaced the Chapter 15 translation-table patcher with ELF
+kernel loading and stage-2 table construction. Chapter 15 keeps
+identity mappings; Chapter 16 still introduces the higher half.
+Chapter 17 now reads retained ELF symbols and demangles names at
+runtime instead of generating and patching a Rust symbol blob.
+Chapters 18–24 inherit that change without moving later features
+earlier. Chapters 01–14 and their display pins are unchanged.
+
+The source implementation was first committed as `7b445cff`,
+then refined and preserved at `cb291401`. The backport rewrites
+20 commits in one linear sequence. Chapters 15–21 remain one
+commit each, and Chapters 22–24 retain their development commits.
+All affected branch tips passed host tests, Pi 3/Pi 4 builds and
+kernel Clippy, and QEMU boot/integration suites. The user verified
+the ELF UART path on hardware; physical JTAG remains unverified.
+
+Recovery refs are `archive/2026-11-23-pre-elf-backport/*`, including
+`main` and the source snapshot `24-elf-source`. Verified bundles
+are `.git/elf-backport/before.bundle` and `source.bundle` within
+that directory. The full commit map, new-tip map, migration scripts,
+validation logs, and independent review are retained there too.
+Nothing was pushed. Publish the rewritten chapter branches with
+force-with-lease before publishing their display pins on `main`.
+
+| Chapter branch | Previous tip | New tip |
+| --- | --- | --- |
+| `15-virtual-mem-part3` | `e0bbaef2` | `b6721718` |
+| `16-virtual-mem-part4` | `7a48d209` | `15f2b791` |
+| `17-kernel-symbols` | `564447f9` | `cbf1fbc1` |
+| `18-kernel-heap` | `c88dda0e` | `7c526b0d` |
+| `19-timer-callbacks` | `0ef84f0c` | `4bd1984c` |
+| `20-boot-improvements` | `b4798024` | `5c9adb86` |
+| `21-second-core` | `a1baa57c` | `46b15ee6` |
+| `22-sdcard` | `815e935e` | `f637f0fa` |
+| `23-load-elf` | `e5a37b6e` | `f8afc59c` |
+| `24-run-init` | `244bafdc` | `f0c4e9cf` |
+
 ## Documentation Backport, October 29, 2026
 
 The documentation command is introduced with `xtask` in Chapter 15

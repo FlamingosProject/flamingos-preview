@@ -1,7 +1,9 @@
 # Backport and Make removal plan
 
-Planning inventory, started 2026-11-16. Implementation is
-deferred. This document is intentionally uncommitted for now.
+Planning inventory, started 2026-11-16. On 2026-11-23 the ELF
+kernel-loading section was committed and backported through
+Chapters 15–24. Make removal and general test-command work
+remain deferred.
 
 ## Scope and current state
 
@@ -110,8 +112,16 @@ also omits image preparation and QEMU runner configuration.
 
 ## ELF kernel loading and runtime symbols
 
-Replace custom symbol generation and patching with ELF loading
-and retained ELF symbol metadata. This supersedes the proposed
+Implemented, committed, and backported to the first affected
+chapters. Chapter 15 introduces ELF boot and runtime table
+construction while keeping identity mappings; Chapter 16 moves
+the kernel into the higher half. Chapter 17 adds runtime ELF
+symbol lookup. Later chapters inherit this implementation.
+The display pins match the rewritten chapter tips. No changes
+were made to Chapters 01–14 or their pins.
+
+The replacement removes custom symbol generation and patching
+in favor of retained ELF metadata. It supersedes the proposed
 two-link approach with a generated linker script/data object.
 
 The kernel is already linked at its intended virtual addresses.
@@ -129,58 +139,61 @@ segments. Keep them explicitly and make them accessible after
 the MMU transition. Their storage address is independent of
 the addresses described by their symbol records.
 
-- [ ] Extend stage 1 to accept a kernel ELF over UART rather
+- [x] Extend stage 1 to accept a kernel ELF over UART rather
   than copying a flat payload directly to `0x80000`.
-- [ ] Validate the AArch64 ELF header, segment/file bounds,
+- [x] Validate the AArch64 ELF header, segment/file bounds,
   physical destinations, sizes, and physical bootstrap entry.
   Copy segment file bytes and initialize required zero tails.
-- [ ] Stage the ELF away from segment destinations and loader
+  Preserve firmware park code in the first 64 KiB; stage 2's
+  seven-page boot stack occupies physical 64–512 KiB.
+- [x] Stage the ELF away from segment destinations and loader
   code/stack. Preserve the firmware DTB and prevent source or
   loader overwrite during loading. The existing chainloader
   relocation near 32 MiB is useful groundwork.
-- [ ] Retain `.symtab` and its associated string table, either
+- [x] Retain `.symtab` and its associated string table, either
   in the source ELF buffer or as separate retained copies.
   Pass their locations and lengths alongside the DTB through
   an explicit boot-information contract.
-- [ ] Map and reserve retained metadata for the kernel's
+- [x] Map and reserve retained metadata for the kernel's
   lifetime, including after the MMU transition and heap setup.
-- [ ] Build initial page tables in stage 2's physical bootstrap
+- [x] Build initial page tables in stage 2's physical bootstrap
   before enabling the MMU. Use linker-defined kernel boundaries
   and physical placement; stage 1 need not construct tables or
   supply the kernel's own mapping recipe.
-- [ ] Keep bootstrap code and data usable at physical addresses
+- [x] Keep bootstrap code and data usable at physical addresses
   until translation is enabled. Reserve and align table storage,
   preserve intended permissions, and let the kernel own its
   tables for subsequent MMIO mappings and other updates.
-- [ ] Remove `translation_table_tool` and patched table/base
+- [x] Remove `translation_table_tool` and patched table/base
   placeholders after runtime construction covers all supported
   boot paths. No page tables are required before chainloading.
-- [ ] Replace custom symbol lookup with bounded ELF symbol
+- [x] Replace custom symbol lookup with bounded ELF symbol
   lookup using linked virtual addresses and string offsets.
   Define handling of symbol types, aliases, zero sizes, and
   address ranges; do not assume ELF symbols are address-sorted.
-- [ ] Demangle Rust names when formatting diagnostics using a
+- [x] Demangle Rust names when formatting diagnostics using a
   `no_std`-compatible demangler. Prefer allocation-free output
   so panic reporting does not depend on a functioning heap.
   Demangling is for readability, not execution or lookup.
-- [ ] Package upload ELFs without unnecessary DWARF sections,
+- [x] Package upload ELFs without unnecessary DWARF sections,
   while retaining symbol/string tables and runtime unwind data.
   Keep the full debug ELF separately for GDB.
-- [ ] Keep a small flat firmware-facing bootstrap. For
+- [x] Keep a small flat firmware-facing bootstrap. For
   standalone boot, embed the kernel ELF in that image and run
   the same loader. This avoids depending on firmware ELF
   interpretation or adding a bootstrap filesystem driver.
-- [ ] Remove `kernel_symbols/`, `debug-symbol-types`, the host
+- [x] Remove `kernel_symbols/`, `debug-symbol-types`, the host
   symbol generator/patcher, the fixed 32 KiB symbol reservation,
   patched symbol count, and `kernel_symbols.mk` once replaced.
-- [ ] Adapt QEMU and hardware-debug entry paths to the retained
+- [x] Adapt QEMU and hardware-debug entry paths to the retained
   metadata contract and stage 2 bootstrap. Verify mappings,
   readable backtraces, and existing symbol sanity checks
   without offline table or symbol patching.
-- [ ] Decide the chapter rollout before implementation. ELF
-  chainloading belongs with the loader workflow; runtime symbol
-  consumption becomes useful in Chapter 17. Avoid introducing
-  process-loader concepts prematurely in earlier chapters.
+- [x] Backport ELF boot/runtime tables from Chapter 15 and ELF
+  symbol consumption from Chapter 17 through Chapter 24.
+  Preserve each chapter's feature boundaries and the linear
+  parent chain. General xtask/Make/testing backports remain
+  separate work.
 
 Stage 1 loads the kernel and preserves boot metadata; stage 2
 owns its memory mappings. ELF headers describe segment layout,
@@ -188,6 +201,25 @@ but the CPU still needs architectural page-table descriptors.
 Constructing those descriptors at boot replaces the current
 host-side translation-table patcher without changing the linked
 virtual addresses or relocating kernel functions.
+
+Validation passed: seven new parser tests, existing loader and
+filesystem tests, xtask tests, strict host Clippy, both BSP
+builds, and the full QEMU boot/five-integration-kernel suite.
+UART QEMU testing transferred a real ELF and reached compiled
+init execution; oversized and invalid uploads were rejected.
+Runtime exceptions print demangled names from retained ELF.
+The user confirmed the new ELF UART boot path on hardware.
+Every affected chapter passes host tests, both BSP builds and
+Clippy checks, and its full QEMU suite. Physical JTAG remains
+unverified. Rewritten chapter branches require force-with-lease
+when published; the display-tree main commit is a normal update.
+
+Normal builds now produce `work/kernel.elf` for UART upload and
+`work/kernel8.img` for standalone firmware boot. Build the new
+serial receiver with
+`cargo xtask build rpi3 --features chainloader` and install its
+`chainloader8.img` on the card before uploading
+ELF payloads. The old flat receiver is incompatible with them.
 
 ## Reference files
 
@@ -198,7 +230,9 @@ virtual addresses or relocating kernel functions.
   chapter: hardware debugging commands and assets.
 - `12-integrated-testing/Makefile`: integration orchestration.
 - `work/Makefile`: current complete target inventory.
-- `work/kernel_symbols.mk`: remaining symbol pipeline.
-- `work/xtask/src/main.rs`: existing commands and Make call.
-- `work/tools/kernel_test_runner/src/main.rs`: test image
-  preparation and remaining symbol-makefile call.
+- `work/libraries/kernel-image/`: safe ELF load/symbol parser.
+- `work/xtask/src/main.rs`: ELF build, packaging, and flat-helper
+  wrapping commands.
+- `work/tools/kernel_test_runner/src/main.rs`: test images use
+  the same ELF bootstrap without offline patchers.
+- `HISTORY-MAP.md`: rewritten chapter tips and recovery refs.

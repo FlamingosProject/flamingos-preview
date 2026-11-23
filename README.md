@@ -56,6 +56,13 @@ chapter, recent validation, and the next task. It is maintained
 in the display tree as milestones change. Chapter READMEs
 describe the behavior of their individual snapshots.
 
+From Chapter 15, a small bootstrap loads the kernel ELF and the
+kernel constructs its own translation tables. Chapter 16 adds
+higher-half mappings; Chapter 17 resolves names from retained ELF
+symbols. Normal builds emit `kernel.elf` for serial upload and
+`kernel8.img` for standalone boot. The serial protocol is unchanged;
+use the ELF-aware receiver introduced with Chapter 15.
+
 Chapter 22's SD-card support remains an optional hardware
 side-quest. Starting with Chapter 23, normal builds package init
 in a sparse, read-only embedded exFAT image, so development does
