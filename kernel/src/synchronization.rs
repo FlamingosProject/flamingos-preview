@@ -95,6 +95,21 @@ impl<T> InitStateLock<T> {
             data: UnsafeCell::new(data),
         }
     }
+
+    /// Access data before the kernel's normal lock checks are available.
+    ///
+    /// # Safety
+    /// The caller must have exclusive access to the lock for the duration of `f`.
+    ///
+    /// # Need
+    /// The physical bootstrap must initialize translation tables before it can
+    /// access the kernel state used by `write`.
+    #[cfg(not(feature = "chainloader"))]
+    pub(crate) unsafe fn with_boot_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
+        // Safety: The caller guarantees exclusive access to the cell.
+        // Need: The table and its final synchronization wrapper share storage.
+        f(unsafe { &mut *self.data.get() })
+    }
 }
 
 //------------------------------------------------------------------------------

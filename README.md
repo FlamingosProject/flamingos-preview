@@ -153,7 +153,7 @@ To enable the pre-MMU boot LED codes (stages 1, 2, and 3):
 cargo xtask build rpiz2 --features boot_trace
 ```
 
-Upload the resulting `kernel8.img` with the usual `scip` command.
+Upload the resulting `kernel.elf` to the ELF-aware chainloader.
 Rebuild without `--features boot_trace` to disable the codes.
 These early writes use physical GPIO addresses; blinking here
 but not in the kernel diagnostic would implicate the mapped
@@ -224,10 +224,12 @@ cargo xtask build rpiz2
 
 This builds normal `init`, generates an MBR/exFAT image containing
 `init.elf`, includes its sparse representation in the kernel, and
-produces `kernel8.img` for the existing single-payload `scip`
-upload. Run this same command after changing init; no separate
+produces `kernel.elf` for a single-payload `scip` upload and a
+standalone `kernel8.img` containing an ELF bootstrap.
+Run this same command after changing init; no separate
 preparation or SD-card copy is required. Pi 4 uses `rpi4` instead
-of `rpiz2`. No protocol or chainloader changes are needed.
+of `rpiz2`. The serial size-prefix protocol is unchanged, but
+the card must contain the new ELF-aware chainloader.
 
 The Make upload wrapper is also available:
 
@@ -337,6 +339,81 @@ the program-header count at 32. Allocations are fallible. The file
 buffer is released after loading; peak storage includes both the
 file and the segment buffers. These limits leave room in the
 kernel's 16 MiB heap for its other users.
+
+## Kernel ELF boot and symbols
+
+Stage 1 now loads the kernel ELF directly. The kernel remains
+linked at its intended virtual addresses; its ELF program headers
+also describe physical destinations. Stage 1 copies file-backed
+bytes, zeroes each segment's tail, and enters the physical
+bootstrap at `0x80000` with the MMU off. Stage 2 constructs its
+own page tables from linker-defined boundaries before enabling
+translation. No offline table or symbol patching is performed.
+
+`cargo xtask build rpi3` produces two kernel artifacts:
+
+- `kernel.elf`: the UART payload, with symbol/string tables and
+  unwind data retained but unnecessary DWARF sections removed.
+- `kernel8.img`: a flat firmware-facing bootstrap containing
+  that ELF, usable for standalone SD boot and QEMU.
+
+Build the serial receiver separately:
+
+```sh
+cargo xtask build rpi3 --features chainloader
+```
+
+Copy `chainloader8.img` to the card under the firmware's kernel
+filename (normally `kernel8.img`). Rebuild the normal kernel,
+then upload `kernel.elf` using `make chainboot BSP=rpi3` or
+the usual `scip --binfile kernel.elf` invocation. The old flat
+receiver cannot boot this ELF payload. A raw stage-2 binary no
+longer supplies the retained symbol metadata.
+
+The physical memory contract is:
+
+| Physical range | Owner |
+|---|---|
+| 0–64 KiB | Preserved firmware secondary-core park code |
+| 64–512 KiB | Stage-2 boot stack |
+| 512 KiB–32 MiB | Stage-2 load destinations, including heap |
+| 32–64 MiB | Relocated stage-1 stack, code and copied DTB |
+| 64–96 MiB | Retained source ELF, maximum 32 MiB |
+
+The loader validates ELF64 little-endian AArch64 `ET_EXEC`, file
+bounds, physical segment overlap, entry instructions, and load
+limits before any segment writes. It rejects dynamic linking,
+TLS, executable stacks, and destinations overlapping reserved
+loader/source memory. The first 64 KiB remains firmware-owned,
+including parked-core instructions and release slots; the
+fileless boot stack starts above that preserved region.
+
+The stage-2 entry ABI is x0 = copied DTB, x1 = retained ELF
+physical base, x2 = ELF byte count. Stage 2 retains its own DTB
+copy and maps source ELF pages read-only and execute-never at
+`0xffff_ffff_c200_0000`. The window is outside heap/MMIO/stack
+reservations. Stage 1 never constructs translation tables.
+The boot contract follows Raspberry Pi firmware: one selected
+core enters stage 1 at EL2 with MMU/data caching disabled; other
+cores remain in the preserved firmware parking code. Custom
+firmware that sends multiple cores into stage 1 is unsupported.
+
+Backtrace and exception printing look up ordinary ELF function
+symbols using their linked virtual addresses and names from the
+associated string table. Names are demangled during formatting
+without heap allocation. Missing metadata falls back to numeric
+addresses. The generated Rust symbol crate, 32 KiB reservation,
+patched count, and host symbol/table tools have been removed.
+The user confirmed this ELF chainloading path on hardware on
+November 23; physical OpenOCD/GDB validation remains separate.
+
+`cargo xtask package rpi3 <kernel-elf> <output-image>` wraps an
+existing stage-2 ELF without relinking or adjusting its symbols.
+The integration runner uses this path for each test kernel.
+GDB builds keep full debug information and load a bootstrap
+with the kernel ELF embedded; stage-2 symbols are added at their
+existing virtual addresses. No hardware debug acceptance is
+implied by a successful build or QEMU test.
 
 ## SD-card workflow
 

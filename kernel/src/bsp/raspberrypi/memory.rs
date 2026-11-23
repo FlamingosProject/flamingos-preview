@@ -6,11 +6,15 @@
 //!
 //! The physical memory layout.
 //!
-//! The Raspberry's firmware copies the kernel binary to 0x8_0000. The preceding region will be used
-//! as the boot core's stack.
+//! Stage 1 loads the kernel ELF's code at 0x8_0000. The preceding region is
+//! reserved for firmware park code (first 64 KiB) and the boot core's stack.
+//! Stage 1 retains the source ELF at
+//! 64 MiB, outside the kernel heap, for runtime symbol lookup.
 //!
 //! +---------------------------------------+
-//! |                                       | boot_core_stack_start @ 0x0
+//! | Preserved firmware park code          | 0x0..0x10000
+//! +---------------------------------------+
+//! |                                       | boot_core_stack_start @ 0x10000
 //! |                                       |                                ^
 //! | Boot-core Stack                       |                                | stack
 //! |                                       |                                | growth
@@ -20,7 +24,6 @@
 //! | .text                                 |
 //! | .rodata                               |
 //! | .got                                  |
-//! | .kernel_symbols                       |
 //! |                                       |
 //! +---------------------------------------+
 //! |                                       | data_start == code_end_exclusive
@@ -46,7 +49,6 @@
 //! | .text                                 |
 //! | .rodata                               |
 //! | .got                                  |
-//! | .kernel_symbols                       |
 //! |                                       |
 //! +---------------------------------------+
 //! |                                       | data_start == code_end_exclusive

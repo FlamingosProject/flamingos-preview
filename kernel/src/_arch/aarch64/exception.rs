@@ -260,14 +260,10 @@ impl fmt::Display for ExceptionContext {
 
         writeln!(f, "{}", self.spsr_el1)?;
         writeln!(f, "ELR_EL1: {:#018x}", self.elr_el1)?;
-        writeln!(
-            f,
-            "      Symbol: {}",
-            match symbols::lookup_symbol(memory::Address::new(self.elr_el1 as usize)) {
-                Some(sym) => sym.name(),
-                _ => "Symbol not found",
-            }
-        )?;
+        match symbols::lookup_symbol(memory::Address::new(self.elr_el1 as usize)) {
+            Some(sym) => writeln!(f, "      Symbol: {:#}", symbols::demangle(sym.name()))?,
+            None => writeln!(f, "      Symbol: Symbol not found")?,
+        }
         writeln!(f)?;
         writeln!(f, "General purpose register:")?;
 

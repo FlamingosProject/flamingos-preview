@@ -18,10 +18,10 @@ pub fn print_backtrace() {
         let lookup_ip = ip.saturating_sub(1);
         match crate::symbols::lookup_symbol(crate::memory::Address::new(lookup_ip)) {
             Some(symbol) => println!(
-                "  #{}: {:#018x} - {}+{:#x}",
+                "  #{}: {:#018x} - {:#}+{:#x}",
                 frame_num,
                 ip,
-                symbol.name(),
+                crate::symbols::demangle(symbol.name()),
                 lookup_ip - symbol.addr() as usize
             ),
             None => println!("  #{}: {:#018x}", frame_num, ip),

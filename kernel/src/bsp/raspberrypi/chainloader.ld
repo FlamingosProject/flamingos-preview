@@ -22,7 +22,7 @@ SECTIONS
     } :segment_boot_core_stack
 
     __binary_nonzero_start = .;
-    .text :
+    .text : AT(__rpi_phys_binary_load_addr)
     {
         KEEP(*(.text._start))
         *(.text._start_arguments)
@@ -34,6 +34,8 @@ SECTIONS
 
     . = ALIGN(8);
     __binary_nonzero_end_exclusive = .;
+    ASSERT(__binary_nonzero_end_exclusive < 0x04000000,
+           "Relocated bootstrap overlaps retained ELF staging")
 
     .bss (NOLOAD) : ALIGN(16)
     {
@@ -41,8 +43,16 @@ SECTIONS
         *(.bss*);
         . = ALIGN(16);
         __bss_end_exclusive = .;
-        __device_tree_start = .;
     } :segment_data
+
+    .device_tree (NOLOAD) : ALIGN(8)
+    {
+        __device_tree_start = .;
+        . += 128K;
+        __device_tree_end = .;
+    } :segment_data
+    ASSERT(__device_tree_end <= 0x04000000,
+           "Bootstrap DTB buffer overlaps retained ELF staging")
 
     .got : { *(.got*) }
     ASSERT(SIZEOF(.got) == 0, "Relocation support not expected")

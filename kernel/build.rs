@@ -44,6 +44,18 @@ fn export_git_revision() {
 fn main() {
     export_git_revision();
 
+    if env::var_os("CARGO_FEATURE_EMBEDDED_KERNEL").is_some() {
+        println!("cargo:rerun-if-env-changed=FLAMINGOS_KERNEL_ELF");
+        let image = PathBuf::from(
+            env::var_os("FLAMINGOS_KERNEL_ELF")
+                .expect("embedded-kernel requires FLAMINGOS_KERNEL_ELF"),
+        )
+        .canonicalize()
+        .expect("could not locate embedded kernel ELF");
+        println!("cargo:rustc-env=FLAMINGOS_KERNEL_ELF={}", image.display());
+        println!("cargo:rerun-if-changed={}", image.display());
+    }
+
     if env::var_os("CARGO_FEATURE_TEST_BUILD").is_some() {
         let family = if env::var_os("CARGO_FEATURE_BSP_RPI4").is_some() {
             "rpi4"

@@ -81,7 +81,7 @@ pub trait AssociatedTranslationTable {
 //--------------------------------------------------------------------------------------------------
 use interface::MMU;
 use synchronization::interface::ReadWriteEx;
-use translation_table::interface::TranslationTable;
+pub(crate) use translation_table::interface::TranslationTable;
 
 /// Map a region in the kernel's translation tables.
 ///

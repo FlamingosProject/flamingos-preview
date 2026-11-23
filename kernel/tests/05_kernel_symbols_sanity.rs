@@ -13,6 +13,9 @@ use libkernel::{
     symbols,
 };
 
+extern crate alloc;
+use alloc::format;
+
 #[unsafe(no_mangle)]
 unsafe fn kernel_init() -> ! {
     memory::init();
@@ -22,11 +25,11 @@ unsafe fn kernel_init() -> ! {
         libkernel::common::is_aligned as *const () as usize,
     ))
     .unwrap();
-    assert!(is_aligned.name().ends_with("common::is_aligned"));
+    assert!(format!("{:#}", symbols::demangle(is_aligned.name())).ends_with("common::is_aligned"));
 
     let version =
         symbols::lookup_symbol(Address::new(libkernel::version as *const () as usize)).unwrap();
-    assert!(version.name().ends_with("libkernel::version"));
+    assert!(format!("{:#}", symbols::demangle(version.name())).ends_with("libkernel::version"));
 
     cpu::qemu_exit_success()
 }

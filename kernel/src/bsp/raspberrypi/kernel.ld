@@ -15,10 +15,16 @@ PAGE_MASK = PAGE_SIZE - 1;
  */
 __kernel_virt_start_addr = ((0xffffffffffffffff - __kernel_virt_addr_space_size) + 1);
 
-__rpi_phys_dram_start_addr = 0;
+/* Preserve low memory used by firmware to park secondary cores. */
+__rpi_phys_boot_stack_start = 64K;
 
 /* The physical address at which the the kernel binary will be loaded by the Raspberry's firmware */
 __rpi_phys_binary_load_addr = 0x80000;
+
+/* The stage-1 loader reserves the source ELF for the life of the kernel. */
+__boot_elf_phys_start = 0x04000000;
+__boot_elf_virt_start = __kernel_virt_start_addr + 0x02000000;
+__boot_elf_virt_end_exclusive = __boot_elf_virt_start + 0x02000000;
 
 /* Symbols expected by the unwinding crate's fde-static finder. */
 __executable_start = ADDR(.text);
@@ -32,8 +38,7 @@ ENTRY(__rpi_phys_binary_load_addr)
  *     5 == RX
  *     6 == RW
  *
- * Segments are marked PT_LOAD below so that the ELF file provides virtual and physical addresses.
- * It doesn't mean all of them need actually be loaded.
+ * Stage 1 copies PT_LOAD file bytes and zeros the corresponding memory tails.
  */
 PHDRS
 {
@@ -59,13 +64,28 @@ SECTIONS
         *(.text._start_arguments) /* Constants (or statics in Rust speak) read by _start(). */
         *(.text._start_rust)      /* The Rust entry point */
         *(.text*)                 /* Everything else */
+
+        /* Keep in sync with BootMemoryLayout. Addresses are 64-bit words. */
+        . = ALIGN(8);
+        __boot_memory_layout = .;
+        QUAD(__code_start)
+        QUAD(__code_end_exclusive)
+        QUAD(LOADADDR(.text))
+        QUAD(__data_start)
+        QUAD(__data_end_exclusive)
+        QUAD(LOADADDR(.data))
+        QUAD(__heap_start)
+        QUAD(__heap_end_exclusive)
+        QUAD(LOADADDR(.heap))
+        QUAD(__boot_core_stack_start)
+        QUAD(__boot_core_stack_end_exclusive)
+        QUAD(LOADADDR(.boot_core_stack))
+        QUAD(__boot_elf_virt_start)
+        QUAD(__boot_elf_virt_end_exclusive)
+        QUAD(__boot_elf_phys_start)
     } :segment_code
 
     .rodata         : ALIGN(8) { *(.rodata*) } :segment_code
-    .kernel_symbols : ALIGN(8) {
-        __kernel_symbols_start = .;
-        . += 32 * 1024;
-    } :segment_code
 
     /* Unwind tables must be in a mapped, readable segment. */
     .eh_frame_hdr : ALIGN(8) { *(.eh_frame_hdr*) } :segment_code
@@ -78,7 +98,10 @@ SECTIONS
     * Data + BSS
     ***********************************************************************************************/
     __data_start = .;
-    .data : { *(.data*) } :segment_data
+    .data : AT(__rpi_phys_binary_load_addr + (__data_start - __code_start))
+    {
+        *(.data*)
+    } :segment_data
 
     /* Section is zeroed in pairs of u64. Align start and end to 16 bytes */
     .bss (NOLOAD) : ALIGN(16)
@@ -89,6 +112,14 @@ SECTIONS
         __bss_end_exclusive = .;
     } :segment_data
 
+    __phys_bss_start = LOADADDR(.bss);
+    __phys_bss_end_exclusive = LOADADDR(.bss) + SIZEOF(.bss);
+    __phys_kernel_tables = LOADADDR(.bss) + (KERNEL_TABLES - ADDR(.bss));
+    __phys_device_tree_buffer = LOADADDR(.bss) + (DEVICE_TREE_BUFFER - ADDR(.bss));
+    __phys_boot_elf_size = LOADADDR(.bss) + (BOOT_ELF_SIZE - ADDR(.bss));
+
+    ASSERT((__phys_kernel_tables & PAGE_MASK) == 0, "Kernel tables are not page aligned")
+
     . = ALIGN(PAGE_SIZE);
     __data_end_exclusive = .;
 
@@ -96,13 +127,15 @@ SECTIONS
     * Heap
     ***********************************************************************************************/
     __heap_start = .;
-    .heap (NOLOAD) :
+    .heap (NOLOAD) : AT(__rpi_phys_binary_load_addr + (__heap_start - __code_start))
     {
         . += 16 * 1024 * 1024;
     } :segment_heap
     __heap_end_exclusive = .;
 
     ASSERT((. & PAGE_MASK) == 0, "Heap is not page aligned")
+    ASSERT(LOADADDR(.heap) + SIZEOF(.heap) <= 0x02000000,
+           "Kernel load regions overlap relocated bootstrap")
 
     /***********************************************************************************************
     * MMIO Remap Reserved
@@ -121,16 +154,17 @@ SECTIONS
     /***********************************************************************************************
     * Boot Core Stack
     ***********************************************************************************************/
-    .boot_core_stack (NOLOAD) : AT(__rpi_phys_dram_start_addr)
+    .boot_core_stack (NOLOAD) : AT(__rpi_phys_boot_stack_start)
     {
-        __boot_core_stack_start = .;         /*   ^             */
-                                             /*   | stack       */
-        . += __rpi_phys_binary_load_addr;    /*   | growth      */
-                                             /*   | direction   */
-        __boot_core_stack_end_exclusive = .; /*   |             */
+        __boot_core_stack_start = .;
+        . += __rpi_phys_binary_load_addr - __rpi_phys_boot_stack_start;
+        __boot_core_stack_end_exclusive = .;
     } :segment_boot_core_stack
 
+    __phys_boot_core_stack_end_exclusive = LOADADDR(.boot_core_stack) + SIZEOF(.boot_core_stack);
+
     ASSERT((. & PAGE_MASK) == 0, "End of boot core stack is not page aligned")
+    ASSERT(. <= __boot_elf_virt_start, "Kernel layout overlaps retained ELF window")
 
     /***********************************************************************************************
     * Misc

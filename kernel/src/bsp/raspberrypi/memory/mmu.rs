@@ -4,6 +4,11 @@
 
 //! BSP Memory Management Unit.
 
+#[cfg(not(feature = "chainloader"))]
+use crate::memory::{
+    Address,
+    mmu::{AccessPermissions, MemAttributes, TranslationTable},
+};
 use crate::{
     memory::{
         Physical, Virtual,
@@ -22,6 +27,27 @@ use crate::{
 type KernelTranslationTable =
     <KernelVirtAddrSpace as AssociatedTranslationTable>::TableStartFromTop;
 
+/// A mapping according to the kernel's linker script.
+#[cfg(not(feature = "chainloader"))]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct BootRegion {
+    virt_start: usize,
+    virt_end_exclusive: usize,
+    phys_start: usize,
+}
+
+/// Initial mappings emitted by the linker into `.text` for the physical bootstrap.
+#[cfg(not(feature = "chainloader"))]
+#[repr(C)]
+pub(crate) struct BootMemoryLayout {
+    code: BootRegion,
+    data: BootRegion,
+    heap: BootRegion,
+    stack: BootRegion,
+    retained_elf: BootRegion,
+}
+
 //--------------------------------------------------------------------------------------------------
 // Public Definitions
 //--------------------------------------------------------------------------------------------------
@@ -37,24 +63,18 @@ pub type KernelVirtAddrSpace = AddressSpace<{ kernel_virt_addr_space_size() }>;
 // Global instances
 //--------------------------------------------------------------------------------------------------
 
-/// The kernel translation tables.
+/// The zeroed kernel translation tables constructed during physical boot.
 ///
-/// It is mandatory that InitStateLock is transparent.
+/// # Safety
+/// This symbol is unique in the kernel ELF. All-zero storage is valid for the
+/// inactive table, and the linker preserves the table's alignment in BSS.
 ///
-/// That is, `size_of(InitStateLock<KernelTranslationTable>) == size_of(KernelTranslationTable)`.
-/// The translation-table tool writes the table bytes directly into this static.
-#[unsafe(link_section = ".data")]
+/// # Need
+/// The linker resolves the storage's physical address for boot initialization.
+#[unsafe(link_section = ".bss.kernel_tables")]
 #[unsafe(no_mangle)]
 static KERNEL_TABLES: InitStateLock<KernelTranslationTable> =
-    InitStateLock::new(KernelTranslationTable::new_for_precompute());
-
-/// This value is needed during early boot for MMU setup.
-///
-/// This will be patched to the correct value by the "translation table tool" after linking. This
-/// given value here is just a dummy.
-#[unsafe(link_section = ".text._start_arguments")]
-#[unsafe(no_mangle)]
-static PHYS_KERNEL_TABLES_BASE_ADDR: u64 = 0xCCCCAAAAFFFFEEEE;
+    InitStateLock::new(KernelTranslationTable::new_uninitialized());
 
 //--------------------------------------------------------------------------------------------------
 // Private Code
@@ -93,8 +113,7 @@ fn virt_data_region() -> MemoryRegion<Virtual> {
     MemoryRegion::new(start_page_addr, end_exclusive_page_addr)
 }
 
-// There is no reason to expect the following conversions to fail, since they were generated offline
-// by the `translation table tool`. If it doesn't work, a panic due to the unwraps is justified.
+// These conversions read the established bootstrap mappings.
 fn kernel_virt_to_phys_region(virt_region: MemoryRegion<Virtual>) -> MemoryRegion<Physical> {
     let phys_start_page_addr =
         generic_mmu::try_kernel_virt_page_addr_to_phys_page_addr(virt_region.start_page_addr())
@@ -109,6 +128,42 @@ fn kernel_virt_to_phys_region(virt_region: MemoryRegion<Virtual>) -> MemoryRegio
 
 fn kernel_page_attributes(virt_page_addr: PageAddress<Virtual>) -> AttributeFields {
     generic_mmu::try_kernel_page_attributes(virt_page_addr).unwrap()
+}
+
+#[cfg(not(feature = "chainloader"))]
+impl BootRegion {
+    /// Install a linker-defined range in the inactive kernel tables.
+    ///
+    /// # Safety
+    /// The caller must ensure the range describes its loaded physical backing,
+    /// is disjoint from other mappings, and uses permissions appropriate to it.
+    ///
+    /// # Need
+    /// Installing page descriptors configures the CPU's memory-access rules.
+    unsafe fn map(
+        &self,
+        tables: &mut KernelTranslationTable,
+        permissions: AccessPermissions,
+        executable: bool,
+    ) -> Result<(), &'static str> {
+        let size = self.virt_end_exclusive - self.virt_start;
+        let virtual_region = MemoryRegion::new(
+            PageAddress::from(self.virt_start),
+            PageAddress::from(self.virt_end_exclusive),
+        );
+        let physical_region = MemoryRegion::new(
+            PageAddress::from(self.phys_start),
+            PageAddress::from(self.phys_start + size),
+        );
+        let attributes = AttributeFields {
+            mem_attributes: MemAttributes::CacheableDRAM,
+            acc_perms: permissions,
+            execute_never: !executable,
+        };
+        // Safety: The caller validates the backing, disjointness and permissions.
+        // Need: These descriptors will be installed as the kernel translation tables.
+        unsafe { tables.map_at(&virtual_region, &physical_region, &attributes) }
+    }
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -150,6 +205,51 @@ pub fn kernel_translation_tables() -> &'static InitStateLock<KernelTranslationTa
     &KERNEL_TABLES
 }
 
+/// Construct the initial mappings while running at physical addresses.
+///
+/// # Safety
+/// The boot core must have exclusive access to the zeroed tables. `tables`
+/// points to the physical `KERNEL_TABLES`, `layout` describes the loaded kernel,
+/// and any retained ELF bytes occupy the reserved physical staging area.
+///
+/// # Need
+/// The physical bootstrap must populate hardware translation tables before
+/// the kernel can use the mapped address of its table storage.
+#[cfg(not(feature = "chainloader"))]
+pub(crate) unsafe fn initialize_boot_tables(
+    tables: *const (),
+    layout: &BootMemoryLayout,
+    elf_size: usize,
+) -> Result<Address<Physical>, &'static str> {
+    let elf = layout.retained_elf;
+    if elf_size > elf.virt_end_exclusive - elf.virt_start {
+        return Err("Boot ELF exceeds retained mapping reservation");
+    }
+
+    // Safety: Only the boot core accesses these inactive tables. The linker
+    // supplies disjoint ranges backed by the loaded kernel and its retained ELF.
+    // Need: Only the physical pointer is usable before address translation.
+    unsafe {
+        let tables = &*tables.cast::<InitStateLock<KernelTranslationTable>>();
+        tables.with_boot_mut(|tables| {
+            let root = tables.init_for_boot()?;
+            layout.code.map(tables, AccessPermissions::ReadOnly, true)?;
+            for region in [&layout.data, &layout.heap, &layout.stack] {
+                region.map(tables, AccessPermissions::ReadWrite, false)?;
+            }
+            if elf_size > 0 {
+                let retained = BootRegion {
+                    virt_end_exclusive: elf.virt_start
+                        + crate::common::align_up(elf_size, KernelGranule::SIZE),
+                    ..elf
+                };
+                retained.map(tables, AccessPermissions::ReadOnly, false)?;
+            }
+            Ok(root)
+        })
+    }
+}
+
 /// The MMIO remap pages.
 pub fn virt_mmio_remap_region() -> MemoryRegion<Virtual> {
     let num_pages = size_to_num_pages(super::mmio_remap_size());
@@ -160,12 +260,8 @@ pub fn virt_mmio_remap_region() -> MemoryRegion<Virtual> {
     MemoryRegion::new(start_page_addr, end_exclusive_page_addr)
 }
 
-/// Add mapping records for the kernel binary.
-///
-/// The actual translation table entries for the kernel binary are generated using the offline
-/// `translation table tool` and patched into the kernel binary. This function just adds the mapping
-/// record entries.
-pub fn kernel_add_mapping_records_for_precomputed() {
+/// Record the mappings installed during the physical kernel bootstrap.
+pub fn kernel_add_mapping_records_for_boot() {
     let virt_code_region = virt_code_region();
     generic_mmu::kernel_add_mapping_record(
         "Kernel code and RO data",
@@ -197,4 +293,19 @@ pub fn kernel_add_mapping_records_for_precomputed() {
         &kernel_virt_to_phys_region(virt_boot_core_stack_region),
         &kernel_page_attributes(virt_boot_core_stack_region.start_page_addr()),
     );
+
+    #[cfg(not(feature = "chainloader"))]
+    if let Some(elf) = crate::cpu::boot::arch_boot::retained_kernel_elf() {
+        let start = Address::new(elf.as_ptr() as usize);
+        let virt_region = MemoryRegion::new(
+            PageAddress::from(start),
+            PageAddress::from((start + elf.len()).align_up_page()),
+        );
+        generic_mmu::kernel_add_mapping_record(
+            "Retained kernel ELF",
+            &virt_region,
+            &kernel_virt_to_phys_region(virt_region),
+            &kernel_page_attributes(virt_region.start_page_addr()),
+        );
+    }
 }

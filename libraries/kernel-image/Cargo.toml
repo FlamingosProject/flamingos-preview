@@ -1,6 +1,4 @@
 [package]
-name = "debug-symbol-types"
+name = "kernel-image"
 version = "1.0.0"
 edition = "2024"
-
-[lib]

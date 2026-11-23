@@ -3,13 +3,11 @@ resolver="2"
 exclude = ["init"]
 
 members = [
+        "libraries/kernel-image",
         "libraries/boot-image",
         "libraries/program-image",
         "kernel",
-        "kernel_symbols",
         "tools/kernel_test_runner",
-        "tools/translation_table_tool",
-        "tools/kernel_symbols_tool",
         "xtask",
 ]
 

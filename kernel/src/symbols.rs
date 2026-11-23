@@ -1,60 +1,31 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //
-// Copyright (c) 2022 Andre Richter <andre.o.richter@gmail.com>
+// Copyright (c) 2026 Bart Massey
 
-//! Debug symbol support.
+//! Symbol lookup from the ELF retained by stage 1.
+//!
+//! Records refer to the kernel's linked virtual addresses. Names remain
+//! borrowed from the ELF and are demangled only while being printed.
 
 use crate::memory::{Address, Virtual};
-use core::{cell::UnsafeCell, slice};
-use debug_symbol_types::Symbol;
+pub use kernel_image::Symbol;
+pub use rustc_demangle::demangle;
 
-//--------------------------------------------------------------------------------------------------
-// Private Definitions
-//--------------------------------------------------------------------------------------------------
-
-// Symbol from the linker script.
-unsafe extern "Rust" {
-    static __kernel_symbols_start: UnsafeCell<()>;
-}
-
-//--------------------------------------------------------------------------------------------------
-// Global instances
-//--------------------------------------------------------------------------------------------------
-
-/// The kernel symbols tool patches this value after linking. Zero is a safe default for an
-/// unprocessed image.
-#[unsafe(no_mangle)]
-static NUM_KERNEL_SYMBOLS: u64 = 0;
-
-//--------------------------------------------------------------------------------------------------
-// Private Code
-//--------------------------------------------------------------------------------------------------
-
-fn kernel_symbol_section_virt_start_addr() -> Address<Virtual> {
-    Address::new(unsafe { __kernel_symbols_start.get() as usize })
-}
-
-fn num_kernel_symbols() -> usize {
-    unsafe {
-        // Read volatile is needed here to prevent the compiler from optimizing NUM_KERNEL_SYMBOLS
-        // away.
-        core::ptr::read_volatile(&NUM_KERNEL_SYMBOLS as *const u64) as usize
+/// Retrieve a defined symbol containing a linked kernel virtual address.
+///
+/// Missing or malformed metadata produces no match, so diagnostic printing
+/// can fall back to numeric addresses without allocating or panicking.
+pub fn lookup_symbol(addr: Address<Virtual>) -> Option<Symbol<'static>> {
+    #[cfg(feature = "chainloader")]
+    {
+        let _ = addr;
+        None
     }
-}
-
-fn kernel_symbols_slice() -> &'static [Symbol] {
-    let ptr = kernel_symbol_section_virt_start_addr().as_usize() as *const Symbol;
-
-    unsafe { slice::from_raw_parts(ptr, num_kernel_symbols()) }
-}
-
-//--------------------------------------------------------------------------------------------------
-// Public Code
-//--------------------------------------------------------------------------------------------------
-
-/// Retrieve the symbol corresponding to a virtual address, if any.
-pub fn lookup_symbol(addr: Address<Virtual>) -> Option<&'static Symbol> {
-    kernel_symbols_slice()
-        .iter()
-        .find(|&i| i.contains(addr.as_usize()))
+    #[cfg(not(feature = "chainloader"))]
+    {
+        let bytes = crate::cpu::boot::arch_boot::retained_kernel_elf()?;
+        kernel_image::SymbolTable::parse(bytes)
+            .ok()??
+            .lookup(addr.as_usize() as u64)
+    }
 }

@@ -57,7 +57,7 @@ pub unsafe fn kernel_init() -> ! {
         // Add records of how we mapped the kernel for later
         // logging once everything is up. Not currently used
         // otherwise.
-        bsp::memory::mmu::kernel_add_mapping_records_for_precomputed();
+        bsp::memory::mmu::kernel_add_mapping_records_for_boot();
 
         // Unmask interrupts on the boot CPU core.
         exception::asynchronous::local_irq_unmask();

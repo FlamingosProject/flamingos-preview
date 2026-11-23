@@ -429,7 +429,7 @@ impl<const NUM_TABLES: usize, const START_FROM_TOP: bool>
 
     /// Create zeroed tables whose level-2 descriptors still need initialization.
     #[allow(clippy::assertions_on_constants)]
-    const fn new_uninitialized() -> Self {
+    pub(crate) const fn new_uninitialized() -> Self {
         assert!(bsp::memory::mmu::KernelGranule::SIZE == Granule64KiB::SIZE);
 
         // Can't have a zero-sized address space.
@@ -442,11 +442,26 @@ impl<const NUM_TABLES: usize, const START_FROM_TOP: bool>
         }
     }
 
-    /// Create tables whose descriptors will be populated by the offline tool.
-    pub const fn new_for_precompute() -> Self {
-        let mut tables = Self::new_uninitialized();
-        tables.initialized = true;
-        tables
+    /// Initialize level-2 descriptors using physical addresses of their targets.
+    fn init_level_two(
+        &mut self,
+        mut to_phys: impl FnMut(usize) -> Result<Address<Physical>, &'static str>,
+    ) -> Result<(), &'static str> {
+        if !self.initialized {
+            for (entry, table) in self.lvl2.iter_mut().zip(&self.lvl3) {
+                let phys_addr = to_phys(table.as_ptr() as usize)?;
+                *entry = TableDescriptor::from_next_lvl_table_addr(phys_addr);
+            }
+            self.initialized = true;
+        }
+        Ok(())
+    }
+
+    /// Initialize tables accessed at their physical address and return their root.
+    #[cfg(not(feature = "chainloader"))]
+    pub(crate) fn init_for_boot(&mut self) -> Result<Address<Physical>, &'static str> {
+        self.init_level_two(|address| Ok(Address::new(address)))?;
+        Ok(Address::new(self.lvl2.as_ptr() as usize))
     }
 
     /// Helper to calculate the lvl2 and lvl3 indices from an address.
@@ -513,22 +528,9 @@ impl<const NUM_TABLES: usize, const START_FROM_TOP: bool>
     for FixedSizeTranslationTable<NUM_TABLES, START_FROM_TOP>
 {
     fn init(&mut self) -> Result<(), &'static str> {
-        if self.initialized {
-            return Ok(());
-        }
-
-        // Populate the l2 entries.
-        for (lvl2_nr, lvl2_entry) in self.lvl2.iter_mut().enumerate() {
-            let virt_table_addr = self.lvl3[lvl2_nr].virt_start_addr();
-            let phys_table_addr = memory::mmu::try_kernel_virt_addr_to_phys_addr(virt_table_addr)?;
-
-            let new_desc = TableDescriptor::from_next_lvl_table_addr(phys_table_addr);
-            *lvl2_entry = new_desc;
-        }
-
-        self.initialized = true;
-
-        Ok(())
+        self.init_level_two(|address| {
+            memory::mmu::try_kernel_virt_addr_to_phys_addr(Address::new(address))
+        })
     }
 
     unsafe fn map_at(

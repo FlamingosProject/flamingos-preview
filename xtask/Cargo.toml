@@ -4,4 +4,5 @@ version = "1.0.0"
 edition = "2024"
 
 [dependencies]
+kernel-image = { path = "../libraries/kernel-image" }
 boot-image = { path = "../libraries/boot-image", features = ["build"] }

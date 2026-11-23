@@ -15,6 +15,7 @@ use core::sync::atomic::{AtomicU8, Ordering};
 static DIRECT_ACT_LED: AtomicU8 = AtomicU8::new(0xff);
 
 /// Record recognized direct-GPIO ACT wiring from a firmware compatible string.
+#[cfg(not(feature = "chainloader"))]
 pub(crate) fn record_act_led_board(compatible: &str) {
     let wiring = match compatible {
         "raspberrypi,model-zero-2-w" if cfg!(feature = "bsp_rpi3") => 29 | 0x80,

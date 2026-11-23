@@ -53,8 +53,10 @@
 // fn _start()
 //------------------------------------------------------------------------------
 _start:
-	// Preserve the device tree pointer supplied in x0 by the firmware or chainloader.
+	// Preserve the device tree and optional retained ELF handoff.
 	mov	x19, x0
+	mov	x20, x1
+	mov	x21, x2
 
 	// Only proceed on the boot core. Park other cores before using the shared boot stack.
 	mrs	x1, MPIDR_EL1
@@ -71,7 +73,7 @@ _start:
 	ldrb	w3, [x3, x1]
 	cbz	w3, .L_not_boot_core
 	mov	x0, x1
-	ADR_REL	x3, __boot_core_stack_end_exclusive
+	ADR_ABS	x3, __phys_boot_core_stack_end_exclusive
 	mov	sp, x3
 	b	_start_core
 
@@ -79,7 +81,7 @@ _start:
 	// If execution reaches here, it is the boot core.
 
 	// Establish a physical stack before calling the Rust boot-tracing helper.
-	ADR_REL	x0, __boot_core_stack_end_exclusive
+	ADR_ABS	x0, __phys_boot_core_stack_end_exclusive
 	mov	sp, x0
 
 	BLINK_CODE #1
@@ -90,10 +92,11 @@ _start:
 	b.eq	.L_in_el2
 	PANIC	#0x11
 .L_in_el2:
+	msr	DAIFSet, #0xf
 
 	// Initialize DRAM.
-	ADR_REL	x0, __bss_start
-	ADR_REL x1, __bss_end_exclusive
+	ADR_ABS	x0, __phys_bss_start
+	ADR_ABS	x1, __phys_bss_end_exclusive
 .L_bss_init_loop:
 	cmp	x0, x1
 	b.eq	.L_prepare_rust
@@ -126,10 +129,8 @@ _start:
 	cmp	x4, x5
 	b.hi	.L_device_tree_too_large
 
-	// The incoming pointer may refer to firmware memory or to the
-	// chainloader's relocated copy around 32 MiB. Copy it into this
-	// kernel's own BSS so it has a known high-half mapping after MMU-on.
-	ADR_REL	x5, DEVICE_TREE_BUFFER
+	// Copy the handoff into the kernel's BSS for use after MMU-on.
+	ADR_ABS	x5, __phys_device_tree_buffer
 	add	x6, x5, x4
 .L_device_tree_copy_loop:
 	ldrb	w7, [x19], #1
@@ -139,15 +140,20 @@ _start:
 
 	BLINK_CODE #2
 
-	// Load the base address of the kernel's translation tables.
-	ldr	x0, PHYS_KERNEL_TABLES_BASE_ADDR // provided by bsp/__board_name__/memory/mmu.rs
+	// The loader supplies the ELF byte count at the reserved physical base.
+	ADR_ABS	x0, __boot_elf_phys_start
+	cmp	x20, x0
+	csel	x4, x21, xzr, eq
 
-	// Load the kernel's linked virtual stack and entry-point addresses.
+	// Pass physical table storage and layout, alongside the linked EL1 addresses.
+	ADR_ABS	x0, __phys_kernel_tables
 	ADR_ABS	x1, __boot_core_stack_end_exclusive
 	ADR_ABS	x2, kernel_init
 	ADR_ABS	x3, DEVICE_TREE_BUFFER
+	ADR_REL	x5, __boot_memory_layout
+	ADR_ABS	x6, __phys_boot_elf_size
 
-	// Jump to Rust code. x3 is the copied device tree's linked virtual address.
+	// Jump to the physical Rust bootstrap.
 	b	_start_rust
 
 .L_bad_device_tree:
